@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/health",
+      "schedule": "30 5 * * *"
+    },
+    {
+      "path": "/api/opnames/herinnering",
+      "schedule": "*/15 5-19 * * 1-5"
+    },
+    {
+      "path": "/api/opnames/herstel",
+      "schedule": "*/20 * * * *"
+    }
+  ]
+}

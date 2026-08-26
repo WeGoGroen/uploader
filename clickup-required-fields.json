@@ -1,0 +1,460 @@
+[
+ {
+  "section": "Opdracht",
+  "name": "Klant:",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": true,
+  "options": [
+   "Broersma",
+   "Scholten Makelaardij",
+   "Voortman & Fransen",
+   "Brummel & Beuk",
+   "Hallie & van Klooster",
+   "Makelaar Bert",
+   "Forte Makelaars",
+   "Buildingscan",
+   "De Graaf & Groot Makelaars",
+   "Ameo"
+  ]
+ },
+ {
+  "section": "Opdracht",
+  "name": "Tags",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": true,
+  "options": [
+   "Terug mailen",
+   "Terug bellen",
+   "Facturatie",
+   "Energielabel",
+   "NEN2580",
+   "Communicatie",
+   "Spoed",
+   "Fotografie"
+  ]
+ },
+ {
+  "section": "Woning",
+  "name": "Woningtype",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Vrijstaande woning",
+   "2-onder-1-kapwoning",
+   "Rijwoning tussen",
+   "Rijwoning hoek",
+   "Galerijflat",
+   "Portiekflat",
+   "Maisonnette",
+   "Appartement overig"
+  ]
+ },
+ {
+  "section": "Woning",
+  "name": "Bouwjaar",
+  "type": "number",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": null
+ },
+ {
+  "section": "Woning",
+  "name": "Gebruiksoppervlakte",
+  "type": "number",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": null
+ },
+ {
+  "section": "Woning",
+  "name": "Aantal bouwlagen",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "1",
+   "2",
+   "3",
+   "4",
+   "5 of meer"
+  ]
+ },
+ {
+  "section": "Gevel",
+  "name": "Gevelconstructie",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Spouwmuur",
+   "Massieve muur",
+   "Houtskeletbouw",
+   "Betonnen element",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Gevel",
+  "name": "Gevelisolatie",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Geen isolatie",
+   "Na-isolatie spouw",
+   "Isolatie in spouw (bouwkundig)",
+   "Buitengevelisolatie",
+   "Binnengevelisolatie",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Gevel",
+  "name": "Rc gevel",
+  "type": "drop_down",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": [
+   "Onbekend",
+   "Kleiner dan 1,3",
+   "1,3 tot 2,0",
+   "2,0 tot 3,0",
+   "3,0 tot 4,5",
+   "Groter dan 4,5"
+  ]
+ },
+ {
+  "section": "Dak",
+  "name": "Daktype",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Hellend dak",
+   "Plat dak",
+   "Combinatie hellend en plat"
+  ]
+ },
+ {
+  "section": "Dak",
+  "name": "Dakisolatie",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Geen isolatie",
+   "Isolatie aanwezig",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Dak",
+  "name": "Rc dak",
+  "type": "drop_down",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": [
+   "Onbekend",
+   "Kleiner dan 1,3",
+   "1,3 tot 2,0",
+   "2,0 tot 3,5",
+   "3,5 tot 6,0",
+   "Groter dan 6,0"
+  ]
+ },
+ {
+  "section": "Vloer en kruipruimte",
+  "name": "Vloertype",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Houten vloer",
+   "Betonnen vloer",
+   "Combinatie",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Vloer en kruipruimte",
+  "name": "Vloerisolatie",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Geen isolatie",
+   "Isolatie aanwezig",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Vloer en kruipruimte",
+  "name": "Kruipruimte",
+  "type": "drop_down",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": [
+   "Aanwezig en toegankelijk",
+   "Aanwezig, niet toegankelijk",
+   "Niet aanwezig",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Ramen en kozijnen",
+  "name": "Beglazing woonkamer",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Enkel glas",
+   "Dubbel glas",
+   "HR-glas",
+   "HR+ glas",
+   "HR++ glas",
+   "Triple glas (HR+++)",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Ramen en kozijnen",
+  "name": "Beglazing slaapkamer",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Enkel glas",
+   "Dubbel glas",
+   "HR-glas",
+   "HR+ glas",
+   "HR++ glas",
+   "Triple glas (HR+++)",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Ramen en kozijnen",
+  "name": "Voorzetbeglazing",
+  "type": "drop_down",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": [
+   "Nee",
+   "Ja",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Ramen en kozijnen",
+  "name": "Kozijnmateriaal",
+  "type": "drop_down",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": [
+   "Hout",
+   "Kunststof",
+   "Aluminium",
+   "Staal",
+   "Combinatie"
+  ]
+ },
+ {
+  "section": "Verwarming en tapwater",
+  "name": "Verwarmingstoestel",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "HR-combiketel",
+   "HR-ketel (solo)",
+   "VR-ketel",
+   "Conventionele ketel",
+   "Warmtepomp all-electric",
+   "Hybride warmtepomp",
+   "Stadsverwarming",
+   "Blokverwarming",
+   "Elektrische verwarming",
+   "Pelletkachel of biomassa"
+  ]
+ },
+ {
+  "section": "Verwarming en tapwater",
+  "name": "Bouwjaar toestel",
+  "type": "number",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": null
+ },
+ {
+  "section": "Verwarming en tapwater",
+  "name": "Afgiftesysteem",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Radiatoren hoge temperatuur",
+   "Radiatoren lage temperatuur",
+   "Vloerverwarming",
+   "Combinatie radiatoren en vloerverwarming",
+   "Convectoren",
+   "Luchtverwarming"
+  ]
+ },
+ {
+  "section": "Verwarming en tapwater",
+  "name": "Warm tapwater",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Combiketel",
+   "Elektrische boiler",
+   "Gasboiler",
+   "Warmtepompboiler",
+   "Zonneboiler met naverwarming",
+   "Stadsverwarming",
+   "Doorstromer elektrisch"
+  ]
+ },
+ {
+  "section": "Verwarming en tapwater",
+  "name": "Douche-WTW",
+  "type": "drop_down",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": [
+   "Nee",
+   "Ja",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Ventilatie en koeling",
+  "name": "Ventilatiesysteem",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "A - natuurlijke toe- en afvoer",
+   "B - mechanische toevoer, natuurlijke afvoer",
+   "C - mechanische afvoer, handbediend of tijdgestuurd",
+   "C - mechanische afvoer, vraaggestuurd (CO2 of aanwezigheid)",
+   "D - balansventilatie met WTW",
+   "D - balansventilatie zonder WTW",
+   "Decentrale WTW-units",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Ventilatie en koeling",
+  "name": "Koeling",
+  "type": "drop_down",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": [
+   "Geen",
+   "Airco split-unit",
+   "Warmtepomp met koelfunctie",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Eigen opwekking",
+  "name": "Zonnepanelen",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Nee",
+   "Ja"
+  ]
+ },
+ {
+  "section": "Eigen opwekking",
+  "name": "Aantal zonnepanelen",
+  "type": "number",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": null
+ },
+ {
+  "section": "Eigen opwekking",
+  "name": "Oriëntatie zonnepanelen",
+  "type": "drop_down",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": [
+   "Zuid",
+   "Zuidoost",
+   "Zuidwest",
+   "Oost",
+   "West",
+   "Noord",
+   "Meerdere richtingen"
+  ]
+ },
+ {
+  "section": "Eigen opwekking",
+  "name": "Zonneboiler",
+  "type": "drop_down",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": [
+   "Nee",
+   "Ja",
+   "Onbekend"
+  ]
+ },
+ {
+  "section": "Opname en bewijslast",
+  "name": "Opnemer",
+  "type": "short_text",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": null
+ },
+ {
+  "section": "Opname en bewijslast",
+  "name": "Datum opname",
+  "type": "date",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": null
+ },
+ {
+  "section": "Opname en bewijslast",
+  "name": "Polycam-scan",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Ja",
+   "Nee, niet nodig",
+   "Nee, niet mogelijk"
+  ]
+ },
+ {
+  "section": "Opname en bewijslast",
+  "name": "Bewijslast",
+  "type": "drop_down",
+  "required": true,
+  "alreadyInClickUp": false,
+  "options": [
+   "Foto's van alle bouwdelen",
+   "Foto's deels",
+   "Geen bewijslast",
+   "Bouwtekeningen aanwezig"
+  ]
+ },
+ {
+  "section": "Opname en bewijslast",
+  "name": "Opmerkingen",
+  "type": "text",
+  "required": false,
+  "alreadyInClickUp": false,
+  "options": null
+ }
+]

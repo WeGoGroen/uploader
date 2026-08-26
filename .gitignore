@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ClickUp veld-dump (bevat geen secrets, wel interne veldnamen)
+clickup-fields.json

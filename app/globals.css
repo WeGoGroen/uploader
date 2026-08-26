@@ -1,26 +1,1822 @@
 @import "tailwindcss";
 
+/* WeGoGroen-huisstijl: donkere zijbalk, groen accent, witte kaarten op een
+   lichte pagina. Overgenomen 1-op-1 uit het testportaal. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --page: #f2f4f2;
+  --paper: #ffffff;
+  --inset: #f4f6f4;
+  --inset-2: #e9ede9;
+  --rule: #e6e9e6;
+  --rule-strong: #d3d9d4;
+
+  --ink: #1a201c;
+  --ink-soft: #54605a;
+  --ink-faint: #58635d; /* 6,25:1 op wit — haalt AA */
+
+  /* Fel merkgroen voor logo/accenten; knoppen met witte tekst gebruiken het
+     diepere groen, want #22a95a haalt met wit maar 3,05:1. */
+  --brand: #22a95a;
+  --accent: #1a8748; /* wit hierop: 4,56:1 */
+  --accent-ink: #146636;
+  --accent-text: #147a44; /* groene tekst op wit: 5,39:1 */
+  --accent-wash: #e9f6ee;
+
+  --side: #2c322e;
+  --side-2: #363d38;
+  --side-ink: #e8ebe9;
+  --side-faint: #a8b1ab;
+  --side-active: #2f4a39;
+
+  --ok: #147a44;
+  --ok-wash: #e9f6ee;
+  --warn: #9a5b06;
+  --warn-wash: #fdf2e3;
+  --bad: #be2f3a;
+  --bad-wash: #fdecee;
+
+  --sans: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --r: 16px;
+  --r-sm: 10px;
+  --tap: 52px;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
 }
+
+.shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 100vh;
+  gap: 0;
+  padding: 0;
+}
+@media (min-width: 760px) {
+  .shell { grid-template-columns: 246px 1fr; padding: 12px; gap: 12px; height: 100vh; overflow: hidden; }
+}
+
+/* ================= zijbalk ================= */
+.side {
+  background: var(--side);
+  color: var(--side-ink);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 22px 16px;
+}
+@media (min-width: 760px) {
+  /* Het menu staat vast en scrollt nooit mee — alleen .main (het
+     hoofdgebied) heeft een eigen scrollbalk, zie .main hieronder. */
+  .side {
+    border-radius: 20px;
+    height: 100%;
+    overflow: hidden;
+  }
+}
+
+.mark { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px 0; }
+.mark b { font-size: 22px; font-weight: 700; letter-spacing: -0.03em; color: var(--brand); }
+.mark span {
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--side-faint);
+}
+
+.side-title {
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--side-faint); padding: 0 8px;
+}
+
+/* gebruiker */
+.user { position: relative; }
+.user-badge {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  min-height: var(--tap); padding: 0 10px;
+  border: 1px solid rgba(255,255,255,0.10); border-radius: 12px;
+  background: var(--side-2); color: var(--side-ink);
+  font: inherit; cursor: pointer; text-align: left;
+}
+.user-badge:hover { background: #414a44; }
+.avatar {
+  flex: none; width: 32px; height: 32px; border-radius: 50%;
+  background: var(--brand); color: #0d1f14;
+  display: grid; place-items: center;
+  font-size: 12.5px; font-weight: 700;
+}
+.user-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.user-id b {
+  font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* Uitzondering: de statuszin (i.p.v. een Dropbox-pad) mag gewoon
+     doorlopen. Afkappen met "…" is bedoeld voor lange mappaden; bij een zin
+     leest de gebruiker anders het halve bericht. */
+}
+.user-id span { font-size: 11.5px; color: var(--side-faint); }
+.user-chev { flex: none; color: var(--side-faint); transition: transform 0.15s ease; }
+.user-badge[aria-expanded="true"] .user-chev { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .user-chev { transition: none; } }
+
+.user-menu {
+  /* Omhoog openklappen. De accountknop staat onderaan de zijbalk, en die
+     heeft overflow: hidden om zijn ronde hoeken te bewaren — naar beneden
+     openen viel dus volledig buiten beeld: je kon klikken, maar er gebeurde
+     zichtbaar niets. */
+  position: absolute; z-index: 40; left: 0; right: 0; bottom: calc(100% + 6px);
+  background: var(--paper); border: 1px solid var(--rule);
+  border-radius: 14px; padding: 6px;
+  box-shadow: 0 14px 34px rgba(20, 30, 24, 0.22);
+  display: flex; flex-direction: column; gap: 2px;
+  /* Bij veel accounts niet alsnog boven de zijbalk uit groeien. */
+  max-height: 60vh; overflow-y: auto;
+}
+.user-menu-label {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-faint); padding: 8px 10px 4px;
+}
+.user-menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  min-height: 44px; padding: 0 10px; border: 0; border-radius: 10px;
+  background: none; font: inherit; font-size: 14px; color: var(--ink);
+  cursor: pointer; text-align: left; text-decoration: none;
+}
+.user-menu-item:hover { background: var(--inset); }
+.user-menu-item .tick { margin-left: auto; color: var(--accent-text); font-size: 13px; }
+.user-menu-sep { height: 1px; margin: 4px 6px; background: var(--rule); }
+.user-menu-plus {
+  display: inline-grid; place-items: center; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--accent); color: var(--accent-ink);
+  font-size: 13px; font-weight: 700; line-height: 1;
+}
+.side-empty { font-size: 13px; color: var(--side-faint); padding: 2px 12px 4px; margin: 0; }
+.side-more {
+  font-size: 12.5px; color: var(--side-faint); text-decoration: none;
+  padding: 6px 12px 2px;
+}
+.side-more:hover { color: var(--side-ink); }
+
+/* navigatie */
+.nav { display: flex; flex-direction: column; gap: 3px; }
+.nav-item {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  min-height: 46px; padding: 0 12px; border: 0; border-radius: 12px;
+  background: none; font: inherit; font-size: 15px; color: var(--side-faint);
+  cursor: pointer; text-align: left; text-decoration: none;
+}
+.nav-item:hover { background: rgba(255,255,255,0.06); color: var(--side-ink); }
+.nav-icon { flex: none; display: grid; place-items: center; width: 20px; opacity: 0.85; }
+
+/* Kopje boven de uploadknoppen. */
+.nav-groep {
+  margin: 16px 0 6px; padding: 0 12px;
+  font-size: 10.5px; font-weight: 750; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--side-faint); opacity: 0.75;
+}
+/* De uploadknoppen zijn het werk waar de app voor bestaat, dus geen gewone
+   navigatieregel maar een tegel met omschrijving: op een iPad met handschoen
+   aan is een groter raakvlak bovendien geen luxe. */
+.nav-upload {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  min-height: 46px; padding: 0 12px; margin-bottom: 4px;
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+  background: rgba(255,255,255,0.035); color: var(--side-ink);
+  text-decoration: none; font: inherit; font-size: 15px;
+}
+.nav-upload:hover { background: rgba(255,255,255,0.09); border-color: rgba(255,255,255,0.16); }
+.nav-upload[aria-current="true"] {
+  background: var(--side-active); border-color: transparent; color: #6ee7a0; font-weight: 600;
+}
+.nav-upload-icon { flex: none; display: grid; place-items: center; width: 20px; opacity: 0.85; }
+.nav-upload-tekst {
+  flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Terughoudend: een bijschrift, geen tweede knop. Kleine letters, geen kader
+   en geen achtergrond — het mag opvallen zonder de naam te overstemmen. */
+.nav-upload-beta {
+  flex: none; font-size: 9.5px; font-weight: 650; letter-spacing: 0.02em;
+  color: #e8a765; opacity: 0.9;
+}
+.nav-upload-teller {
+  flex: none; min-width: 22px; height: 22px; padding: 0 6px;
+  display: grid; place-items: center; border-radius: 999px;
+  background: #d92d3c; color: #fff;
+  font-size: 12px; font-weight: 750; font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nav-upload-teller { animation: teller-klop 1.8s ease-in-out infinite; }
+  @keyframes teller-klop {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(217, 45, 60, 0.55); }
+    60% { box-shadow: 0 0 0 6px rgba(217, 45, 60, 0); }
+  }
+}
+.nav-item[aria-current="true"] {
+  background: var(--side-active); color: #6ee7a0; font-weight: 600;
+}
+
+/* statussen */
+.side-block { display: flex; flex-direction: column; gap: 6px; }
+.side-block.is-compact { gap: 1px; }
+.svc {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  min-height: 44px; padding: 0 12px; border: 0; border-radius: 12px;
+  background: none; font: inherit; cursor: pointer; text-align: left;
+  color: var(--side-ink); text-decoration: none;
+}
+.side-block.is-compact .svc { min-height: 30px; padding: 0 12px; border-radius: 8px; }
+.side-block.is-compact .svc-name { font-size: 13px; }
+.svc:hover { background: rgba(255,255,255,0.06); }
+.svc-row { display: flex; align-items: center; }
+.svc-row .svc { flex: 1; min-width: 0; }
+.svc-delete {
+  flex: none; width: 30px; height: 30px; margin-right: 4px;
+  border: 0; border-radius: 8px; background: none; color: var(--side-faint);
+  font-size: 18px; line-height: 1; cursor: pointer;
+}
+.svc-delete:hover { background: rgba(255,255,255,0.08); color: #f87171; }
+.svc-name {
+  font-size: 14px; flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.svc-state {
+  margin-left: auto; font-size: 11px; color: var(--side-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dot.is-ok  { background: #4ade80; }
+.dot.is-bad { background: #f87171; }
+.dot.is-off { background: #8d9791; }
+.dot.is-busy { background: #fbbf24; }
+.svc-check {
+  flex: none; width: 8px; display: grid; place-items: center;
+  color: #4ade80; font-size: 12px; font-weight: 700; line-height: 1;
+}
+.svc-live {
+  flex: none; font-size: 9px; font-weight: 800; letter-spacing: 0.08em;
+  color: #7cf0a8; background: rgba(74, 222, 128, 0.16);
+  border-radius: 5px; padding: 2px 5px; line-height: 1.4;
+}
+/* Een verbroken koppeling betekent dat er werk stilligt. Deze tag is bewust
+   luider dan het LIVE-label ernaast: hij moet opvallen tussen vijf groene
+   vinkjes, ook als je alleen langs het menu scant. */
+.svc-fix {
+  flex: none; display: inline-flex; align-items: center; gap: 3px;
+  font-size: 9px; font-weight: 800; letter-spacing: 0.08em;
+  color: #ffc9ce; background: rgba(217, 45, 60, 0.26);
+  border: 1px solid rgba(217, 45, 60, 0.6);
+  border-radius: 5px; padding: 2px 5px; line-height: 1.4;
+}
+.svc.needs-login .svc-name { color: #ffc9ce; }
+.svc.needs-login:hover .svc-fix { background: rgba(217, 45, 60, 0.42); color: #fff; }
+@media (prefers-reduced-motion: no-preference) {
+  .svc-fix { animation: svc-fix-puls 2.4s ease-in-out infinite; }
+  @keyframes svc-fix-puls {
+    0%, 100% { border-color: rgba(217, 45, 60, 0.6); }
+    50% { border-color: rgba(217, 45, 60, 1); }
+  }
+}
+
+/* onderste knoppen in de zijbalk — losse tegels i.p.v. gewone nav-items,
+   zodat "Gebruikers" en "Koppelingen" duidelijk apart staan van het
+   hoofdmenu erboven. */
+.side-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.side-tile {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  padding: 10px 11px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03); color: var(--side-faint);
+  font-size: 12.5px; font-weight: 600; text-decoration: none;
+}
+.side-tile:hover { background: rgba(255,255,255,0.07); color: var(--side-ink); border-color: rgba(255,255,255,0.14); }
+.side-tile[aria-current="true"] { background: var(--side-active); color: #6ee7a0; border-color: transparent; }
+.side-tile-icon {
+  display: grid; place-items: center; width: 26px; height: 26px;
+  border-radius: 8px; background: rgba(255,255,255,0.06); color: inherit;
+}
+.side-tile[aria-current="true"] .side-tile-icon { background: rgba(110, 231, 160, 0.16); }
+
+/* ================= hoofdgebied ================= */
+.main { display: flex; flex-direction: column; min-width: 0; gap: 12px; padding: 12px; }
+@media (min-width: 760px) { .main { padding: 0; height: 100%; overflow-y: auto; } }
+
+.topline {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 14px 20px;
+  background: var(--paper); border: 1px solid var(--rule);
+  border-radius: var(--r);
+}
+
+h1 { margin: 0; font-size: 25px; font-weight: 680; letter-spacing: -0.028em; }
+h2 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.02em; }
+.lede { margin: 0; font-size: 15.5px; line-height: 1.55; color: var(--ink-soft); max-width: 52ch; }
+.eyebrow {
+  font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-faint); font-weight: 600;
+}
+
+/* knoppen */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  font: inherit; border-radius: 999px; border: 1px solid transparent;
+  cursor: pointer; letter-spacing: -0.01em; min-height: var(--tap); padding: 0 24px;
+}
+.btn:disabled { cursor: default; opacity: 0.6; }
+.btn-primary { background: var(--accent); color: #fff; font-weight: 600; font-size: 15.5px; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-ink); }
+.btn-block { width: 100%; }
+.btn-quiet {
+  background: var(--paper); border-color: var(--rule-strong);
+  color: var(--ink); font-size: 14.5px; font-weight: 550; min-height: 46px;
+}
+.btn-quiet:hover { background: var(--inset); }
+.btn-text {
+  background: none; border: 0; padding: 0; font: inherit; font-size: 14.5px;
+  color: var(--accent-text); cursor: pointer; text-decoration: underline;
+  text-underline-offset: 3px; width: fit-content; min-height: 44px;
+}
+.btn-text:hover { color: var(--accent-ink); }
+
+.btn-refresh {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 4px; padding: 0 16px; min-height: 42px;
+  background: var(--paper); border: 1px solid var(--rule-strong); border-radius: 10px;
+  color: var(--ink); font: inherit; font-size: 14px; font-weight: 550;
+  cursor: pointer; width: fit-content;
+}
+.btn-refresh:hover:not(:disabled) { background: var(--inset); border-color: var(--accent); color: var(--accent-ink); }
+.btn-refresh:disabled { color: var(--ink-faint); cursor: default; }
+
+.draft-list { display: flex; flex-direction: column; gap: 10px; }
+.draft-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 18px; border: 1px solid var(--rule); border-radius: 12px; flex-wrap: wrap;
+}
+.draft-info { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.draft-title { font-weight: 600; font-size: 15px; }
+.draft-meta { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+.draft-actions { display: flex; align-items: center; gap: 14px; flex: none; }
+.btn-refresh .spin { animation: btn-refresh-spin 0.8s linear infinite; }
+@keyframes btn-refresh-spin { to { transform: rotate(360deg); } }
+
+/* Gebruikers-pagina: elk teamlid als eigen kaart, i.p.v. een dichte lijstrij
+   met knoppen door elkaar. */
+/* Gebruikerskaarten naast elkaar zodra er ruimte is: bij vier collega's was
+   één kolom een lange lijst waarin de actieve gebruiker niet opviel. */
+.user-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 12px; }
+.user-card {
+  position: relative; overflow: hidden;
+  border: 1px solid var(--rule); border-radius: 14px; padding: 16px 18px;
+  background: var(--paper);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.user-card:hover { box-shadow: 0 2px 10px rgba(20, 30, 24, 0.07); }
+.user-card.is-active { border-color: var(--accent); background: var(--accent-wash); }
+/* Streep langs de zijkant i.p.v. alleen een randkleur: dat leest ook als je
+   de kaarten van een afstand bekijkt. */
+.user-card.is-active::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  background: var(--accent);
+}
+.user-card-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.user-card-avatar {
+  position: relative; width: 52px; height: 52px; border-radius: 50%;
+  border: 0; padding: 0; cursor: pointer; flex: none; overflow: hidden;
+  background: var(--inset); display: grid; place-items: center;
+  font-size: 16px; font-weight: 700; color: var(--ink-soft);
+}
+.user-card-avatar img { width: 100%; height: 100%; object-fit: cover; }
+/* Camerarandje: zonder aanwijzing is niet te zien dat je op de foto kunt
+   klikken om 'm te wijzigen. */
+.user-card-avatar::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%;
+  box-shadow: inset 0 0 0 2px rgba(26, 135, 72, 0); transition: box-shadow 0.15s;
+}
+.user-card-avatar:hover::after { box-shadow: inset 0 0 0 2px var(--accent); }
+.user-card-avatar-busy {
+  position: absolute; inset: 0; background: rgba(0,0,0,0.4);
+  display: grid; place-items: center; z-index: 1;
+}
+.user-card-info { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+.user-card-name {
+  font-weight: 680; font-size: 16px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.user-card-foto {
+  font-size: 11.5px; color: var(--ink-faint); background: none; border: 0;
+  padding: 0; cursor: pointer; text-align: left; text-decoration: underline;
+}
+.user-card-foto:hover { color: var(--accent-text); }
+/* Knoppen onderaan op een eigen regel: naast de naam werden ze op een iPad
+   zo smal dat "Wissel naar dit account" over drie regels brak. */
+.user-card-actions {
+  display: flex; gap: 8px; margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+.user-card.is-active .user-card-actions { border-top-color: rgba(26, 135, 72, 0.22); }
+.user-card-actions .btn { white-space: nowrap; flex: 1; min-height: 40px; font-size: 13.5px; }
+.user-card-token {
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--rule);
+  display: flex; flex-direction: column; gap: 12px; align-items: flex-start;
+}
+.user-card-token .field { width: 100%; }
+.user-add-card { margin-top: 20px; }
+@media (prefers-reduced-motion: reduce) { .btn-refresh .spin { animation: none; } }
+
+.btn-back {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--paper); border: 1px solid var(--rule-strong);
+  border-radius: 999px; padding: 0 16px 0 13px; min-height: 40px;
+  font: inherit; font-size: 13.5px; font-weight: 600; color: var(--ink-soft);
+  cursor: pointer;
+}
+.btn-back:hover { background: var(--inset); border-color: var(--ink-faint); color: var(--ink); }
+.btn-back svg { flex: none; }
+
+.btn-quiet.is-danger { color: var(--bad); border-color: #f3c9cd; }
+.btn-quiet.is-danger:hover { background: var(--bad-wash); border-color: var(--bad); }
+
+button:focus-visible, a:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ================= adresweergave ================= */
+.addr-grid { flex: 1; display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 1120px) { .addr-grid { grid-template-columns: 400px 1fr; } }
+
+.addr-find {
+  display: flex; flex-direction: column; padding: 22px; gap: 15px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r);
+}
+.addr-detail {
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r);
+}
+
+.search {
+  display: flex; align-items: center; gap: 11px;
+  border: 1px solid var(--rule-strong); border-radius: 12px;
+  padding: 0 15px; min-height: 50px; background: var(--paper);
+}
+.search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+.search svg { flex: none; color: var(--ink-faint); }
+.search input {
+  border: 0; background: none; font: inherit; font-size: 15.5px;
+  color: var(--ink); width: 100%; min-width: 0; outline: none;
+}
+.search input::placeholder { color: var(--ink-faint); }
+
+.spinner {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid var(--accent-wash); border-top-color: var(--accent);
+  animation: spin 0.75s linear infinite;
+}
+.spinner.on-accent { border-color: rgba(255,255,255,0.4); border-top-color: #fff; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+.list-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 2px 0 4px; }
+.rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.rows li { border-bottom: 1px solid var(--rule); }
+.row {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  min-height: var(--tap); background: none; border: 0; padding: 11px 6px;
+  font: inherit; text-align: left; cursor: pointer; border-radius: 10px;
+}
+.row:hover { background: var(--inset); }
+.row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.row-street { font-size: 16.5px; font-weight: 600; letter-spacing: -0.015em; }
+.row-meta {
+  font-family: var(--mono); font-size: 12.5px;
+  color: var(--ink-soft); font-variant-numeric: tabular-nums;
+}
+.row-dist {
+  font-family: var(--mono); font-size: 14px;
+  font-variant-numeric: tabular-nums; color: var(--ink-soft); flex: none;
+}
+.note { padding: 22px 2px; font-size: 15px; color: var(--ink-soft); line-height: 1.55; margin: 0; }
+.today-appts.is-compact { margin-bottom: 14px; }
+.today-appts.is-compact .list-head { padding: 0 0 4px; }
+.today-appts-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+/* Kaart staat bewust in kolomvorm: adres + huisnummer bovenaan en volledig
+   leesbaar, plaats eronder, tags onderaan — met veel tags (makelaar, dienst,
+   BAG-waarschuwing) verdween het adres anders in de verdrukking. */
+.today-appt-card {
+  display: flex; flex-direction: column; align-items: stretch; gap: 5px; width: 100%;
+  padding: 10px 11px; border: 1px solid var(--rule); border-radius: 10px;
+  background: var(--paper); font: inherit; text-align: left; cursor: pointer;
+  color: inherit; transition: border-color 0.15s, background 0.15s;
+}
+.today-appt-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.today-appt-top .today-appt-street { flex: 1; min-width: 0; }
+.today-appt-card:hover { background: var(--inset); border-color: var(--accent); }
+.today-appt-card.is-dimmed { opacity: 0.5; background: var(--inset); }
+.today-appt-card.is-dimmed:hover { opacity: 0.75; }
+.today-appt-card.is-dimmed .today-appt-time { color: var(--ink-faint); background: var(--rule); }
+.today-appt-time {
+  flex: none; font-family: var(--mono); font-size: 12px; font-weight: 700;
+  color: var(--accent-text); background: var(--accent-wash);
+  border-radius: 999px; padding: 3px 9px; letter-spacing: 0.01em;
+}
+.today-appt-address { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+/* Bewust géén ellipsis: bij een lange straatnaam viel juist het huisnummer
+   (dat achteraan staat) weg — dat is het belangrijkste deel. Nu breekt de
+   regel af i.p.v. af te kappen. */
+.today-appt-street {
+  font-size: 14px; font-weight: 650; line-height: 1.3;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.today-appt-city {
+  font-size: 12.5px; font-weight: 500; color: var(--ink-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.today-appt-services { display: flex; flex-wrap: wrap; gap: 5px; }
+/* Voorstellen na een niet-gevonden BAG-adres: staan onder de kaart, blijven
+   binnen de kolom en breken netjes af bij lange adressen. */
+.today-appt-fix {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: 5px 0 2px; padding: 8px 10px;
+  border: 1px dashed #f3c9cd; border-radius: 9px; background: var(--bad-wash);
+}
+.today-appt-fix-label { font-size: 11.5px; font-weight: 700; color: var(--bad); }
+.today-appt-fix-btn {
+  max-width: 100%; min-height: 40px; padding: 8px 12px; border-radius: 999px;
+  border: 1px solid var(--rule-strong); background: var(--paper); color: var(--ink);
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.today-appt-fix-btn:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-wash); }
+.today-appt-service-tag {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.01em;
+  padding: 3px 8px; border-radius: 999px;
+  background: var(--accent-wash); color: var(--accent-text);
+}
+.today-appt-service-tag.is-nen { background: #e4ecff; color: #0061fe; }
+.today-appt-service-tag.is-uploaded { background: var(--inset); color: var(--ink-soft); }
+.today-appt-service-tag.is-warning { background: var(--bad-wash); color: var(--bad); }
+.today-appt-service-tag.is-picked {
+  border: 0; cursor: pointer; font: inherit; font-size: 10.5px; font-weight: 700;
+  background: var(--accent-wash); color: var(--accent-text);
+}
+.today-appt-service-tag.is-picked:hover { background: var(--accent); color: #fff; }
+.today-appt-service-tag.is-makelaar {
+  background: var(--inset); color: var(--ink-soft); font-weight: 600;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.today-appt-connect-hint {
+  display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px;
+  border: 1px dashed var(--rule); border-radius: 10px;
+  background: var(--inset); color: var(--ink-soft); font-size: 12.5px; line-height: 1.5;
+}
+.today-appt-connect-hint svg { flex: none; margin-top: 1px; color: var(--ink-faint); }
+.today-appt-connect-hint a { color: var(--accent-text); font-weight: 600; }
+
+.placeholder {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 16px; padding: 60px 32px; text-align: center;
+}
+.placeholder-mark {
+  width: 58px; height: 58px; border-radius: 50%; background: var(--accent-wash);
+  display: grid; place-items: center; color: var(--accent-text);
+}
+.placeholder p { margin: 0; color: var(--ink-soft); font-size: 15.5px; max-width: 34ch; line-height: 1.55; }
+
+.pad { padding: 22px; display: flex; flex-direction: column; gap: 18px; }
+
+.card { border: 1px solid var(--rule); border-radius: var(--r); overflow: hidden; }
+.card-head { padding: 20px 22px; border-bottom: 1px solid var(--rule); background: var(--inset); }
+.card-head h2 { font-size: 21px; }
+.card-head p { margin: 6px 0 0; font-family: var(--mono); font-size: 14px; color: var(--ink-soft); }
+.card-head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.btn-edit-addr {
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 12px; height: 34px; margin-top: 2px;
+  background: var(--paper); border: 1px solid var(--rule-strong); border-radius: 999px;
+  color: var(--ink-soft); font: inherit; font-size: 12.5px; font-weight: 600;
+  cursor: pointer;
+}
+.btn-edit-addr:hover { background: var(--inset); border-color: var(--accent); color: var(--accent-ink); }
+.facts { margin: 0; }
+.fact {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 20px; padding: 14px 22px; border-bottom: 1px solid var(--rule);
+}
+.fact:last-child { border-bottom: 0; }
+
+.card > .btn-text { margin: 0 22px 18px; }
+.addr-edit { padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+.addr-edit-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.addr-edit-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.fact dt { font-size: 14px; color: var(--ink-soft); flex: none; }
+.fact dd {
+  margin: 0; font-family: var(--mono); font-size: 14.5px;
+  font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere;
+}
+
+/* ================= formulier ================= */
+.sections { display: flex; flex-direction: column; gap: 20px; padding: 22px; }
+.section { border: 1px solid var(--rule); border-radius: var(--r); overflow: hidden; }
+.section-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 15px 20px; border-bottom: 1px solid var(--rule); background: var(--inset);
+}
+.section-head h2 { font-size: 16.5px; font-weight: 650; }
+.section-head-toggle {
+  width: 100%; border: 0; font: inherit; text-align: left; cursor: pointer;
+  color: var(--ink);
+}
+.section-head-toggle:hover { background: var(--inset-2); }
+.section-count {
+  margin-left: auto; font-size: 12px; color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+/* Telt de nog lege verplichte velden in een groep, zodat een ingeklapte
+   groep niet verbergt dat daar nog werk ligt. Deelt de margin-left: auto met
+   .section-count: de eerste slokt de vrije ruimte op, daarna staan ze naast
+   elkaar rechts in de kop. */
+.section-missing {
+  margin-left: auto; font-size: 11.5px; font-weight: 700;
+  color: var(--bad); background: var(--bad-wash);
+  border-radius: 999px; padding: 3px 9px; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.section-head .btn-text { margin-left: auto; }
+.section-head .btn-refresh { margin-left: auto; margin-top: 0; min-height: 34px; padding: 0 12px; font-size: 13px; }
+.section-head .btn-primary { margin-left: auto; min-height: 34px; padding: 0 16px; font-size: 13px; }
+
+.doc-list { display: flex; flex-direction: column; padding: 6px 20px 18px; }
+.doc-row {
+  padding: 14px 14px; margin: 0 -14px; border-bottom: 1px solid var(--rule);
+  border-radius: 8px;
+}
+.doc-row:last-child { border-bottom: 0; }
+.doc-row.is-missing { background: rgba(248, 113, 113, 0.08); }
+.doc-row.is-missing .doc-title { color: #c22b2b; }
+.doc-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.doc-title { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.doc-folder { font-size: 12px; color: var(--ink-faint); font-family: var(--mono); flex: none; }
+.doc-row-head-right { display: flex; align-items: center; gap: 10px; flex: none; }
+.doc-files { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.doc-files li { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-soft); }
+.doc-file-check { color: #1c7a41; font-weight: 700; }
+.doc-grid { display: grid; grid-template-columns: 1fr; gap: 16px; padding: 6px 20px 18px; }
+@media (min-width: 700px) { .doc-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1000px) { .doc-grid { grid-template-columns: repeat(4, 1fr); } }
+.doc-col { padding: 14px; border: 1px solid var(--rule); border-radius: 10px; display: flex; flex-direction: column; gap: 10px; }
+.doc-col.is-missing { background: rgba(248, 113, 113, 0.08); border-color: #f3c9cd; }
+.doc-col.is-missing .doc-title { color: #c22b2b; }
+.doc-col.is-complete { background: rgba(28, 122, 65, 0.08); border-color: #a9d9bb; }
+.doc-col.is-complete .doc-title { color: #1c7a41; }
+/* Ingeklapte voltooide map: één groene regel, vinkjes rechts. */
+.doc-col-collapsed {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; margin: 0; padding: 0; border: 0; background: none;
+  font: inherit; cursor: pointer; text-align: left;
+}
+.doc-complete-checks { display: flex; gap: 12px; flex: none; color: #1c7a41; font-weight: 700; font-size: 13px; }
+.doc-col-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.btn-pick-file {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--rule-strong);
+  background: var(--paper); color: var(--ink); font: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer;
+}
+.btn-pick-file:hover:not(:disabled) { background: var(--inset); border-color: #0061fe; }
+.btn-pick-file:disabled { cursor: default; opacity: 0.55; }
+.doc-upload-progress { display: flex; flex-direction: column; gap: 4px; }
+.doc-upload-bar { height: 6px; border-radius: 999px; background: var(--inset); overflow: hidden; }
+.doc-upload-bar-fill { height: 100%; background: #0061fe; border-radius: 999px; transition: width 0.15s ease; }
+@media (prefers-reduced-motion: reduce) { .doc-upload-bar-fill { transition: none; } }
+.chev { flex: none; color: var(--ink-faint); transition: transform 0.15s ease; }
+.chev.is-open { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
+.section-body { padding: 20px; display: grid; gap: 18px; grid-template-columns: 1fr; }
+@media (min-width: 620px) { .section-body { grid-template-columns: 1fr 1fr; } }
+.section-body.is-single-wide { grid-template-columns: 1fr; }
+
+.field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.field.is-wide { grid-column: 1 / -1; }
+.field label { font-size: 14px; font-weight: 600; color: var(--ink); }
+.field .req { color: var(--accent-text); margin-left: 3px; }
+.field-required-mark { color: var(--bad); }
+.field-missing label { color: var(--bad); }
+.field-missing .control,
+.field-missing textarea.control { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
+.field-year-tag {
+  display: inline-block; margin-left: 8px; padding: 2px 7px;
+  border-radius: 999px; background: rgba(74, 222, 128, 0.16); color: #1c7a41;
+  font-size: 11px; font-weight: 700; font-family: var(--mono); letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
+/* ================= kompas-kiezer (A8) ================= */
+.field-with-compass { display: flex; align-items: center; gap: 8px; }
+.field-with-compass .control { flex: 1; }
+.btn-compass {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 46px; height: 50px; border: 1px solid var(--rule-strong); border-radius: 12px;
+  background: var(--paper); color: var(--ink-soft); cursor: pointer;
+}
+.btn-compass:hover { background: var(--inset); border-color: var(--accent); color: var(--accent-ink); }
+
+.compass-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(20, 30, 24, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.compass-modal {
+  width: 100%; max-width: 360px; background: var(--paper);
+  border-radius: 22px; padding: 22px;
+  box-shadow: 0 24px 60px rgba(20, 30, 24, 0.35);
+}
+.compass-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.compass-modal-head h3 { margin: 0; font-size: 17px; font-weight: 680; }
+.compass-close {
+  width: 30px; height: 30px; border-radius: 8px; border: 0; background: var(--inset);
+  color: var(--ink-soft); display: grid; place-items: center; cursor: pointer;
+}
+.compass-close:hover { background: var(--rule); }
+/* De vinklijst gebruikt vanaf 620px viewportbreedte 2 kolommen — dat kijkt
+   naar het venster, niet naar de (veel smallere) pop-up zelf, dus hier altijd
+   geforceerd op 1 kolom om overlappende tekst te voorkomen. */
+.compass-modal .dbx-strip-docs { grid-template-columns: 1fr; }
+/* Rode rand zolang er geen makelaar gekozen is — doorklikken kan dan niet. */
+.compass-modal.is-invalid { border: 2px solid var(--bad); }
+/* Ontbrekende makelaar in de vinklijst: opvallend rood i.p.v. een groen vinkje. */
+.dbx-strip-doc-row.is-warning-row { color: var(--bad); font-weight: 700; }
+.dbx-strip-doc-row.is-warning-row .dbx-strip-doc-status { color: var(--bad); font-weight: 700; }
+
+.compass-wrap { position: relative; margin: 0 auto 14px; max-width: 300px; }
+.compass-pointer {
+  position: absolute; top: -7px; left: 50%; transform: translateX(-50%);
+  z-index: 4; width: 0; height: 0;
+  border-left: 9px solid transparent; border-right: 9px solid transparent;
+  border-bottom: 16px solid var(--accent);
+  filter: drop-shadow(0 2px 3px rgba(20, 30, 24, 0.25));
+}
+/* Echte kompasring: een cirkel met een subtiele gelaagde rand (buiten- en
+   binnenring) — de windrichtingen staan op de rand, niet in een rooster. */
+.compass-rose {
+  position: relative; aspect-ratio: 1; border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, var(--paper) 0%, var(--paper) 62%, var(--inset) 92%, var(--rule) 100%);
+  border: 1px solid var(--rule);
+  box-shadow: inset 0 0 0 10px var(--paper), inset 0 0 0 11px var(--rule);
+  transition: transform 0.15s linear;
+}
+.compass-ticks { position: absolute; inset: 0; }
+.compass-tick { position: absolute; inset: 0; }
+.compass-tick::before {
+  content: ""; position: absolute; top: 6px; left: 50%; width: 1.5px; height: 7px;
+  background: var(--rule-strong); transform: translateX(-50%);
+}
+.compass-tick.is-major::before { top: 5px; width: 2.5px; height: 10px; background: var(--ink-soft); }
+
+.compass-btn {
+  position: absolute; width: 54px; height: 54px; margin: -27px 0 0 -27px;
+  border: 2px solid var(--rule-strong); border-radius: 50%;
+  background: var(--paper); color: var(--ink); font-weight: 700; font-size: 13.5px;
+  cursor: pointer; display: grid; place-items: center;
+  box-shadow: 0 2px 6px rgba(20, 30, 24, 0.08);
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+}
+.compass-btn:hover:not(:disabled) { background: var(--accent-wash); border-color: var(--accent); color: var(--accent-ink); }
+.compass-btn:disabled { opacity: 0.35; cursor: default; }
+.compass-btn.is-north { border-color: var(--ink); color: var(--ink); font-weight: 800; }
+/* opgeslagen A8-waarde: duidelijke ring + vinkje, geen vulling — zo blijft
+   dit visueel apart van "is-live" (de huidige apparaatrichting). */
+.compass-btn.is-active {
+  border-color: var(--accent); border-width: 3px; color: var(--accent-ink);
+  background: var(--accent-wash);
+}
+.compass-btn-check { display: block; font-size: 10px; line-height: 1; margin-bottom: 1px; color: var(--accent); }
+/* live apparaatrichting: gevulde, pulserende groene knop — dit is de knop
+   die "meedraait" terwijl je de tablet beweegt. */
+.compass-btn.is-live {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+  transform: scale(1.15); box-shadow: 0 0 0 0 rgba(34, 169, 90, 0.5);
+  animation: compass-live-pulse 1.6s ease-out infinite;
+  z-index: 1;
+}
+.compass-btn.is-live .compass-btn-check { color: #fff; }
+@keyframes compass-live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(34, 169, 90, 0.45); }
+  70% { box-shadow: 0 0 0 10px rgba(34, 169, 90, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 169, 90, 0); }
+}
+.compass-btn-label { display: flex; flex-direction: column; align-items: center; transition: transform 0.15s linear; }
+.compass-center {
+  position: absolute; top: 50%; left: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px;
+  border-radius: 50%; background: var(--inset);
+  display: grid; place-items: center; color: var(--ink-faint);
+}
+.compass-center-deg {
+  font-size: 11px; font-weight: 700; color: var(--accent-ink);
+  font-variant-numeric: tabular-nums;
+}
+.compass-live-btn { margin-top: 4px; }
+.compass-legend {
+  display: flex; justify-content: center; gap: 16px; margin: 2px 0 0;
+  font-size: 11.5px; color: var(--ink-faint);
+}
+.compass-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.compass-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.compass-legend-dot.is-live { background: var(--accent); }
+.compass-legend-dot.is-active { border: 2px solid var(--accent); background: var(--accent-wash); }
+.compass-calibrate {
+  text-align: center; background: rgba(251, 191, 36, 0.14); color: #92620a;
+  border-radius: 10px; padding: 8px 10px; margin: 0 0 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .compass-rose, .compass-btn-label, .compass-btn { transition: none; }
+  .compass-btn.is-live { animation: none; }
+}
+
+/* ================= upload-voortgangspopup ================= */
+.upload-overlay {
+  position: fixed; inset: 0; z-index: 70;
+  background: rgba(20, 30, 24, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.upload-modal {
+  /* Ruimer dan 340px: er staan nu drie groepen in met bestandsnamen ernaast,
+     en die braken bij de oude breedte per woord af. */
+  width: 100%; max-width: 420px; background: var(--paper);
+  border-radius: 20px; padding: 24px;
+  max-height: min(86vh, 780px); overflow-y: auto;
+  box-shadow: 0 24px 60px rgba(20, 30, 24, 0.35);
+}
+.upload-modal h3 { margin: 0 0 14px; font-size: 16px; font-weight: 680; line-height: 1.35; }
+/* Kopje boven een groep stappen. */
+.upload-groep {
+  margin: 18px 0 8px; font-size: 11px; font-weight: 750;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint);
+}
+.upload-groep:first-of-type { margin-top: 4px; }
+.upload-leeg {
+  margin: 16px 0 0; font-size: 12px; color: var(--ink-faint);
+}
+/* Naam links, uitkomst rechts — zo staan de uitkomsten onder elkaar en is in
+   één verticale blik te zien of alles goed ging. */
+.upload-step-naam { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.upload-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.upload-list li { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--ink-faint); }
+.upload-list li.is-done { color: var(--ink); }
+.upload-list li.is-error { color: var(--bad); }
+.upload-check { color: #1c7a41; font-weight: 700; flex: none; }
+.upload-warn { color: var(--bad); font-weight: 700; flex: none; }
+.upload-list .spinner { flex: none; }
+.upload-timer {
+  margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--rule);
+  font-size: 12.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums;
+}
+
+.control {
+  width: 100%; min-height: 50px; padding: 0 14px;
+  border: 1px solid var(--rule-strong); border-radius: 12px;
+  background: var(--paper); font: inherit; font-size: 15.5px; color: var(--ink);
+}
+select.control {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16' fill='none'><path d='M4 6l4 4 4-4' stroke='%2358635d' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat; background-position: right 14px center;
+  padding-right: 40px;
+}
+textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-height: 1.5; }
+.control:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+.control.is-filled { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-ink); }
+
+.toggle-btn {
+  width: 100%; min-height: 50px; padding: 0 14px;
+  border: 1px solid var(--rule-strong); border-radius: 12px;
+  background: var(--paper); font: inherit; font-size: 15.5px; font-weight: 600;
+  color: var(--ink-soft); text-align: left; cursor: pointer;
+}
+.toggle-btn.is-on { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-ink); }
+
+.form-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  padding: 14px 22px; background: var(--paper); border-top: 1px solid var(--rule);
+}
+/* Staat van de verplichte velden, naast de doorgaan-knop: je ziet vóór het
+   klikken of je klaar bent, en springt met één tik naar het eerste lege veld. */
+.form-foot-missing {
+  border: 1px dashed #f3c9cd; border-radius: 999px; background: var(--bad-wash);
+  color: var(--bad); font: inherit; font-size: 13px; font-weight: 700;
+  padding: 7px 14px; cursor: pointer; text-align: left;
+}
+.form-foot-missing:hover { border-style: solid; border-color: var(--bad); }
+.form-foot-ok { font-size: 13px; font-weight: 650; color: var(--accent-text); }
+
+.banner {
+  display: flex; align-items: center; gap: 12px;
+  border-radius: 14px; padding: 15px 18px; font-size: 15px;
+}
+.banner.is-ok { background: var(--accent-wash); color: var(--accent-ink); }
+.banner.is-bad { background: var(--bad-wash); color: var(--bad); }
+
+.result-links { display: flex; flex-direction: column; gap: 10px; margin: 16px 0; }
+.result-link {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px; border: 1px solid var(--rule); border-radius: 14px;
+  background: var(--paper); text-decoration: none; color: var(--ink);
+  transition: background 0.15s, border-color 0.15s;
+}
+.result-link:hover { background: var(--inset); border-color: var(--rule-strong); }
+.result-link-icon {
+  flex: none; width: 38px; height: 38px; border-radius: 10px;
+  display: grid; place-items: center;
+}
+.result-link.is-clickup .result-link-icon { background: rgba(122, 92, 255, 0.14); color: #7a5cff; }
+.result-link.is-dropbox .result-link-icon { background: rgba(0, 97, 254, 0.12); color: #0061fe; }
+.result-link-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.result-link-text b { font-size: 14.5px; font-weight: 650; letter-spacing: -0.01em; }
+.result-link-text span { font-size: 12.5px; color: var(--ink-faint); }
+.result-link-arrow { flex: none; color: var(--ink-faint); }
+.result-link:hover .result-link-arrow { color: var(--accent-ink); }
+
+/* ================= koppelingen ================= */
+.conn-grid { display: grid; gap: 16px; }
+@media (min-width: 900px) { .conn-grid { grid-template-columns: 1fr 1fr; } }
+.conn { border: 1px solid var(--rule); border-radius: var(--r); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+/* Een dichtgeklapte kaart is alleen de kop; die mag strakker zitten. */
+.conn.is-dicht { padding-bottom: 16px; gap: 0; }
+/* De kop is de schakelaar: geen los knopje ernaast, want de hele regel is
+   de plek waar je klikt. */
+.conn-toggle {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%;
+  border: 0; background: transparent; padding: 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.conn-toggle .conn-top { flex: 1; min-width: 0; }
+.conn-toggle .chev { margin-top: 9px; }
+.conn-body { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+.conn-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.conn-heading { display: flex; align-items: center; gap: 11px; }
+.conn-icon {
+  flex: none; width: 34px; height: 34px; border-radius: 9px;
+  display: grid; place-items: center;
+}
+.conn-icon.is-dropbox { background: #e4ecff; color: #0061fe; }
+.conn-icon.is-clickup { background: var(--accent-wash); color: var(--accent-text); }
+.conn-icon.is-bag { background: var(--inset); color: var(--ink-soft); }
+.conn-name { font-size: 17px; font-weight: 650; letter-spacing: -0.015em; }
+.conn-role { margin: 5px 0 0; font-size: 14px; color: var(--ink-soft); max-width: 36ch; line-height: 1.5; }
+.pill {
+  display: inline-flex; align-items: center; gap: 7px; flex: none;
+  border-radius: 999px; padding: 6px 12px;
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid transparent;
+}
+.pill.is-ok   { background: var(--accent-wash); color: var(--accent-text); }
+.pill.is-bad  { background: var(--bad-wash); color: var(--bad); }
+.pill.is-off  { background: var(--inset); color: var(--ink-soft); border-color: var(--rule); }
+.pill .dot.is-ok { background: var(--accent-text); }
+.pill .dot.is-bad { background: var(--bad); }
+.pill .dot.is-off { background: var(--ink-faint); }
+.conn-acct { font-family: var(--mono); font-size: 13px; padding: 12px 14px; background: var(--inset); border-radius: 10px; overflow-wrap: anywhere; }
+.conn-acct.is-empty { color: var(--ink-faint); }
+.conn-err { font-size: 14px; color: var(--bad); line-height: 1.5; margin: 0; }
+.conn-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.conn-hint { font-size: 12.5px; color: var(--ink-faint); line-height: 1.5; margin: 0; }
+.conn-hint code { background: var(--inset); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); }
+
+/* ================= pinned-head (topbalk + dropbox-balk, blijven samen vast) ================= */
+/* position: fixed i.p.v. sticky — zo blijft dit gegarandeerd op zijn plek
+   ongeacht welke voorouder ergens een scroll-container of transform
+   introduceert. .pinned-head-spacer reserveert (via JS gemeten) dezelfde
+   ruimte in de gewone flow zodat de rest van de pagina niet onder de balken
+   verdwijnt of springt bij het wisselen van pagina. */
+.pinned-head {
+  position: fixed; top: 12px; left: 12px; right: 12px; z-index: 30;
+  display: flex; flex-direction: column; gap: 10px;
+}
+@media (min-width: 760px) { .pinned-head { left: 270px; right: 24px; } }
+.pinned-head-spacer { flex: none; }
+.pinned-head .topline { box-shadow: 0 8px 20px rgba(20, 30, 24, 0.06); }
+
+.dbx-strip {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 8px 20px rgba(20, 30, 24, 0.1);
+}
+.dbx-strip.is-ready { border-color: #bcd0ff; background: #f5f8ff; }
+.dbx-strip.is-off { background: var(--inset); }
+.dbx-strip-top { display: flex; align-items: center; gap: 10px; min-height: 22px; flex-wrap: wrap; }
+.dbx-strip-icon { flex: none; }
+.dbx-strip-text.is-wrap { white-space: normal; overflow: visible; }
+.dbx-strip-text {
+  display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;
+  font-size: 13px; color: var(--ink-soft);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dbx-strip-check { color: #1c7a41; font-weight: 700; flex: none; }
+.dbx-folder-path { font-family: var(--mono); color: var(--ink); }
+.dbx-strip .btn-text { flex: none; font-size: 13px; }
+.dbx-strip-doc-now {
+  margin-left: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; padding: 1px 6px; border-radius: 999px;
+  background: var(--accent-wash); color: var(--accent-text);
+}
+.dbx-strip-progress-label { font-size: 11.5px; color: var(--ink-faint); font-weight: 600; flex: none; }
+
+.dbx-strip-refresh {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--rule-strong);
+  background: var(--paper); color: var(--ink-soft); cursor: pointer;
+}
+.dbx-strip-refresh:hover:not(:disabled) { background: var(--inset); border-color: var(--accent); color: var(--accent-ink); }
+.dbx-strip-refresh:disabled { color: var(--ink-faint); cursor: default; }
+.dbx-strip-refresh .spin { animation: btn-refresh-spin 0.8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .dbx-strip-refresh .spin { animation: none; } }
+
+.dbx-strip-docs {
+  display: grid; grid-template-columns: 1fr; gap: 4px 16px;
+  padding-top: 8px; border-top: 1px solid var(--rule);
+}
+@media (min-width: 620px) { .dbx-strip-docs { grid-template-columns: 1fr 1fr; } }
+.dbx-strip.is-ready .dbx-strip-docs { border-top-color: #d7e3ff; }
+.dbx-strip-doc-row {
+  display: flex; align-items: center; gap: 7px; min-height: 22px;
+  font-size: 12.5px; color: var(--ink-faint);
+}
+.dbx-strip-doc-row.is-done { color: var(--ink); }
+.dbx-strip-doc-row svg { flex: none; color: #1c7a41; }
+.dbx-strip-doc-empty {
+  flex: none; width: 12px; height: 12px; border-radius: 50%;
+  border: 1.5px solid var(--rule-strong);
+}
+.dbx-strip-doc-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dbx-strip-doc-status { flex: none; font-variant-numeric: tabular-nums; }
+.dbx-strip-doc-row.is-done .dbx-strip-doc-status { color: #1c7a41; font-weight: 600; }
+
+.btn-open-dbx {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  padding: 0 12px; height: 30px; border-radius: 8px;
+  background: var(--accent); color: #fff;
+  font-size: 13px; font-weight: 600; text-decoration: none;
+}
+.btn-open-dbx:hover { filter: brightness(0.94); }
+
+.doc-open-folder {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  padding: 0 10px; height: 28px; border-radius: 7px;
+  background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 600; text-decoration: none;
+}
+.doc-open-folder:hover { filter: brightness(0.94); }
+
+.card-mediatask-summary {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--rule);
+}
+.card-mediatask-summary .dbx-strip-docs { flex: 1; padding-top: 0; border-top: none; }
+.card-mediatask-summary .btn-edit-addr { flex: none; }
+
+/* ================= scancontrole (RAW .dp) ================= */
+.scan-modal {
+  width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto;
+  background: var(--paper); border-radius: 20px; padding: 22px;
+  box-shadow: 0 24px 60px rgba(20, 30, 24, 0.35);
+}
+.scan-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.scan-modal-head h3 { margin: 0; font-size: 17px; font-weight: 680; }
+.scan-verdict { font-size: 12.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+.scan-verdict.is-ok { background: var(--ok-wash); color: var(--ok); }
+.scan-verdict.is-twijfel { background: var(--warn-wash); color: var(--warn); }
+.scan-verdict.is-afkeuren { background: var(--bad-wash); color: var(--bad); }
+.scan-verdict.is-onbekend { background: #eff1ee; color: var(--ink-faint); }
+.scan-render {
+  width: 100%; height: auto; border: 1px solid var(--rule); border-radius: 12px;
+  background: #fff; display: block;
+}
+.scan-progress { padding: 0; margin: 0 0 12px; }
+.scan-error { margin: 0 0 12px; font-size: 13.5px; color: var(--bad); }
+.scan-summary { margin: 0 0 14px; font-size: 14px; line-height: 1.5; color: var(--ink); }
+.scan-facts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 10px; margin: 0 0 16px; padding: 12px; background: #f6f7f4; border-radius: 12px;
+}
+.scan-facts div { margin: 0; }
+.scan-facts dt { font-size: 11px; color: var(--ink-faint); margin: 0 0 2px; }
+.scan-facts dd { margin: 0; font-size: 14px; font-weight: 640; font-variant-numeric: tabular-nums; }
+.scan-list { list-style: none; margin: 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.scan-list li { display: flex; gap: 10px; align-items: flex-start; }
+.scan-list li > div { display: flex; flex-direction: column; gap: 2px; }
+.scan-list strong { font-size: 13.5px; font-weight: 640; }
+.scan-list span { font-size: 13px; color: var(--ink-faint); line-height: 1.45; }
+.scan-list em { font-size: 11.5px; color: var(--ink-faint); opacity: 0.75; font-style: normal; }
+.scan-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; }
+.scan-list li.is-ok .scan-dot { background: var(--ok); }
+.scan-list li.is-twijfel .scan-dot { background: var(--warn); }
+.scan-list li.is-afkeuren .scan-dot { background: var(--bad); }
+.scan-list li.is-onbekend .scan-dot { background: #c3c8c2; }
+
+/* ================= inloggen ================= */
+/* Schermvullend over de app-shell heen: uitgelogd hoort er geen zijbalk met
+   navigatie zichtbaar te zijn. */
+.login-wrap {
+  position: fixed; inset: 0; z-index: 100;
+  display: grid; place-items: center; padding: 20px;
+  background: var(--page);
+}
+.login-card {
+  width: 100%; max-width: 340px;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--paper); border: 1px solid var(--rule);
+  border-radius: var(--r); padding: 24px 20px 20px;
+  box-shadow: 0 18px 44px rgba(20, 30, 24, 0.10);
+}
+.login-prompt { margin: 6px 0 0; font-size: 15px; font-weight: 600; text-align: center; }
+
+/* Cijferklavier: grote vlakken zodat het met één duim snel gaat op de iPad. */
+.pin-dots { display: flex; justify-content: center; gap: 14px; margin: 6px 0 2px; }
+.pin-dot {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--rule-strong); background: transparent;
+  transition: background 0.12s, border-color 0.12s, transform 0.12s;
+}
+.pin-dot.is-filled { background: var(--accent); border-color: var(--accent); transform: scale(1.12); }
+@media (prefers-reduced-motion: reduce) { .pin-dot { transition: none; } }
+
+/* Vaste hoogte: de melding mag het klavier niet op en neer laten springen. */
+.login-msg { margin: 0; min-height: 20px; font-size: 13px; text-align: center; color: var(--ink-soft); }
+.login-msg.is-error { color: var(--bad); font-weight: 600; }
+
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.keypad-key {
+  min-height: 62px; border-radius: 14px;
+  border: 1px solid var(--rule); background: var(--inset);
+  font: inherit; font-size: 24px; font-weight: 600; color: var(--ink);
+  cursor: pointer; user-select: none;
+  transition: background 0.1s, transform 0.06s;
+}
+.keypad-key:active:not(:disabled) { background: var(--accent-wash); transform: scale(0.96); }
+.keypad-key:disabled { opacity: 0.4; cursor: default; }
+.keypad-key.is-quiet { font-size: 17px; color: var(--ink-soft); background: transparent; border-color: transparent; }
+.keypad-key.is-quiet:active:not(:disabled) { background: var(--inset); }
+@media (prefers-reduced-motion: reduce) { .keypad-key { transition: none; } }
+.scan-verdict.is-onvolledig { background: var(--warn-wash); color: var(--warn); }
+/* Resterende tijd naast het uploadpercentage — bewust rustig van kleur, het
+   percentage blijft het hoofdgetal. */
+.upload-eta { color: var(--ink-faint); }
+
+/* ---- brede scancontrole: plattegrond links, checklist rechts ---- */
+.scan-modal.is-wide { max-width: 1080px; }
+.scan-split { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 880px) { .scan-split { grid-template-columns: 1fr; } }
+.scan-view { min-width: 0; }
+.scan-side { min-width: 0; }
+.scan-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
+.scan-tab {
+  border: 1px solid var(--rule-strong); background: var(--paper); border-radius: 999px;
+  padding: 5px 12px; font: inherit; font-size: 12.5px; cursor: pointer; color: var(--ink-faint);
+}
+.scan-tab.is-active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.scan-spots { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.scan-spots li { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; color: var(--ink-faint); }
+.scan-spot-nr {
+  flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--bad); color: #fff;
+  font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+}
+.scan-icon {
+  flex: none; width: 18px; height: 18px; border-radius: 50%; margin-top: 1px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: #fff;
+}
+.scan-icon.is-ok { background: var(--ok); }
+.scan-icon.is-twijfel { background: var(--warn); }
+.scan-icon.is-afkeuren { background: var(--bad); }
+.scan-icon.is-onbekend { background: #b6bcb6; }
+.scan-icon.is-bezig {
+  background: transparent; border: 2px solid var(--rule-strong); border-top-color: var(--ink-faint);
+  animation: scan-spin 0.8s linear infinite;
+}
+@keyframes scan-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .scan-icon.is-bezig { animation: none; } }
+.scan-list li.is-bezig strong { color: var(--ink-faint); }
+.scan-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+/* Aantal bestanden / "overgeslagen" achter een stap in de upload-popup. */
+.upload-step-note {
+  margin-left: auto; flex: none; text-align: right;
+  font-size: 12px; color: var(--ink-faint);
+}
+.upload-list li.is-done .upload-step-note { color: #1c7a41; }
+.upload-list li.is-error .upload-step-note { color: var(--bad); }
+.scan-pick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.scan-pick-name { font-size: 13px; font-weight: 620; color: var(--ink); }
+
+/* ================= verdiepingkiezer ================= */
+/* Ruime vlakken: dit wordt met een handschoen aan op een iPad bediend. */
+/* Eén aaneengesloten strip i.p.v. losse blokken: rustiger beeld en in één
+   veegbeweging te bedienen op de iPad. */
+.floor-picker {
+  display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px;
+  background: var(--inset); border: 1px solid var(--rule); border-radius: 999px;
+}
+.floor-btn {
+  min-width: 40px; height: 38px; padding: 0 10px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--ink-soft);
+  font: inherit; font-size: 14.5px; font-weight: 650;
+  font-variant-numeric: tabular-nums; cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, transform 0.1s ease;
+}
+.floor-btn:hover:not(.is-on) { background: var(--paper); color: var(--ink); }
+.floor-btn:active { transform: scale(0.93); }
+.floor-btn.is-on {
+  background: var(--accent); color: #fff;
+  box-shadow: 0 1px 4px rgba(26, 135, 72, 0.35);
+}
+@media (prefers-reduced-motion: reduce) { .floor-btn { transition: none; } }
+.scan-icon.is-afwijking { background: var(--bad); }
+.scan-list li.is-afwijking .scan-dot { background: var(--bad); }
+.scan-verdict.is-afwijking { background: var(--bad-wash); color: var(--bad); }
+
+/* Elke scan een eigen kaart.
+   Eerder liepen bestandsnaam, voortgang en verdiepingen als losse regels door
+   elkaar; bij twee scans in één map was dan niet te zien welke verdiepingen
+   bij welke scan hoorden. De omlijsting maakt dat expliciet. */
+.doc-files li.has-floors,
+.doc-upload-progress.scan-kaart {
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+  margin-bottom: 10px; padding: 12px 13px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 12px;
+}
+.doc-upload-progress.scan-kaart { background: var(--inset); }
+.doc-files li.has-floors .doc-file-name,
+.scan-kaart-naam {
+  font-weight: 650; color: var(--ink); font-size: 13.5px;
+}
+/* Naam over meerdere regels: een scannaam is lang en mag niet afgekapt worden
+   als hij de titel van de kaart is. */
+.scan-kaart-naam { overflow-wrap: anywhere; }
+.doc-file-line { display: flex; align-items: center; gap: 8px; }
+/* Een vraag hoort niet in kapitalen — dat leest als geschreeuw en juist deze
+   regel moet rustig te lezen zijn op een iPad in de zon. */
+.floor-label {
+  font-size: 12.5px; font-weight: 650; color: var(--ink-soft);
+  padding-top: 6px; border-top: 1px dashed var(--rule);
+}
+.floor-label em { font-style: normal; color: var(--bad); font-weight: 700; }
+/* Compacte variant in een al afgeronde map. */
+.btn-pick-file.is-compact { min-height: 34px; font-size: 12.5px; align-self: flex-start; }
+
+/* Verwijderen van een verkeerd geüpload bestand. */
+.doc-files li.has-actions { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+.doc-file-line { display: flex; align-items: center; gap: 8px; width: 100%; }
+/* Afkappen i.p.v. per letter afbreken; de volledige naam staat in de tooltip. */
+.doc-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-file-del {
+  flex: none; width: 30px; height: 30px; border-radius: 8px;
+  border: 0; background: none; color: var(--ink-faint);
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.doc-file-del:hover { background: var(--bad-wash); color: var(--bad); }
+.doc-file-confirm {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 6px 8px; border-radius: 8px; background: var(--bad-wash);
+  font-size: 12px; color: var(--bad); font-weight: 600;
+}
+.doc-file-yes, .doc-file-no {
+  min-height: 30px; padding: 0 10px; border-radius: 8px;
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.doc-file-yes { border: 0; background: var(--bad); color: #fff; }
+.doc-file-yes:disabled { opacity: 0.6; cursor: default; }
+.doc-file-no { border: 1px solid var(--rule-strong); background: var(--paper); color: var(--ink); }
+
+/* ---- groter, zoombaar bovenaanzicht ---- */
+.scan-modal.is-wide { max-width: 1400px; }
+.scan-split { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); }
+.scan-canvas {
+  position: relative; overflow: hidden; border: 1px solid var(--rule);
+  border-radius: 12px; background: #fff; touch-action: none; cursor: grab;
+  aspect-ratio: 1 / 1; max-height: 62vh;
+}
+.scan-canvas:active { cursor: grabbing; }
+.scan-canvas .scan-render { border: 0; border-radius: 0; transform-origin: center center; user-select: none; }
+.scan-viewbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.scan-zoom { display: flex; align-items: center; gap: 6px; }
+.scan-zoom button {
+  border: 1px solid var(--rule-strong); background: var(--paper); border-radius: 8px;
+  min-width: 30px; height: 28px; padding: 0 8px; font: inherit; font-size: 13px; cursor: pointer;
+}
+.scan-zoom span { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; min-width: 40px; text-align: center; }
+
+/* ---- klikbare checklist ---- */
+.scan-list-btn {
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  background: none; border: 0; padding: 0; font: inherit; cursor: pointer; width: 100%;
+}
+.scan-list li.is-gekozen { background: #f2f5f1; border-radius: 10px; padding: 6px 8px; margin: -6px -8px; }
+.scan-kaart-tag {
+  margin-left: 8px; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--brand); border: 1px solid var(--brand);
+  border-radius: 999px; padding: 1px 6px; vertical-align: middle;
+}
+
+/* ---- checklist krijgt de ruimte ---- */
+.scan-side { display: flex; flex-direction: column; min-height: 0; }
+.scan-side .scan-list {
+  flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding-right: 6px; gap: 8px;
+}
+.scan-split { align-items: stretch; }
+.scan-view { display: flex; flex-direction: column; }
+.scan-facts { margin-bottom: 12px; padding: 10px; }
+.scan-list li { padding: 2px 0; }
+.scan-list li.is-gekozen { padding: 6px 8px; }
+.scan-list strong { line-height: 1.35; }
+.scan-list span { line-height: 1.4; }
+@media (min-width: 881px) {
+  .scan-side { max-height: calc(62vh + 92px); }
+}
+
+/* ---- duidelijker statusiconen ---- */
+.scan-icon { width: 22px; height: 22px; font-size: 13px; border-radius: 6px; }
+.scan-icon.is-ok { background: var(--ok); }
+.scan-icon.is-twijfel, .scan-icon.is-afwijking { background: var(--warn); }
+.scan-icon.is-afkeuren { background: var(--bad); }
+.scan-list li.is-afkeuren strong { color: var(--bad); }
+.scan-list li.is-twijfel strong, .scan-list li.is-afwijking strong { color: var(--warn); }
+.scan-icon.is-bezig { width: 18px; height: 18px; border-radius: 50%; }
+
+/* ---- plattegrond groter ---- */
+.scan-modal.is-wide { max-width: 1600px; }
+.scan-split { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.scan-canvas { max-height: 78vh; }
+@media (min-width: 881px) {
+  .scan-side { max-height: calc(78vh + 92px); }
+}
+
+/* ---- statusiconen: rustige tint met een gekleurd teken ---- */
+.scan-icon {
+  width: 22px; height: 22px; border-radius: 50%; flex: none; margin-top: 1px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; background: transparent; color: inherit;
+}
+.scan-icon.is-ok { background: var(--ok-wash); border-color: rgba(20, 122, 68, 0.28); color: var(--ok); }
+.scan-icon.is-twijfel,
+.scan-icon.is-afwijking { background: var(--warn-wash); border-color: rgba(154, 91, 6, 0.3); color: var(--warn); }
+.scan-icon.is-afkeuren { background: var(--bad-wash); border-color: rgba(190, 47, 58, 0.32); color: var(--bad); }
+.scan-icon.is-onbekend { background: #f0f2ef; border-color: #dfe3dd; color: #8b938a; }
+.scan-icon.is-bezig {
+  width: 18px; height: 18px; margin-top: 3px;
+  border: 2px solid var(--rule-strong); border-top-color: var(--ink-faint);
+  background: transparent; animation: scan-spin 0.8s linear infinite;
+}
+.scan-list li { align-items: flex-start; gap: 11px; }
+
+/* ---- scrollen in de scancontrole ----
+   Alleen `overflow-y` zetten laat de browser de horizontale as óók op "auto"
+   zetten; dan schuift de hele pop-up zijwaarts weg zodra iets een pixel te
+   breed is. Vandaar hier expliciet dicht, met woordafbreking zodat lange
+   waarden de breedte niet alsnog oprekken. */
+.scan-modal {
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.scan-side .scan-list {
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.scan-list strong,
+.scan-list span,
+.scan-list em,
+.scan-summary,
+.scan-error,
+.scan-spots li,
+.scan-facts dd { overflow-wrap: anywhere; }
+.scan-modal-head h3 { min-width: 0; overflow-wrap: anywhere; }
+.scan-facts { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); }
+
+/* Smal scherm: onder elkaar in plaats van twee kolommen. Deze regel staat
+   bewust achteraan — eerdere kolomdefinities hebben dezelfde specificiteit en
+   zouden anders winnen. Op mobiel scrollt de pop-up als geheel; een lijst met
+   een eigen scrollgebied binnen een scrollende pop-up is daar niet te bedienen. */
+@media (max-width: 880px) {
+  .scan-split { grid-template-columns: 1fr; }
+  .scan-side { max-height: none; }
+  .scan-side .scan-list { overflow-y: visible; max-height: none; flex: none; padding-right: 0; }
+  .scan-canvas { max-height: 56vh; }
+}
+
+/* Melding dat blijven liggen uploads worden hervat. */
+/* Hervat-melding voor uploads uit een vorige sessie. Geen pil meer maar een
+   paneeltje: er staat nu per bestand bij welk adres en welke submap het hoort,
+   zodat je die uploads kunt terugvinden i.p.v. alleen een aantal te zien. */
+.resume-panel {
+  position: fixed; z-index: 90; left: 50%; bottom: 18px; transform: translateX(-50%);
+  width: min(440px, calc(100vw - 32px)); padding: 12px 14px;
+  border-radius: 14px; background: var(--side); color: var(--side-ink);
+  font-size: 13.5px; box-shadow: 0 10px 28px rgba(20, 30, 24, 0.28);
+  /* Hoogtegrens: zonder dit groeide de melding met het aantal bestanden mee
+     en liep hij bij een grote reeks van onder tot boven door het scherm —
+     precies over de knoppen waar je op wilde tikken. */
+  max-height: min(45vh, 380px); display: flex; flex-direction: column;
+}
+.resume-panel-head { flex: none; }
+.resume-panel-list { overflow-y: auto; overscroll-behavior: contain; }
+.resume-panel.is-bad { background: var(--bad); }
+.resume-panel-head { display: flex; align-items: center; gap: 9px; font-weight: 600; }
+.resume-panel-head strong { flex: 1; font-weight: 650; }
+.resume-panel-close {
+  flex: none; border: 0; background: transparent; color: inherit;
+  font: inherit; font-size: 15px; line-height: 1; padding: 2px 4px;
+  cursor: pointer; opacity: 0.7;
+}
+.resume-panel-close:hover { opacity: 1; }
+.resume-panel-list { list-style: none; margin: 9px 0 0; padding: 0; display: grid; gap: 5px; align-content: start; }
+.resume-panel-list li {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 10px;
+  font-size: 12.5px; opacity: 0.92;
+}
+/* Merkt een onderdeel dat nog in ontwikkeling is. Bewust rustig van kleur:
+   het is een bijschrift bij de titel, geen waarschuwing. */
+.beta-tag {
+  display: inline-block; vertical-align: middle; margin-left: 8px;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.08em;
+  color: #8a5a00; background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 5px; padding: 2px 6px; line-height: 1.4;
+}
+
+.resume-panel-addr { font-weight: 650; color: inherit; text-decoration: none; }
+.resume-panel-addr:hover { text-decoration: underline; }
+.resume-panel-state { grid-row: span 2; align-self: center; font-variant-numeric: tabular-nums; }
+.resume-panel-file { grid-column: 1; opacity: 0.75; overflow-wrap: anywhere; }
+/* Per regel afmaken, zodat één mislukt bestand niet vraagt om de hele reeks
+   opnieuw te doen. Raakt de rij van de voortgangstekst, dus zelfde kolom. */
+.resume-panel-retry {
+  grid-row: span 2; align-self: center; flex: none;
+  border: 1px solid rgba(255,255,255,0.5); border-radius: 8px;
+  background: rgba(255,255,255,0.14); color: inherit;
+  font: inherit; font-size: 12px; font-weight: 650;
+  padding: 5px 10px; cursor: pointer; white-space: nowrap;
+}
+.resume-panel-retry:hover:not(:disabled) { background: rgba(255,255,255,0.26); }
+.resume-panel-retry:disabled { opacity: 0.6; cursor: default; }
+.resume-panel-hint { margin: 10px 0 0; font-size: 12.5px; opacity: 0.9; }
+.resume-panel-hint a { color: inherit; text-decoration: underline; }
+.resume-panel-hint { display: grid; gap: 7px; justify-items: start; }
+.resume-panel-hint.is-plain { display: block; }
+.resume-panel-all { width: 100%; justify-content: center; }
+
+/* ---------- Dashboard: drie kolommen ----------
+   Links waar je nog iets mee moet, midden de dag zelf, rechts wat de
+   ochtendcontrole opmerkte. De aandachtspunten stonden eerder als banner
+   bovenin de afsprakenkaart en duwden de afspraken naar beneden.
+   Op een smal scherm (telefoon in het veld) stapelt alles: eerst het
+   openstaande werk, dan de afspraken, dan de signalen. */
+.dash-grid { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
+@media (min-width: 1080px) {
+  /* Even breed: openstaand werk is niet minder belangrijk dan de dag zelf,
+     en met een smalle kolom ernaast las het als een terzijde. */
+  .dash-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  /* Meescrollen tot hij past, daarna blijft de lijst in beeld staan. */
+  .dash-uploads { position: sticky; top: 12px; }
+}
+/* Aandachtspunten staan pagina-breed onder het raster. */
+.dash-signals { margin-top: 12px; }
+.dash-agenda { min-width: 0; }
+
+.dash-card {
+  background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r);
+  padding: 16px 16px 14px;
+}
+.dash-card.is-warn { border-color: #e8d3ac; background: var(--warn-wash); }
+.dash-card.is-bad { border-color: #f3c9cd; background: var(--bad-wash); }
+.dash-card-head { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
+.dash-card-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.dash-card-head .section-count { margin-left: auto; }
+.dash-empty { margin: 0; font-size: 13px; color: var(--ink-faint); line-height: 1.5; }
+
+/* ---- Aandachtspunten uit de ochtendcontrole ---- */
+.sig-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.sig-list li { display: flex; gap: 9px; align-items: flex-start; }
+.sig-list li.is-bad { color: var(--bad); }
+.sig-list li.is-warn { color: var(--warn); }
+.sig-icon { flex: none; margin-top: 1px; }
+.sig-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sig-text strong { font-size: 13px; font-weight: 700; }
+.sig-text span { font-size: 12.5px; color: var(--ink-soft); line-height: 1.45; overflow-wrap: anywhere; }
+.sig-time { margin: 12px 0 0; font-size: 11.5px; color: var(--ink-faint); }
+
+/* ---- Openstaand werk ----
+   Elke regel draagt zijn status: een gekleurde rand links, een label
+   rechtsboven en een bijpassende telling in de kop. Zonder dat zag elke regel
+   er hetzelfde uit en moest je de zin eronder lezen om te weten of iets liep,
+   vastlag, of alleen nog afgemaakt moest worden. */
+.up-telling { margin-left: auto; display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.up-telling-item { font-size: 11.5px; font-weight: 650; color: var(--ink-faint); }
+.up-telling-item.is-bezig { color: var(--accent-text); }
+.up-telling-item.is-mislukt { color: var(--bad); }
+
+.up-leeg { display: flex; gap: 10px; align-items: flex-start; }
+.up-leeg-mark {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  background: var(--ok-wash); color: var(--ok);
+}
+.up-leeg p { margin: 0; font-size: 13px; color: var(--ink-faint); line-height: 1.5; }
+
+.up-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.up-item {
+  position: relative; overflow: hidden;
+  border: 1px solid var(--rule); border-radius: var(--r-sm);
+  padding: 12px 14px 12px 17px; background: var(--paper);
+  display: flex; flex-direction: column; gap: 9px;
+}
+/* Kleurstreep links: op ooghoogte te scannen zonder te lezen. */
+.up-item::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  background: var(--rule-strong);
+}
+.up-item.is-bezig::before { background: var(--accent); }
+.up-item.is-mislukt::before { background: var(--bad); }
+.up-item.is-mislukt { border-color: #f3c9cd; }
+.up-item.is-open::before { background: var(--warn); }
+
+.up-hit { display: flex; flex-direction: column; gap: 4px; text-decoration: none; color: inherit; }
+.up-hit:hover .up-addr { text-decoration: underline; }
+.up-top { display: flex; align-items: center; gap: 8px; }
+.up-status {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px;
+  background: var(--inset-2); color: var(--ink-soft);
+}
+.up-status.is-bezig { background: var(--accent-wash); color: var(--accent-text); }
+.up-status.is-mislukt { background: var(--bad-wash); color: var(--bad); }
+.up-status.is-open { background: var(--warn-wash); color: var(--warn); }
+.up-tijd { font-size: 11.5px; color: var(--ink-faint); }
+.up-pct { margin-left: auto; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* Het adres is waar je op mikt, dus dat is de grootste regel. */
+.up-addr { font-size: 15px; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere; }
+
+.up-redenen { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.up-redenen li { font-size: 12.5px; color: var(--ink-faint); line-height: 1.4; }
+.up-redenen li::before { content: "· "; }
+
+.up-voet { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.up-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Producttags zijn meteen de weg naar díe flow. */
+.up-kind {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 999px; text-decoration: none;
+  background: var(--accent-wash); color: var(--accent-text);
+}
+.up-kind:hover { background: var(--accent); color: #fff; }
+.up-kind.is-nen { background: #eaf0fa; color: #1f4e8c; }
+.up-kind.is-nen:hover { background: #1f4e8c; color: #fff; }
+.up-kind.is-media { background: #f3ecfa; color: #6b3fa0; }
+.up-kind.is-media:hover { background: #6b3fa0; color: #fff; }
+.up-user {
+  font-size: 10.5px; font-weight: 650; padding: 3px 9px; border-radius: 999px;
+  background: var(--inset-2); color: var(--ink-soft);
+}
+
+.up-bar { display: block; height: 6px; border-radius: 999px; background: var(--inset-2); overflow: hidden; }
+.up-bar-fill {
+  display: block; height: 100%; border-radius: 999px; background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+/* Waarschuwingsdriehoek met de velden die nog ingevuld moeten worden. */
+.up-todo {
+  display: flex; gap: 8px; align-items: flex-start; text-decoration: none;
+  border: 1px dashed #e8d3ac; background: var(--warn-wash); color: var(--warn);
+  border-radius: var(--r-sm); padding: 8px 10px;
+}
+.up-todo:hover { border-style: solid; }
+.up-todo-icon { flex: none; margin-top: 1px; }
+.up-todo-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.up-todo-text strong { font-size: 12.5px; font-weight: 700; }
+.up-todo-codes {
+  font-size: 11.5px; font-weight: 650; opacity: 0.85; overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.up-retry {
+  margin-left: auto; border: 1px solid var(--accent); background: var(--accent);
+  color: #fff; font: inherit; font-size: 12.5px; font-weight: 650;
+  padding: 6px 12px; border-radius: 999px; cursor: pointer;
+}
+.up-retry:disabled { opacity: 0.6; cursor: default; }
+.up-lost { font-size: 12px; color: var(--bad); line-height: 1.4; }
+
+/* ---------- Upload media ---------- */
+/* Waar je in de flow bent: adres → foto's → video → 360. Geen klikbare tabs:
+   de volgorde is de bedoeling, en met losse tabs sla je zonder het te merken
+   een soort over. */
+.media-steps {
+  list-style: none; display: flex; flex-wrap: wrap; gap: 8px;
+  margin: 0 0 16px; padding: 0; counter-reset: stap;
+}
+.media-step {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--rule); border-radius: 999px; padding: 6px 13px 6px 10px;
+  font-size: 13px; font-weight: 600; color: var(--ink-faint); background: var(--paper);
+}
+.media-step.is-now { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-text); }
+.media-step.is-done { border-color: var(--rule-strong); color: var(--ink-soft); }
+.media-step-nr {
+  flex: none; width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 11px; font-weight: 700;
+  background: var(--inset-2); color: var(--ink-soft);
+}
+.media-step.is-now .media-step-nr { background: var(--accent); color: #fff; }
+.media-step.is-done .media-step-nr { background: var(--ok-wash); color: var(--ok); }
+.media-step-label { display: inline-flex; align-items: center; gap: 6px; }
+.media-step-count {
+  min-width: 18px; text-align: center; border-radius: 999px; padding: 1px 6px;
+  background: var(--accent); color: #fff; font-size: 11px; font-variant-numeric: tabular-nums;
+}
+
+/* Uploadknop in Dropbox-vorm. Dropbox-blauw (#0061fe) haalt met witte tekst
+   5,1:1 — ruim boven AA — en onderscheidt zich van de groene "Volgende"
+   ernaast, zodat uploaden en doorgaan niet op elkaar lijken. */
+.btn-dropbox {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  min-height: 68px; padding: 12px 16px; text-align: left;
+  border: 0; border-radius: var(--r-sm); cursor: pointer;
+  background: #0061fe; color: #fff; font: inherit;
+}
+.btn-dropbox:hover { background: #0050d0; }
+.btn-dropbox:active { background: #0046b8; }
+.btn-dropbox:disabled { opacity: 0.6; cursor: default; }
+.btn-dropbox-mark {
+  flex: none; width: 40px; height: 40px; border-radius: 10px;
+  display: grid; place-items: center;
+  background: rgba(255, 255, 255, 0.16);
+}
+.btn-dropbox-tekst { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.btn-dropbox-tekst strong { font-size: 16px; font-weight: 650; }
+/* De bestemming staat op de knop zelf: je ziet vóór het tikken waar de
+   bestanden heen gaan, i.p.v. dat achteraf in de balk te moeten nalezen. */
+.btn-dropbox-doel {
+  font-size: 12px; opacity: 0.85; font-family: var(--mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.btn-dropbox-actie {
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 14px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18); font-size: 13.5px; font-weight: 700;
+}
+.btn-dropbox:hover .btn-dropbox-actie { background: rgba(255, 255, 255, 0.28); }
+.media-hint { margin: 10px 0 0; font-size: 13px; color: var(--ink-faint); line-height: 1.45; }
+.media-files { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.media-files li {
+  display: flex; gap: 10px; align-items: center; font-size: 13px;
+  color: var(--ink-soft); padding: 5px 8px; border-radius: 7px;
+}
+.media-files li.is-error { color: var(--bad); }
+/* Afgerond staat groen met een vinkje ervoor: in een lange lijst zie je zo
+   in één blik hoeveel er al binnen is en waar het nog loopt. */
+.media-files li.is-done { color: var(--ok); background: var(--ok-wash); }
+.media-files li.is-done .media-file-state { font-weight: 700; }
+.media-file-check { margin-right: 5px; }
+.media-file-name { flex: 1; overflow-wrap: anywhere; }
+.media-file-state { flex: none; font-variant-numeric: tabular-nums; font-weight: 650; }
+
+/* Lopende media-opnames op de adresstap: de wachtrij loopt door als je
+   wegklikt, dus dit is de weg terug — zonder herladen, alles komt uit de
+   lokale opslag. */
+.media-lopend { margin: 0 0 16px; }
+.media-lopend-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.media-lopend-list li { display: flex; align-items: flex-start; gap: 6px; }
+.media-lopend-knop {
+  flex: 1; min-width: 0; text-align: left; cursor: pointer;
+  border: 1px solid var(--rule); border-radius: var(--r-sm);
+  background: var(--paper); font: inherit; color: inherit;
+  padding: 11px 13px; display: flex; flex-direction: column; gap: 5px;
+}
+.media-lopend-knop:hover { border-color: var(--rule-strong); }
+.media-lopend-top { display: flex; align-items: center; gap: 8px; }
+.media-lopend-pct { margin-left: auto; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.media-lopend-adres { font-size: 14.5px; font-weight: 650; overflow-wrap: anywhere; }
+.media-lopend-meta { font-size: 12px; color: var(--ink-faint); }
+.media-lopend-weg {
+  flex: none; border: 0; background: transparent; color: var(--ink-faint);
+  font: inherit; font-size: 15px; line-height: 1; padding: 8px 6px; cursor: pointer;
+}
+.media-lopend-weg:hover { color: var(--ink); }
+
+/* Voortgang per onderdeel, direct onder de Dropbox-balk in de vaste kop.
+   Zonder dit leek een video-upload gestopt zodra je doorklikte naar 360. */
+.mediabalk {
+  background: var(--paper); border: 1px solid var(--rule); border-top: 0;
+  border-radius: 0 0 var(--r) var(--r); padding: 8px 14px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.mediabalk-rij { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.mediabalk-rij.is-bad { color: var(--bad); }
+.mediabalk-naam { font-weight: 650; min-width: 74px; }
+.mediabalk-staat { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.mediabalk-rij.is-bad .mediabalk-staat { color: var(--bad); }
+.mediabalk-bar {
+  flex: 1; min-width: 60px; height: 5px; border-radius: 999px;
+  background: var(--inset-2); overflow: hidden;
+}
+.mediabalk-bar-fill { display: block; height: 100%; background: var(--accent); transition: width 0.25s ease; }
+.mediabalk-pct { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+
+/* Waarschuwingsdriehoek in de statuslijst van de zijbalk: een gedoofd bolletje
+   leest als "staat uit", terwijl dit betekent dat er iets moet gebeuren. */
+.svc-waarschuwing { flex: none; display: grid; place-items: center; width: 13px; color: #ff8a94; }
+
+/* Link onderaan een dashboardkaart. Een volle knop zou concurreren met de
+   opnames erboven — dit is een uitstapje, geen hoofdhandeling — maar als kale
+   tekstlink was hij ook niet als knop te herkennen. Vandaar een rustig vlak
+   dat pas bij aanraken kleurt. */
+.dash-meer {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; margin-top: 14px; min-height: 42px; padding: 0 16px;
+  border: 1px solid var(--rule); border-radius: 12px;
+  background: var(--inset);
+  font-size: 13.5px; font-weight: 650; color: var(--ink-soft);
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.dash-meer:hover {
+  background: var(--accent-wash); border-color: var(--accent); color: var(--accent-text);
+}
+.dash-meer svg { flex: none; transition: transform 0.15s ease; }
+.dash-meer:hover svg { transform: translateX(3px); }
+
+/* Per onderdeel in de lijst met openstaande opnames: welk deel nog loopt,
+   zonder de hele bestandslijst uit te klappen. */
+.media-lopend-delen { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.media-deel {
+  font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  background: var(--inset-2); color: var(--ink-soft);
+}
+.media-deel b { font-weight: 700; font-variant-numeric: tabular-nums; }
+.media-deel.is-bezig { background: var(--accent-wash); color: var(--accent-text); }
+.media-deel.is-klaar { background: var(--ok-wash); color: var(--ok); }
+.media-deel.is-bad { background: var(--bad-wash); color: var(--bad); }
+
+/* Mailadres per gebruiker: veld en opslaanknop op één regel. */
+.user-card-mail { display: flex; align-items: flex-end; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.user-card-mail .field { flex: 1; min-width: 200px; }
+
+/* Verwerking bij Mediatask, ná het versturen. Bewust een blok met uitleg en
+   geen regel in de stappenlijst: die lijst gaat over wat de app doet, dit gaat
+   over wachten waar je niets aan hoeft te doen. */
+.verwerk-blok {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin-top: 12px; padding: 12px 13px;
+  background: var(--inset); border: 1px solid var(--rule); border-radius: 12px;
+  font-size: 13px; line-height: 1.45;
+}
+.verwerk-blok.is-klaar { background: var(--accent-wash); border-color: var(--accent); }
+.verwerk-blok > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.verwerk-blok b { font-weight: 650; color: var(--ink); }
+.verwerk-blok span span { color: var(--ink-faint); font-size: 12px; }
+.verwerk-blok .spinner, .verwerk-blok .upload-check { flex: none; margin-top: 2px; }
+
+/* Kerncijfers boven de opnamelijst: doorstroom in één blik. */
+.cijfers {
+  display: grid; gap: 10px; margin: 0 0 18px; padding: 0;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+.cijfers > div {
+  background: var(--inset); border: 1px solid var(--rule);
+  border-radius: var(--r-sm); padding: 12px 14px;
+}
+.cijfers > div.is-warn { background: var(--warn-wash); border-color: #e8d3ac; }
+.cijfers > div.is-bad { background: var(--bad-wash); border-color: #f3c9cd; }
+.cijfers dt { font-size: 12px; color: var(--ink-faint); margin: 0 0 4px; }
+.cijfers > div.is-warn dt { color: var(--warn); }
+.cijfers > div.is-bad dt { color: var(--bad); }
+.cijfers dd { margin: 0; font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Scans die bij Mediatask in behandeling zijn of zijn afgekeurd. */
+.scanstatus-lijst { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.scanstatus-lijst li { display: flex; align-items: center; gap: 11px; font-size: 13.5px; }
+.scanstatus-icoon { flex: none; display: grid; place-items: center; width: 18px; color: var(--ink-faint); }
+.scanstatus-lijst li.is-bad .scanstatus-icoon { color: var(--bad); }
+.scanstatus-tekst { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.scanstatus-tekst b { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scanstatus-tekst span { font-size: 12px; color: var(--ink-faint); }
+.scanstatus-lijst .btn { flex: none; min-height: 36px; font-size: 12.5px; padding: 0 14px; }
+.scanstatus-lijst li.is-goed .scanstatus-icoon { color: #1c7a41; font-weight: 700; }

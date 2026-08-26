@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Lint heeft een aantal pre-existing meldingen door de app heen (een
+      # strengere hooks-regel die met Next 16 is meegekomen) — nog niet
+      # blokkerend gemaakt zodat CI niet meteen roodstaat; wel zichtbaar in
+      # de workflow-log als aandachtspunt voor een aparte opschoonronde.
+      - run: npm run lint
+        continue-on-error: true
+      - run: npm test
+      - run: npm run build
