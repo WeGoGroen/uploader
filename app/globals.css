@@ -207,12 +207,17 @@ body {
   flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* Terughoudend: een bijschrift, geen tweede knop. Kleine letters, geen kader
-   en geen achtergrond — het mag opvallen zonder de naam te overstemmen. */
-.nav-upload-beta {
-  flex: none; font-size: 9.5px; font-weight: 650; letter-spacing: 0.02em;
-  color: #e8a765; opacity: 0.9;
+/* Een label, geen tweede knop: een klein kader met een wash eromheen leest
+   als "status van dit onderdeel" i.p.v. als iets aanklikbaars. Twee soorten,
+   want ze zeggen iets anders — bèta is "werkt, maar let op", binnenkort is
+   "hier kun je nog niets". */
+.nav-upload-tag {
+  flex: none; font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; line-height: 1;
+  padding: 3px 6px; border-radius: 5px; border: 1px solid transparent;
 }
+.nav-upload-tag.is-beta { color: #e8a765; background: rgba(232, 167, 101, 0.14); border-color: rgba(232, 167, 101, 0.34); }
+.nav-upload-tag.is-binnenkort { color: var(--side-faint); background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.18); }
 .nav-upload-teller {
   flex: none; min-width: 22px; height: 22px; padding: 0 6px;
   display: grid; place-items: center; border-radius: 999px;
@@ -1820,3 +1825,56 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
 .scanstatus-tekst span { font-size: 12px; color: var(--ink-faint); }
 .scanstatus-lijst .btn { flex: none; min-height: 36px; font-size: 12.5px; padding: 0 14px; }
 .scanstatus-lijst li.is-goed .scanstatus-icoon { color: #1c7a41; font-weight: 700; }
+
+/* ---------- Instellingen ---------- */
+/* Twee losse blokken in plaats van één kaart met alles erin: storingen en
+   koppelingen zijn twee vragen ("wat is er mis?" en "waar regel ik het?") en
+   die horen visueel uit elkaar te liggen. */
+.set-page { display: flex; flex-direction: column; gap: 18px; }
+
+.set-hero {
+  background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r);
+  padding: 24px 24px 22px;
+  display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 18px;
+}
+.set-hero-tekst { min-width: 0; }
+.set-hero h1 { margin: 0 0 8px; font-size: 26px; letter-spacing: -0.02em; }
+
+/* De tellers zijn de samenvatting van de pagina; ze staan naast de titel en
+   niet eronder, zodat ze in één oogopslag mee te nemen zijn. Een teller op
+   nul blijft staan maar dooft — verdwijnen zou het beeld elke keer laten
+   verspringen. */
+.set-tellers { display: flex; flex-wrap: wrap; gap: 8px; }
+.set-teller {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 7px 12px; border-radius: 999px;
+  border: 1px solid var(--rule); background: var(--inset);
+  font-size: 13px; color: var(--ink-soft); white-space: nowrap;
+}
+.set-teller b { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+.set-teller.is-ok { background: var(--accent-wash); border-color: transparent; }
+.set-teller.is-ok b { color: var(--accent-text); }
+.set-teller.is-bad { background: var(--bad-wash); border-color: #f3c9cd; }
+.set-teller.is-bad b { color: var(--bad); }
+.set-teller.is-off { background: var(--warn-wash); border-color: #e8d3ac; }
+.set-teller.is-leeg { opacity: 0.55; }
+
+.set-sectie {
+  background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r);
+  padding: 22px 24px 24px;
+}
+.set-sectie-head {
+  display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between;
+  gap: 14px; margin: 0 0 16px;
+}
+.set-sectie-head h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.015em; }
+.set-sectie-uitleg { margin: 5px 0 0; font-size: 14px; color: var(--ink-soft); max-width: 52ch; line-height: 1.5; }
+
+/* Geen storingen is ook een uitkomst, en die verdient een regel — een leeg
+   vlak laat je twijfelen of de controle wel gedraaid heeft. */
+.set-rustig {
+  display: flex; align-items: center; gap: 9px;
+  padding: 14px 16px; border-radius: 12px;
+  background: var(--accent-wash); color: var(--accent-text);
+  font-size: 14px; font-weight: 550;
+}

@@ -97,13 +97,14 @@ function NavUpload({
   label,
   actief,
   bezig,
-  beta = false,
+  tag,
 }: {
   href: string;
   label: string;
   actief: boolean;
   bezig: number;
-  beta?: boolean;
+  /** Bijschrift achter de naam: "bèta" of "binnenkort". */
+  tag?: { woord: string; soort: "beta" | "binnenkort" };
 }) {
   return (
     <a href={href} className="nav-upload" aria-current={actief ? "true" : undefined}>
@@ -115,7 +116,7 @@ function NavUpload({
       </span>
       <span className="nav-upload-tekst">
         {label}
-        {beta && <span className="nav-upload-beta">bèta</span>}
+        {tag && <span className={`nav-upload-tag is-${tag.soort}`}>{tag.woord}</span>}
       </span>
       {bezig > 0 && (
         <span className="nav-upload-teller" title={`${bezig} ${bezig === 1 ? "project" : "projecten"} aan het uploaden`}>
@@ -244,14 +245,14 @@ export default function Sidebar() {
           label="NEN2580"
           actief={pathname === "/nen"}
           bezig={bezigNen}
-          beta
+          tag={{ woord: "bèta", soort: "beta" }}
         />
         <NavUpload
           href="/media"
           label="Media"
           actief={pathname.startsWith("/media")}
           bezig={bezigMedia}
-          beta
+          tag={{ woord: "binnenkort", soort: "binnenkort" }}
         />
       </nav>
 
@@ -299,7 +300,7 @@ export default function Sidebar() {
               />
             </svg>
           </span>
-          Koppelingen
+          Instellingen
         </a>
       </div>
 

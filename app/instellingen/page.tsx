@@ -536,6 +536,114 @@ function MediataskCard({ status, onSaved }: { status: ConnectionStatus; onSaved:
   );
 }
 
+interface Controle {
+  naam: string;
+  ok: boolean;
+  niveau?: "ok" | "let op" | "fout";
+  detail: string;
+}
+
+interface Gezondheid {
+  tijdstip: string;
+  allesGoed?: boolean;
+  controles: Controle[];
+}
+
+/**
+ * De storingen stonden op het dashboard, onder de afspraken van vandaag. Daar
+ * waren ze op het verkeerde moment in beeld: wie 's ochtends zijn route
+ * bekijkt gaat geen koppeling repareren, en wie een storing zoekt kijkt hier.
+ * Naast de koppelingen zelf staan ze bovendien in hun context — de melding en
+ * de knop om het recht te zetten op één pagina.
+ */
+function Storingen() {
+  const [rapport, setRapport] = useState<Gezondheid | null>(null);
+  const [bezig, setBezig] = useState(false);
+  const [fout, setFout] = useState<string | null>(null);
+
+  // Eerst de laatste uitslag: die staat klaar en is er meteen. Een verse
+  // controle draait alle diensten langs en duurt seconden — dat is een keuze
+  // van de gebruiker, geen wachttijd bij het openen van de pagina.
+  useEffect(() => {
+    fetch("/api/health/laatste", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setRapport(d))
+      .catch(() => {});
+  }, []);
+
+  const nuControleren = async () => {
+    setBezig(true);
+    setFout(null);
+    try {
+      const res = await fetch("/api/health", { cache: "no-store" });
+      if (!res.ok) throw new Error("controle mislukt");
+      setRapport(await res.json());
+    } catch {
+      setFout("De controle kon niet worden uitgevoerd.");
+    } finally {
+      setBezig(false);
+    }
+  };
+
+  const storingen = rapport?.controles.filter((c) => !c.ok) ?? [];
+  const aandacht = rapport?.controles.filter((c) => c.ok && c.niveau === "let op") ?? [];
+  const alles = [...storingen, ...aandacht];
+
+  return (
+    <section className="set-sectie">
+      <div className="set-sectie-head">
+        <div>
+          <h2>Storingen</h2>
+          <p className="set-sectie-uitleg">
+            Wat de automatische controle als laatste zag. Alleen wat aandacht vraagt staat hier.
+          </p>
+        </div>
+        <button className="btn-refresh" onClick={nuControleren} disabled={bezig}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={bezig ? "spin" : undefined}>
+            <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {bezig ? "Controleren…" : "Nu controleren"}
+        </button>
+      </div>
+
+      {fout && <p className="conn-err">{fout}</p>}
+
+      {!rapport && !fout && <p className="note" style={{ padding: 0 }}>Nog geen controle gedraaid.</p>}
+
+      {rapport && alles.length === 0 && (
+        <div className="set-rustig">
+          <span className="dot is-ok" />
+          Alles in orde — geen storingen gevonden.
+        </div>
+      )}
+
+      {alles.length > 0 && (
+        <ul className="sig-list">
+          {alles.map((c) => (
+            <li key={c.naam} className={c.ok ? "is-warn" : "is-bad"}>
+              <span className="sig-icon" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 1.8 15 14H1L8 1.8Z" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                  <path d="M8 6.2v3.1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                  <circle cx="8" cy="11.5" r="0.9" fill="currentColor" />
+                </svg>
+              </span>
+              <span className="sig-text">
+                <strong>{c.naam}</strong>
+                <span>{c.detail}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {rapport && (
+        <p className="sig-time">Gecontroleerd op {new Date(rapport.tijdstip).toLocaleString("nl-NL")}</p>
+      )}
+    </section>
+  );
+}
+
 export default function Instellingen() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -565,73 +673,68 @@ export default function Instellingen() {
   return (
     <>
       <header className="topline">
-        <span className="eyebrow">Koppelingen</span>
+        <span className="eyebrow">Instellingen</span>
       </header>
 
-      <div className="pad" style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}>
-        <div className="settings-head">
-          <div>
-            <h1>Koppelingen</h1>
+      {/* Twee blokken onder elkaar in plaats van één lange kaart: eerst wat er
+          mis is, dan waar je het regelt. De samenvatting staat in de kop, want
+          dat is het antwoord op de vraag waarmee je hier binnenkomt. */}
+      <div className="set-page">
+        <div className="set-hero">
+          <div className="set-hero-tekst">
+            <h1>Instellingen</h1>
             <p className="lede">
-              Live status van de diensten waar de app op leunt. Alles staat centraal ingesteld —
-              inloggen doe je één keer, daarna werkt het voor het hele team.
+              Storingen en koppelingen op één plek. Alles staat centraal ingesteld — inloggen doe
+              je één keer, daarna werkt het voor het hele team.
             </p>
           </div>
-          <button className="btn-refresh" onClick={load} disabled={loading}>
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden="true"
-              className={loading ? "spin" : undefined}
-            >
-              <path
-                d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            {loading ? "Verversen…" : "Verversen"}
-          </button>
+          {status && (
+            <div className="set-tellers">
+              <span className="set-teller is-ok">
+                <b>{okCount}</b> in orde
+              </span>
+              <span className={`set-teller${problems > 0 ? " is-bad" : " is-leeg"}`}>
+                <b>{problems}</b> met een probleem
+              </span>
+              <span className={`set-teller${missing > 0 ? " is-off" : " is-leeg"}`}>
+                <b>{missing}</b> niet ingesteld
+              </span>
+            </div>
+          )}
         </div>
 
-        {status && (
-          <div className="conn-summary">
-            <span className="conn-summary-item">
-              <span className="dot is-ok" />
-              {okCount} in orde
-            </span>
-            {problems > 0 && (
-              <span className="conn-summary-item">
-                <span className="dot is-bad" />
-                {problems} met een probleem
-              </span>
-            )}
-            {missing > 0 && (
-              <span className="conn-summary-item">
-                <span className="dot is-off" />
-                {missing} nog niet ingesteld
-              </span>
-            )}
-          </div>
-        )}
+        <Storingen />
 
-        {loading && !status && <p className="note">Status controleren…</p>}
-
-        {status && (
-          <div className="conn-grid">
-            <SharePointCard status={status.sharepoint} onSaved={load} />
-            <DropboxCard status={status.dropbox} />
-            <ClickUpCard status={status.clickup} />
-            <GoogleCard status={status.google} />
-            <MediataskCard status={status.mediatask} onSaved={load} />
-            <BagCard status={status.bag} />
-            <StreetViewCard status={status.streetview} />
+        <section className="set-sectie">
+          <div className="set-sectie-head">
+            <div>
+              <h2>Koppelingen</h2>
+              <p className="set-sectie-uitleg">
+                Live status van de diensten waar de app op leunt.
+              </p>
+            </div>
+            <button className="btn-refresh" onClick={load} disabled={loading}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={loading ? "spin" : undefined}>
+                <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {loading ? "Verversen…" : "Verversen"}
+            </button>
           </div>
-        )}
+
+          {loading && !status && <p className="note" style={{ padding: 0 }}>Status controleren…</p>}
+
+          {status && (
+            <div className="conn-grid">
+              <SharePointCard status={status.sharepoint} onSaved={load} />
+              <DropboxCard status={status.dropbox} />
+              <ClickUpCard status={status.clickup} />
+              <GoogleCard status={status.google} />
+              <MediataskCard status={status.mediatask} onSaved={load} />
+              <BagCard status={status.bag} />
+              <StreetViewCard status={status.streetview} />
+            </div>
+          )}
+        </section>
       </div>
     </>
   );

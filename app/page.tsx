@@ -88,12 +88,6 @@ export default function Dashboard() {
   // Handmatig gekozen alternatief per afspraak — de actieknoppen gaan dan
   // met dát adres verder i.p.v. met het niet-bestaande agenda-adres.
   const [chosenAddress, setChosenAddress] = useState<Record<string, string>>({});
-  // Uitslag van de ochtendcontrole. Alleen tonen als er iets mis is — een
-  // groen vinkje elke dag wordt toch weggekeken.
-  const [gezondheid, setGezondheid] = useState<{
-    tijdstip: string;
-    controles: { naam: string; ok: boolean; niveau?: string; detail: string }[];
-  } | null>(null);
 
   const load = useCallback(async () => {
     setCalendarError(null);
@@ -140,17 +134,6 @@ export default function Dashboard() {
     load().finally(() => setLoading(false));
   }, [load]);
 
-  useEffect(() => {
-    fetch("/api/health/laatste", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        // Ook tonen bij aandachtspunten (bv. een afspraak zonder adres) —
-        // dat is precies wat je 's ochtends nog wilt rechtzetten.
-        if (d && (d.allesGoed === false || d.controles?.some((c: { niveau?: string }) => c.niveau === "let op")))
-          setGezondheid(d);
-      })
-      .catch(() => {});
-  }, []);
 
   // Controleer per afspraak of het adres in de BAG bestaat — een typefout of
   // niet-bestaand adres valt zo meteen op in de lijst, i.p.v. pas nadat
@@ -209,53 +192,6 @@ export default function Dashboard() {
     return clickupTaskNames.some((name) => sameAddress(name, street));
   }
 
-  // De ochtendcontrole staat in een eigen kolom. Als banner bovenin de
-  // afsprakenkaart duwde hij de afspraken naar beneden en werd hij bij een
-  // lange lijst juist weggekeken — terwijl het gaat om dingen die je vóór
-  // vertrek wilt weten.
-  const aandachtspunten = gezondheid
-    ? (() => {
-        const storingen = gezondheid.controles.filter((c) => !c.ok);
-        const aandacht = gezondheid.controles.filter((c) => c.ok && c.niveau === "let op");
-        const alles = [...storingen, ...aandacht];
-        return (
-          <div className={`dash-card${storingen.length > 0 ? " is-bad" : " is-warn"}`}>
-            <div className="dash-card-head">
-              <h2>{storingen.length > 0 ? "Storing" : "Aandachtspunten"}</h2>
-              <span className="section-count">{alles.length}</span>
-            </div>
-            <ul className="sig-list">
-              {alles.map((c) => (
-                <li key={c.naam} className={c.ok ? "is-warn" : "is-bad"}>
-                  <span className="sig-icon" aria-hidden="true">
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-                      <path
-                        d="M8 1.8 15 14H1L8 1.8Z"
-                        fill="currentColor"
-                        fillOpacity="0.16"
-                        stroke="currentColor"
-                        strokeWidth="1.4"
-                        strokeLinejoin="round"
-                      />
-                      <path d="M8 6.2v3.1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                      <circle cx="8" cy="11.5" r="0.9" fill="currentColor" />
-                    </svg>
-                  </span>
-                  <span className="sig-text">
-                    <strong>{c.naam}</strong>
-                    <span>{c.detail}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <p className="sig-time">
-              Gecontroleerd op {new Date(gezondheid.tijdstip).toLocaleString("nl-NL")}
-            </p>
-          </div>
-        );
-      })()
-    : null;
-
   return (
     <>
       <header className="topline">
@@ -300,7 +236,7 @@ export default function Dashboard() {
           <p className="note" style={{ padding: 0 }}>
             ⚠ {calendarError}{" "}
             <a href="/instellingen" style={{ color: "var(--accent-text)" }}>
-              Naar Koppelingen
+              Naar Instellingen
             </a>
           </p>
         )}
@@ -461,14 +397,6 @@ export default function Dashboard() {
         </div>
 
       </div>
-
-      {/* Onderaan en pagina-breed: het is naslag bij de dag, geen alarm dat
-          bovenaan de afspraken hoort te staan. */}
-      {aandachtspunten && (
-        <section className="dash-signals" aria-label="Aandachtspunten">
-          {aandachtspunten}
-        </section>
-      )}
     </>
   );
 }
