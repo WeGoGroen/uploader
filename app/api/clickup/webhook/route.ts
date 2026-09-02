@@ -1,9 +1,7 @@
 import crypto from "node:crypto";
 import { NextResponse, after } from "next/server";
-import { createTaskComment, getTask, requireClickUpConfig } from "@/lib/clickup";
 import { getOptionalRedis } from "@/lib/redis";
-import { taskToAddress } from "@/lib/sharepoint-match";
-import { SyncError, syncSharePointFiles } from "@/lib/sharepoint-sync";
+import { overdrachtVoorTaak } from "@/lib/sharepoint-overdracht";
 
 /**
  * Ontvangt ClickUp-webhooks. Zodra een energielabel-taak op "klaar" gezet
@@ -112,54 +110,17 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true, actie: "opgestart" });
 }
 
+/**
+ * De overdracht zelf staat in lib/sharepoint-overdracht.ts, zodat de
+ * Energielabel AI Agent exact dezelfde handeling kan doen als deze webhook.
+ * Hier blijft alleen wat écht bij de webhook hoort: de blokkade vasthouden
+ * zolang het gelukt is, en vrijgeven zodra een nieuwe poging zinvol is.
+ */
 async function handleDone(taskId: string): Promise<void> {
-  const { token } = await requireClickUpConfig();
-  const task = await getTask(token, taskId);
+  const uitkomst = await overdrachtVoorTaak(taskId);
 
-  const address = taskToAddress(task);
-  if (!address) {
-    // Geen adres in het veld "A1 Adres:" en ook niet in de naam: dit is een
-    // gewone taak, geen opname. Stilzwijgend overslaan — daar hoort geen
-    // opmerking bij.
-    await releaseClaim(taskId);
-    return;
-  }
-
-  try {
-    const result = await syncSharePointFiles({
-      kind: "energielabel",
-      addressLine: address.addressLine,
-      woonplaats: address.woonplaats,
-      postcodeRegel: address.postcodeRegel,
-    });
-
-    const bolletje =
-      result.status === "compleet" ? "🟢" : result.status === "bezig" ? "🟠" : "🔴";
-
-    const lines = [
-      `${bolletje} ${result.copied.length} bestand${result.copied.length === 1 ? "" : "en"} opgehaald van SharePoint naar Dropbox: ${result.targetPaths.join(", ")}`,
-      result.copied.length ? result.copied.map((n) => `• ${n}`).join("\n") : null,
-      result.skipped.length ? `Overgeslagen (stond er al): ${result.skipped.join(", ")}` : null,
-      result.pending.length
-        ? `⏳ Nog onderweg bij Dropbox: ${result.pending.join(", ")}. De map blijft oranje tot dit is afgerond.`
-        : null,
-      result.failed.length
-        ? `⚠️ Mislukt: ${result.failed.map((f) => `${f.name} (${f.error})`).join("; ")}`
-        : null,
-    ].filter(Boolean);
-
-    await createTaskComment(token, taskId, lines.join("\n"));
-
-    // Blokkade alleen vasthouden als het écht af is. Bij een halve of mislukte
-    // overdracht moet een nieuwe poging meteen kunnen — anders zit de taak een
-    // kwartier op slot terwijl er juist iets rechtgezet moet worden.
-    if (result.status !== "compleet") await releaseClaim(taskId);
-  } catch (err) {
-    const message =
-      err instanceof SyncError
-        ? err.message
-        : `Ophalen van SharePoint is mislukt: ${err instanceof Error ? err.message : String(err)}`;
-    await createTaskComment(token, taskId, `⚠️ ${message} Haal de bestanden deze keer met de hand op.`);
-    await releaseClaim(taskId);
-  }
+  // Blokkade alleen vasthouden als het écht af is. Bij een halve of mislukte
+  // overdracht moet een nieuwe poging meteen kunnen — anders zit de taak een
+  // kwartier op slot terwijl er juist iets rechtgezet moet worden.
+  if (!uitkomst.ok) await releaseClaim(taskId);
 }
