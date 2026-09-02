@@ -513,6 +513,22 @@ export interface ClickUpTask {
 }
 
 /** Eén taak ophalen — gebruikt door de webhook, die alleen een task_id krijgt. */
+/**
+ * De workspace waar een taak in zit.
+ *
+ * Nodig voor de V3-attachments-API, die per workspace werkt. Vragen aan de
+ * taak zelf en niet aan het token: `getTeams()` geeft alle workspaces waar
+ * iemand lid van is, en de eerste daarvan hoeft de onze niet te zijn. Zit een
+ * medewerker ook in een andere workspace, dan ging het bestand naar een
+ * workspace waar dat veld niet bestaat — en dat antwoordt ClickUp met
+ * "404 Not Found or Authorized", precies de fout die de bijlages liet stranden
+ * terwijl de taak zelf gewoon werd aangemaakt.
+ */
+export async function getTaskTeamId(accessToken: string, taskId: string): Promise<string | null> {
+  const data = await clickupFetch<{ team_id?: string }>(accessToken, `/task/${taskId}`);
+  return data.team_id ? String(data.team_id) : null;
+}
+
 export async function getTask(accessToken: string, taskId: string): Promise<ClickUpTask> {
   const data = await clickupFetch<{
     id: string;

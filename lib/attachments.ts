@@ -1,4 +1,4 @@
-import { getListCustomFields, getTeams, setAttachmentFieldValue, uploadCustomFieldAttachment } from "@/lib/clickup";
+import { getListCustomFields, getTaskTeamId, getTeams, setAttachmentFieldValue, uploadCustomFieldAttachment } from "@/lib/clickup";
 import { downloadFile, getSharedAccessToken, listFolderFiles } from "@/lib/dropbox";
 import { DOCUMENT_FOLDER_MAP } from "@/lib/documents";
 
@@ -72,10 +72,24 @@ export async function attachOneDocument(
   if (!doc) throw new Error(`Onbekende documentcategorie: ${docKey}`);
 
   const [teamId, dropboxToken, allFields] = await Promise.all([
-    getTeams(clickupToken).then((teams) => {
-      if (!teams[0]) throw new Error("Geen ClickUp-workspace gevonden");
-      return teams[0].id;
-    }),
+    /*
+      De workspace komt van de taak, niet van het token.
+
+      Hiervoor stond hier teams[0]: de eerste workspace waar het token lid van
+      is. Dat werkt zolang iemand maar één workspace heeft, en breekt stil zodra
+      dat er twee zijn — dan gaat het bestand naar de verkeerde workspace en
+      antwoordt ClickUp "404 Not Found or Authorized". De taak zelf werd wél
+      aangemaakt (dat gaat via de lijst), dus het zag eruit als een probleem met
+      de bijlages terwijl het een probleem met de workspace was.
+    */
+    getTaskTeamId(clickupToken, taskId)
+      .catch(() => null)
+      .then(async (viaTaak) => {
+        if (viaTaak) return viaTaak;
+        const teams = await getTeams(clickupToken);
+        if (!teams[0]) throw new Error("Geen ClickUp-workspace gevonden");
+        return teams[0].id;
+      }),
     getSharedAccessToken(),
     getListCustomFields(clickupToken, listId),
   ]);

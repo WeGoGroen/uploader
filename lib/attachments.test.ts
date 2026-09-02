@@ -16,6 +16,8 @@ const uploadCustomFieldAttachment = vi.fn();
 const setAttachmentFieldValue = vi.fn();
 
 vi.mock("./clickup", () => ({
+  // De workspace komt van de taak; teams[0] is alleen nog de terugval.
+  getTaskTeamId: async () => "team-van-de-taak",
   getTeams: async () => [{ id: "team1" }],
   getListCustomFields: async () => [{ id: "veld-d5", name: "D5 Algemene foto's" }],
   uploadCustomFieldAttachment: (...a: unknown[]) => uploadCustomFieldAttachment(...a),
@@ -60,6 +62,23 @@ describe("attachOneDocument", () => {
 
     expect(r).toMatchObject({ fileCount: 3, gelukt: 3, mislukt: [], afgekapt: false, volgendeSkip: 3 });
     expect(geuploadeNamen()).toEqual(["foto-1.jpg", "foto-2.jpg", "foto-3.jpg"]);
+  });
+
+  it("uploads naar de workspace van de taak, niet naar de eerste van het token", async () => {
+    /*
+      Dit was de fout die de bijlages liet stranden: de workspace kwam van
+      getTeams()[0] — de eerste waar het token lid van is. Zit een medewerker
+      ook in een andere workspace, dan belandde het bestand daar en antwoordde
+      ClickUp "404 Not Found or Authorized", terwijl de taak zelf gewoon
+      aangemaakt werd.
+    */
+    listFolderFiles.mockResolvedValue(fotos(1));
+
+    await attachOneDocument("t", "lijst", "taak", "/map", "D5");
+
+    const workspaces = uploadCustomFieldAttachment.mock.calls.map((c) => c[1]);
+    expect(workspaces).toEqual(["team-van-de-taak"]);
+    expect(workspaces).not.toContain("team1");
   });
 
   it("resumes at skip instead of starting over", async () => {
