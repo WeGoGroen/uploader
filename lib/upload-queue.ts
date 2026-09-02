@@ -48,11 +48,21 @@ export interface UploadTask {
  * Parallelisme op gewicht i.p.v. op aantal bestanden. "3 bestanden tegelijk"
  * behandelde 60 foto's van 800KB hetzelfde als 3 video's van 100MB — de
  * uplink stond bij fotoseries grotendeels leeg. Een klein bestand weegt 1,
- * een groot bestand (dat zelf al in parallelle blokken gaat) weegt 3: binnen
- * het budget passen dus 6 foto's, of 2 grote bestanden, of een mengsel.
+ * een groot bestand (dat zelf al in parallelle blokken gaat) weegt 6: binnen
+ * het budget passen dus 12 foto's, of 2 grote bestanden, of een mengsel.
+ *
+ * Twaalf en niet zes, omdat een fotoserie in de praktijk met twintig tegelijk
+ * binnenkomt en elke foto vooral wáchttijd is: verbinding opzetten, versturen,
+ * antwoord afwachten. Die wachttijd loopt parallel, de bytes delen de uplink.
+ * Nog verder omhoog levert weinig meer op — dan is de uplink zelf vol en
+ * begint Dropbox bij te veel gelijktijdige verzoeken met 429 te antwoorden.
+ *
+ * Het gewicht van een groot bestand groeit mee (3 → 6), zodat er nog steeds
+ * hooguit twee video's tegelijk gaan. Die trekken de uplink met hun vier
+ * parallelle blokken al vol; er een derde naast zetten maakt alles trager.
  */
-const PARALLEL_BUDGET = 6;
-const GEWICHT_GROOT = 3;
+const PARALLEL_BUDGET = 12;
+const GEWICHT_GROOT = 6;
 // Boven deze grens accepteert een enkele Dropbox-upload het bestand niet meer
 // in één keer; dan valt de upload terug op de chunked server-route.
 const DIRECT_UPLOAD_MAX = 140 * 1024 * 1024;
@@ -91,7 +101,11 @@ let seq = 0;
 // en krijgen de uploadslots alleen bestanden die klaar zijn om te versturen.
 const compressPending: { task: UploadTask; file: File }[] = [];
 let compressing = 0;
-const COMPRESS_PARALLEL = 2;
+// Drie tegelijk: met twaalf uploadslots was verkleinen bij een serie van
+// twintig foto's de nieuwe flessenhals — de slots stonden te wachten op de
+// CPU. Hoger niet: elke verkleining houdt een gedecodeerde foto in het
+// geheugen, en dat is op een iPad de grens waar Safari tabbladen wegruimt.
+const COMPRESS_PARALLEL = 3;
 
 function emit() {
   // Nieuwe array-referentie: useSyncExternalStore vergelijkt op identiteit.
