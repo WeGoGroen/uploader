@@ -63,6 +63,32 @@ function houseNumber(a: { huisnummer: number; huisletter: string | null; huisnum
   return [a.huisnummer, a.huisletter ?? "", a.huisnummertoevoeging ? `-${a.huisnummertoevoeging}` : ""].join("");
 }
 
+/**
+ * Koppelt een (net aangemaakte) Mediatask-order aan het bestaande concept,
+ * zodat een tweede bezoek aan dit adres dezelfde order terugvindt i.p.v. een
+ * nieuwe aan te maken. Best-effort: de order is het echte werk, dit is de
+ * boekhouding erna.
+ */
+function koppelOrderAanConcept(
+  draft: DraftRecord,
+  orderId: number,
+  state: string
+): void {
+  void fetch("/api/drafts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: draft.id,
+      status: draft.status,
+      straatnaam: draft.straatnaam,
+      state: {
+        ...draft.state,
+        mediatask: { orderId, state, submittedAt: Date.now() },
+      },
+    }),
+  }).catch(() => {});
+}
+
 export default function UploadNen() {
   const router = useRouter();
   // ---------- Stap 1: adres zoeken — identiek aan de ClickUp-opnameflow ----------
@@ -362,6 +388,12 @@ export default function UploadNen() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [result, setResult] = useState<{ orderId: number; state: string } | null>(null);
   const [statusRefreshing, setStatusRefreshing] = useState(false);
+  // Voortgang van het aanmaken van de concept-order in de bevestigingspop-up.
+  // De order gaat tegenwoordig al bij "Ja, klopt" naar Mediatask, zodat de
+  // puntenwolken tijdens het uploaden alvast doorgestuurd kunnen worden —
+  // "fout" blokkeert niets: dan valt de flow terug op aanmaken bij het
+  // afronden, zoals voorheen.
+  const [orderSetup, setOrderSetup] = useState<"idle" | "bezig" | "fout">("idle");
 
   function resetMediataskState() {
     setDropboxFolder(null);
@@ -378,6 +410,7 @@ export default function UploadNen() {
     setAgencyEditMode(false);
     setResult(null);
     setSendError(null);
+    setOrderSetup("idle");
     setProductId("");
     setProductConfig({});
     setManualProductId("");
@@ -813,6 +846,82 @@ export default function UploadNen() {
     requestAnimationFrame(() => {
       document.getElementById("mediatask-order-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
+  }
+
+  /**
+   * "Ja, klopt" in de bevestigingspop-up: map klaarzetten, de order alvast
+   * als concept bij Mediatask aanmaken, en dan door naar de documenten.
+   *
+   * De order ontstond vroeger pas bij het afronden. Nu hij er meteen is, kan
+   * elke scan die bij Dropbox binnenkomt op de achtergrond direct door naar
+   * Mediatask — bij het afronden hangt hij er dan al. Lukt het aanmaken hier
+   * niet, dan gaat de flow gewoon door zonder ordernummer en ontstaat de
+   * order alsnog bij het afronden, zoals voorheen.
+   */
+  async function bevestigEnDoor() {
+    // Normaal staat de map er al (aangemaakt bij "Documenten uploaden"); is
+    // dat toen mislukt, dan hier nog één poging i.p.v. stil niets doen.
+    const folder = await ensureNenFolder();
+    if (!folder) return;
+
+    // Al een order voor dit adres (bv. uit een eerdere sessie)? Die
+    // hergebruiken — een tweede aanmaak zou een dubbele order opleveren.
+    let orderId = result?.orderId ?? null;
+    if (!orderId && finalProductId && finalPriorityId && finalAgencyId) {
+      setOrderSetup("bezig");
+      try {
+        const res = await fetch("/api/mediatask/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            draftOnly: true,
+            dropboxFolderPath: folder.path,
+            productId: Number(finalProductId),
+            priorityId: finalPriorityId,
+            agencyId: finalAgencyId,
+            productConfiguration: finalProductConfig,
+            city: mtCity,
+            street: mtStreet,
+            number: mtNumber,
+            postcode: mtPostcode,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          orderId = data.order.id as number;
+          setResult({ orderId, state: data.order.state });
+          setOrderSetup("idle");
+          if (existingDraft) koppelOrderAanConcept(existingDraft, orderId, data.order.state);
+        } else {
+          setOrderSetup("fout");
+        }
+      } catch {
+        setOrderSetup("fout");
+      }
+    }
+
+    setShowAgencyConfirm(false);
+    const addrTekst = `${address?.straatnaam ?? ""} ${address ? houseNumber(address) : ""}`.trim();
+    const params = new URLSearchParams();
+    params.set("path", folder.path);
+    params.set("dropboxUrl", folder.url);
+    params.set("addr", addrTekst);
+    if (finalProductId) params.set("productId", String(finalProductId));
+    if (finalPriorityId) params.set("priorityId", finalPriorityId);
+    if (finalAgencyId) params.set("agencyId", finalAgencyId);
+    params.set("config", JSON.stringify(finalProductConfig));
+    params.set("city", mtCity);
+    params.set("street", mtStreet);
+    params.set("number", mtNumber);
+    params.set("postcode", mtPostcode);
+    // Het ordernummer mee: daarmee stuurt de documentenpagina elke geslaagde
+    // Dropbox-upload uit Optimized direct door als puntenwolk.
+    if (orderId) params.set("orderId", String(orderId));
+    // Het concept meegeven, zodat de documentenpagina 'm na een
+    // geslaagde order kan afsluiten — anders blijft het adres
+    // eeuwig als openstaande opname in beeld staan.
+    if (existingDraft) params.set("draft", existingDraft.id);
+    router.push(`/nen/documenten?${params.toString()}`);
   }
 
   async function refreshStatus() {
@@ -1365,44 +1474,32 @@ export default function UploadNen() {
                   ?
                 </p>
 
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button type="button" className="btn btn-quiet" style={{ flex: 1 }} onClick={() => setAgencyEditMode(true)}>
-                    Aanpassen
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    style={{ flex: 1 }}
-                    onClick={async () => {
-                      // Normaal staat de map er al (aangemaakt bij
-                      // "Documenten uploaden"); is dat toen mislukt, dan hier
-                      // nog één poging i.p.v. stil niets doen.
-                      const folder = await ensureNenFolder();
-                      if (!folder) return;
-                      setShowAgencyConfirm(false);
-                      const addr = `${address?.straatnaam ?? ""} ${address ? houseNumber(address) : ""}`.trim();
-                      const params = new URLSearchParams();
-                      params.set("path", folder.path);
-                      params.set("dropboxUrl", folder.url);
-                      params.set("addr", addr);
-                      if (finalProductId) params.set("productId", String(finalProductId));
-                      if (finalPriorityId) params.set("priorityId", String(finalPriorityId));
-                      if (finalAgencyId) params.set("agencyId", String(finalAgencyId));
-                      params.set("config", JSON.stringify(finalProductConfig));
-                      params.set("city", mtCity);
-                      params.set("street", mtStreet);
-                      params.set("number", mtNumber);
-                      params.set("postcode", mtPostcode);
-                      // Het concept meegeven, zodat de documentenpagina 'm na een
-                      // geslaagde order kan afsluiten — anders blijft het adres
-                      // eeuwig als openstaande opname in beeld staan.
-                      if (existingDraft) params.set("draft", existingDraft.id);
-                      router.push(`/nen/documenten?${params.toString()}`);
-                    }}
-                  >
-                    Ja, klopt
-                  </button>
-                </div>
+                {/* Terwijl de concept-order naar Mediatask gaat is er niets te
+                    kiezen: dan de knoppen vervangen door wat er gebeurt, zodat
+                    zichtbaar is dat de order nu al aangemaakt wordt. */}
+                {orderSetup === "bezig" ? (
+                  <div className="banner" style={{ background: "var(--inset)" }}>
+                    <span className="spinner" />
+                    <span>Order aanmaken bij Mediatask…</span>
+                  </div>
+                ) : (
+                  <>
+                    {result && (
+                      <p className="note" style={{ padding: 0, margin: "0 0 12px" }}>
+                        ✓ Order #{result.orderId} staat al klaar bij Mediatask — de scans gaan er tijdens het
+                        uploaden direct naartoe.
+                      </p>
+                    )}
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button type="button" className="btn btn-quiet" style={{ flex: 1 }} onClick={() => setAgencyEditMode(true)}>
+                        Aanpassen
+                      </button>
+                      <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={bevestigEnDoor}>
+                        Ja, klopt
+                      </button>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

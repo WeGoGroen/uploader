@@ -40,7 +40,7 @@ export interface MediataskOrder {
   address?: string;
 }
 
-class MediataskApiError extends Error {
+export class MediataskApiError extends Error {
   constructor(
     public status: number,
     message: string
@@ -107,7 +107,7 @@ export async function requireMediataskConfig(): Promise<{ token: string; baseUrl
   return { token, baseUrl: baseUrl.replace(/\/$/, "") };
 }
 
-async function mediataskFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export async function mediataskFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const { token, baseUrl } = await requireMediataskConfig();
   const res = await fetch(`${baseUrl}${path}`, {
     ...init,
@@ -179,8 +179,45 @@ export function getOrder(id: number): Promise<MediataskOrder> {
  * onze eigen concept-administratie (die kan achterlopen, bv. als iemand het
  * concept-record niet had of de opslag daarvan faalde).
  */
-export function listOrders(): Promise<MediataskOrder[]> {
-  return mediataskFetch<MediataskOrder[]>("/api/orders");
+export function listOrders(pagina?: number): Promise<MediataskOrder[]> {
+  // Mediatask geeft maximaal 100 orders per antwoord; met een paginanummer
+  // vragen we de oudere op. Of hun API dit ondersteunt is empirisch: geeft
+  // pagina 2 dezelfde orders terug als pagina 1, dan negeren ze de parameter.
+  return mediataskFetch<MediataskOrder[]>(
+    pagina && pagina > 1 ? `/api/orders?page=${pagina}` : "/api/orders"
+  );
+}
+
+/**
+ * Bestaat er al een concept-order voor dit adres? Die hergebruiken in plaats
+ * van een tweede aanmaken.
+ *
+ * Het vangnet achter de orderId-parameter: de pop-up geeft het ordernummer
+ * netjes door aan de documentenpagina, maar wie die pagina via een hervat-pad
+ * of een herlaadbeurt zonder ordernummer bereikt, maakte voorheen stilletjes
+ * een duplicaat aan — de achtergebleven draft bleef dan eeuwig bij Mediatask
+ * staan (zo zijn er meerdere gevonden).
+ */
+export async function vindBestaandeDraft(
+  street: string,
+  number: string,
+  city: string
+): Promise<MediataskOrder | null> {
+  const doel = `${street} ${number}`.replace(/\s+/g, " ").trim().toLowerCase();
+  const plaats = city.trim().toLowerCase();
+  if (!doel || !plaats) return null;
+
+  const orders = await listOrders().catch(() => [] as MediataskOrder[]);
+  return (
+    orders.find((o) => {
+      if (o.state !== "draft" || !o.address) return false;
+      const [adres, ...rest] = o.address.split(",");
+      return (
+        adres.replace(/\s+/g, " ").trim().toLowerCase() === doel &&
+        rest.join(",").trim().toLowerCase() === plaats
+      );
+    }) ?? null
+  );
 }
 
 export function submitOrder(id: number): Promise<void> {
@@ -269,4 +306,118 @@ export interface MediataskPointcloud {
 /** Wat er nu aan puntenwolken bij een order hangt — om te controleren of het gelukt is. */
 export function listPointclouds(orderId: number): Promise<MediataskPointcloud[]> {
   return mediataskFetch<MediataskPointcloud[]>(`/api/orders/${orderId}/pointclouds`);
+}
+
+/**
+ * Foto's en video's als échte bijlage aan een order hangen.
+ *
+ * Mediatask kent bij een order het bestandsveld `photos`. Dat veld vullen met
+ * Dropbox-links werkte niet: de links kwamen niet zichtbaar op de order
+ * terecht (live vastgesteld). Wat wél werkt voor puntenwolken is Rails'
+ * directe-uploadflow, en die is voor de overige bestandsvelden hetzelfde
+ * opgezet: aanmelden bij de order geeft per bestand een tijdelijke S3-link
+ * terug, daarna melden dat het geland is.
+ *
+ * Omdat dat laatste bij `photos` niet zwart-op-wit gedocumenteerd is, kijkt
+ * `requestPhotoUploads` naar de vórm van het antwoord in plaats van erop te
+ * vertrouwen: geeft Mediatask geen uploadlinks terug, dan gooit hij
+ * `GeenDirecteUpload` en valt de aanroeper terug op de linkenlijst. Zo levert
+ * een API die morgen anders reageert een leesbare mededeling op in plaats van
+ * stilzwijgend verdwenen foto's.
+ */
+export class GeenDirecteUpload extends Error {
+  constructor(message = "Mediatask gaf geen uploadlinks terug voor foto's") {
+    super(message);
+    this.name = "GeenDirecteUpload";
+  }
+}
+
+export interface MediaUploadRequest {
+  filename: string;
+  byte_size: string;
+  checksum: string;
+  content_type: string;
+}
+
+export interface MediaUploadTarget {
+  url: string;
+  headers: Record<string, string>;
+  blob_id: string;
+  filename: string;
+  /** Mediatask noemt dit veld per bestandssoort anders (photo_id, id, …). */
+  photo_id: number;
+}
+
+/** Stap 1: de foto's/video's aanmelden en de S3-uploadlinks ophalen. */
+export async function requestPhotoUploads(
+  orderId: number,
+  photos: MediaUploadRequest[]
+): Promise<MediaUploadTarget[]> {
+  let data: Record<string, unknown>;
+  try {
+    data = await mediataskFetch<Record<string, unknown>>(`/api/orders/${orderId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ files: { photos } }),
+    });
+  } catch (err) {
+    // Live vastgesteld (01-09): Mediatask antwoordt op élke schrijfactie op
+    // het photos-veld met 422 "Attachments is invalid" — metadata, URL's, een
+    // /photos-subresource (404): alles wordt geweigerd, terwijl exact dezelfde
+    // vorm voor pointclouds werkt. Foto's aan een order hangen kan alleen in
+    // hun eigen UI. Deze vertaling maakt daar de nette linkenterugval van in
+    // plaats van een kale fout per bestand.
+    if (err instanceof MediataskApiError && (err.status === 422 || err.status === 404)) {
+      throw new GeenDirecteUpload(`Mediatask accepteert geen foto-bijlagen via de API (${err.status})`);
+    }
+    throw err;
+  }
+  const ruw = (data?.photos ?? (data as { files?: { photos?: unknown } })?.files?.photos) as unknown;
+  if (!Array.isArray(ruw)) throw new GeenDirecteUpload();
+  const doelen = ruw
+    .filter((p): p is Record<string, unknown> => Boolean(p) && typeof p === "object")
+    .map((p) => ({
+      url: String(p.url ?? ""),
+      headers: (p.headers ?? {}) as Record<string, string>,
+      blob_id: String(p.blob_id ?? p.signed_blob_id ?? ""),
+      filename: String(p.filename ?? ""),
+      photo_id: Number(p.photo_id ?? p.id ?? 0),
+    }))
+    .filter((p) => p.url.startsWith("http"));
+  if (doelen.length !== photos.length) throw new GeenDirecteUpload();
+  return doelen;
+}
+
+/** Stap 3: de geüploade blobs aan de order koppelen. */
+export function attachPhotos(
+  orderId: number,
+  photos: { photo_id: number; signed_blob_id: string }[]
+): Promise<{ message?: string; successes?: string[] }> {
+  return mediataskFetch(`/api/orders/${orderId}/photos/attach`, {
+    method: "POST",
+    body: JSON.stringify({ photos }),
+  });
+}
+
+/** Wat er nu als foto aan een order hangt — de enige harde bevestiging. */
+export async function listPhotos(orderId: number): Promise<{ id: number; url: string }[]> {
+  const order = await getOrder(orderId).catch(() => null);
+  const ruw = (order as unknown as { files?: { photos?: unknown } } | null)?.files?.photos;
+  if (!Array.isArray(ruw)) return [];
+  return ruw.map((p, i) =>
+    typeof p === "string"
+      ? { id: i, url: p }
+      : { id: Number((p as { id?: number }).id ?? i), url: String((p as { url?: string }).url ?? "") }
+  );
+}
+
+/**
+ * Terugvalweg: de foto's als kant-en-klare (Dropbox-)URL in het veld zetten.
+ * Minder goed dan een echte bijlage — de verwerker moet er dan zelf heen —
+ * maar beter dan een order zonder beeld.
+ */
+export function setPhotoUrls(orderId: number, urls: string[]): Promise<unknown> {
+  return mediataskFetch(`/api/orders/${orderId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ files: { photos: urls } }),
+  });
 }

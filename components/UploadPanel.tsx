@@ -12,14 +12,15 @@ import {
 import { relatieveTijd } from "@/lib/relatieve-tijd";
 
 /**
- * De linkerkolom van het dashboard: alles wat nog loopt of nog afgemaakt moet
- * worden. Eén regel per adres, met een tag per product (een pand kan zowel een
- * energielabel als een NEN2580 hebben) en een tag met de gebruiker van wie het
- * werk is.
+ * De linkerkolom van het dashboard: wat de actieve gebruiker nog moet afmaken.
+ * Eén regel per adres, met een tag per product (een pand kan zowel een
+ * energielabel als een NEN2580 hebben).
  *
- * De hele regel is klikbaar: opnames staan in gedeelde opslag, dus iedereen
- * kan het werk van een ander afmaken — daar hoeft niemand op de oorspronkelijke
- * opnemer te wachten.
+ * Alleen het eigen werk: het werk van collega's stond hiertussen en dat maakte
+ * de lijst op locatie onbruikbaar — je zoekt jouw drie adressen tussen twintig
+ * andere. Werk zonder eigenaar (van vóór de accounts) blijft wel staan, want
+ * onzichtbaar werk raakt kwijt. Het volledige teamoverzicht leeft in het
+ * Business Control Center.
  *
  * De samenvoeg- en percentagelogica staat in lib/upload-overview.ts, zodat die
  * te testen is zonder een browser.
@@ -30,12 +31,24 @@ const STATUS_LABEL: Record<Status, string> = {
   open: "Openstaand",
 };
 
-export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | null }) {
+export default function UploadPanel({
+  drafts,
+  actieveGebruiker,
+}: {
+  drafts: OverzichtDraft[] | null;
+  actieveGebruiker: string | null;
+}) {
   const alleTaken = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const [herstart, setHerstart] = useState<string[]>([]);
   const [kwijt, setKwijt] = useState<string[]>([]);
 
-  const items = useMemo(() => bouwOpenstaand(alleTaken, drafts), [alleTaken, drafts]);
+  const eigen = useMemo(() => {
+    if (!drafts || !actieveGebruiker) return drafts;
+    const naam = actieveGebruiker.toLowerCase();
+    return drafts.filter((d) => !d.accountName || d.accountName.toLowerCase() === naam);
+  }, [drafts, actieveGebruiker]);
+
+  const items = useMemo(() => bouwOpenstaand(alleTaken, eigen), [alleTaken, eigen]);
 
   async function opnieuw(regel: Openstaand) {
     const ids = regel.mislukt.map((t) => t.id);

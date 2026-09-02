@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { addOrderComment, createOrder, listOrders, submitOrder } from "@/lib/mediatask";
+import { addOrderComment, createOrder, getOrder, listOrders, submitOrder, vindBestaandeDraft } from "@/lib/mediatask";
 import { getFileLinksWithNames, getSharedAccessToken } from "@/lib/dropbox";
 import { bewaarOrderPad, stuurScansVanuitDropbox, type ScanUitkomst } from "@/lib/mediatask-pointclouds";
+import { stuurMediaVanuitDropboxMap, type MediaUitkomst } from "@/lib/mediatask-media";
 
 // Twee doorgangen per scan over honderden MB's passen niet in een minuut.
 export const maxDuration = 300;
@@ -44,9 +45,19 @@ export async function POST(request: Request) {
     extraDrawingUrls?: string[];
     /** Verdiepingen per geüpload Optimized-bestand, bv. {"scan.ply": [-1,0]}. */
     floorsByFile?: Record<string, number[]>;
+    /** Alleen het concept aanmaken (en de Dropbox-map eraan koppelen), zonder
+        opmerking, scans of indienen. Gebruikt bij de bevestigingspop-up aan
+        het begin van de flow: de bestanden bestaan dan nog niet. */
+    draftOnly?: boolean;
+    /** Bestaande order afronden i.p.v. een nieuwe aanmaken — de tegenhanger
+        van draftOnly, bij het afmaken op de documentenpagina. */
+    orderId?: number;
   };
 
-  if (!body.productId || !body.priorityId || !body.agencyId || !body.city || !body.street || !body.number) {
+  if (
+    !body.orderId &&
+    (!body.productId || !body.priorityId || !body.agencyId || !body.city || !body.street || !body.number)
+  ) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
   }
 
@@ -55,7 +66,7 @@ export async function POST(request: Request) {
   // onbegrijpelijke foutmelding: hier weten we tenminste wát er ontbreekt.
   const config = body.productConfiguration ?? {};
   const filled = Object.entries(config).filter(([, v]) => v !== "" && v != null);
-  if (filled.length === 0) {
+  if (!body.orderId && filled.length === 0) {
     return NextResponse.json(
       {
         error:
@@ -77,18 +88,39 @@ export async function POST(request: Request) {
   const drawings: string[] = [...(body.extraDrawingUrls ?? [])];
 
   try {
-    const order = await createOrder({
-      product_id: body.productId,
-      priority_id: body.priorityId,
-      agency_id: body.agencyId,
-      state: "draft",
-      city: body.city,
-      street: body.street,
-      number: body.number,
-      postcode: body.postcode,
-      product_configuration: Object.fromEntries(filled),
-      files: { photos, drawings, additional: [] },
-    });
+    // Bestaat de order al (aangemaakt bij de bevestigingspop-up aan het
+    // begin), dan alleen ophalen — een tweede createOrder zou een dubbele
+    // order opleveren. Komt er géén ordernummer mee (hervat-pad, herlaadbeurt),
+    // dan eerst bij Mediatask kijken of er al een concept voor dit adres
+    // staat: dat is het vangnet tegen de duplicaat-drafts die daar anders
+    // blijven rondslingeren.
+    const bestaande = body.orderId
+      ? null
+      : await vindBestaandeDraft(body.street!, body.number!, body.city!).catch(() => null);
+    const order = body.orderId
+      ? await getOrder(body.orderId)
+      : bestaande ??
+        (await createOrder({
+          product_id: body.productId!,
+          priority_id: body.priorityId!,
+          agency_id: body.agencyId!,
+          state: "draft",
+          city: body.city!,
+          street: body.street!,
+          number: body.number!,
+          postcode: body.postcode,
+          product_configuration: Object.fromEntries(filled),
+          files: { photos, drawings, additional: [] },
+        }));
+
+    // Bij draftOnly stopt het hier: de opmerking (verdiepingen, links) en de
+    // scans komen pas bij het afronden — de bestanden bestaan nu nog niet.
+    // Wél alvast de Dropbox-map aan de order koppelen, zodat de achtergrond-
+    // uploads van de puntenwolken de weg terug kunnen vinden.
+    if (body.draftOnly) {
+      if (body.dropboxFolderPath) await bewaarOrderPad(order.id, body.dropboxFolderPath);
+      return NextResponse.json({ order, submitError: null, commentError: null, scans: [] });
+    }
 
     // Verdiepingen als opmerking bij de order. Vóór het indienen, zodat de
     // verwerker het meteen ziet; een mislukte opmerking mag de order niet
@@ -123,12 +155,16 @@ export async function POST(request: Request) {
     // rechtstreeks mee als puntenwolk, al staan ze hier ook nog als link voor
     // het geval een puntenwolk niet doorkwam.
     if (body.dropboxFolderPath) {
+      // Geen "also uploaded directly"-beloftes bij de media: Mediatask's API
+      // accepteert geen foto-bijlagen (elke schrijfactie op het photos-veld
+      // geeft 422 — live vastgesteld), dus deze links zíjn de aanlevering.
       const mappen: { map: string; kop: string }[] = [
         { map: "Optimized", kop: "Point clouds (Optimized) — also uploaded directly to this order" },
         { map: "RAW", kop: "RAW scans" },
         { map: "Additionals", kop: "Additional files" },
-        { map: "Photo's", kop: "Photos" },
-        { map: "Video", kop: "Video" },
+        { map: "Photo's", kop: "Photos — please download via these links" },
+        { map: "Video", kop: "Video — please download via these links" },
+        { map: "360", kop: "360 captures — please download via these links" },
       ];
       try {
         const at = await getSharedAccessToken();
@@ -163,12 +199,23 @@ export async function POST(request: Request) {
     // Vóór het indienen: aan een ingediende order valt bij Mediatask niets
     // meer toe te voegen, dus wat er dan niet aan hangt komt er nooit meer bij.
     let scans: ScanUitkomst[] = [];
+    let media: MediaUitkomst[] = [];
     if (body.dropboxFolderPath) {
       // Onthouden bij welke map deze order hoort, zodat een scan die hun
       // verwerker later afkeurt opnieuw verstuurd kan worden.
       await bewaarOrderPad(order.id, body.dropboxFolderPath);
       scans = await stuurScansVanuitDropbox(order.id, body.dropboxFolderPath).catch((err) => {
         console.error("Puntenwolken doorsturen mislukt", err);
+        return [];
+      });
+
+      // Foto's, video's en 360-opnames gaan als foto mee aan de order. Ook dit
+      // vóór het indienen: aan een ingediende order valt bij Mediatask niets
+      // meer toe te voegen. En net als bij de scans nooit blokkerend — de
+      // order bestaat al, dus een foto die niet aankomt mag hem niet laten
+      // sneuvelen; wat er misging staat per bestand in het antwoord.
+      media = await stuurMediaVanuitDropboxMap(order.id, body.dropboxFolderPath).catch((err) => {
+        console.error("Foto's en video's doorsturen mislukt", err);
         return [];
       });
     }
@@ -193,6 +240,7 @@ export async function POST(request: Request) {
       submitError,
       commentError,
       scans,
+      media,
       photoCount: photos.length,
       drawingCount: drawings.length,
       additionalCount: 0,

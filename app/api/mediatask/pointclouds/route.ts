@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   attachPointclouds,
@@ -6,7 +5,7 @@ import {
   requestPointcloudUploads,
   type PointcloudUploadRequest,
 } from "@/lib/mediatask";
-import { getSharedAccessToken, openFileStream } from "@/lib/dropbox";
+import { alAanwezigeNamen, stuurScanVanuitDropbox } from "@/lib/mediatask-pointclouds";
 
 /**
  * De twee serverkanten van het uploaden van een puntenwolk naar Mediatask.
@@ -28,64 +27,10 @@ interface Body {
   pointclouds?: { pointcloud_id: number; signed_blob_id: string }[];
   /** Volledig Dropbox-pad van de scan, bv. "/Automatie NEN2580/…/Optimized/x.dp". */
   path?: string;
-}
-
-/**
- * Stuurt een scan vanuit Dropbox rechtstreeks naar de opslag van Mediatask.
- *
- * Waarom niet vanuit de browser, wat sneller zou zijn: de S3-bucket van
- * Mediatask geeft geen CORS-toestemming aan ons domein, dus een browser
- * weigert de upload al vóór hij begint (live vastgesteld). Onze server heeft
- * dat probleem niet — CORS is een browserregel.
- *
- * Het bestand komt nooit helemaal in het geheugen: het wordt in twee
- * doorgangen gestreamd. Eerst om de MD5 te berekenen (die tekent S3 mee in de
- * uploadlink, dus hij moet vooraf bekend zijn), daarna om te uploaden. Twee
- * keer downloaden is de prijs voor nul geheugengebruik — en dat is de goede
- * ruil, want een serverless-functie die 300 MB probeert vast te houden valt om.
- */
-async function stuurVanuitDropbox(orderId: number, path: string) {
-  const naam = path.split("/").pop() ?? "scan";
-  const token = await getSharedAccessToken();
-
-  // Doorgang 1: alleen meten en hashen.
-  const eerste = await openFileStream(token, path);
-  const hash = createHash("md5");
-  let bytes = 0;
-  for await (const blok of eerste.stream as unknown as AsyncIterable<Uint8Array>) {
-    hash.update(blok);
-    bytes += blok.byteLength;
-  }
-  const checksum = hash.digest("base64");
-  const grootte = bytes || eerste.size;
-
-  const doelen = await requestPointcloudUploads(orderId, [
-    { filename: naam, byte_size: String(grootte), checksum, content_type: "application/octet-stream" },
-  ]);
-  const doel = doelen.pointclouds?.[0];
-  if (!doel?.url) throw new Error("Mediatask gaf geen uploadlink terug");
-
-  // Doorgang 2: dezelfde bytes rechtstreeks doorzetten naar S3.
-  const tweede = await openFileStream(token, path);
-  const put = await fetch(doel.url, {
-    method: "PUT",
-    headers: { ...doel.headers, "Content-Length": String(grootte) },
-    body: tweede.stream,
-    // Node stuurt een stroom alleen mee als je expliciet zegt dat je niet op
-    // een antwoord wacht voordat je klaar bent met versturen.
-    duplex: "half",
-  } as RequestInit & { duplex: "half" });
-  if (!put.ok) {
-    const body = await put.text().catch(() => "");
-    throw new Error(`Amazon weigerde de scan (${put.status}). ${body.slice(0, 200)}`);
-  }
-
-  const uitkomst = await attachPointclouds(orderId, [
-    { pointcloud_id: doel.pointcloud_id, signed_blob_id: doel.blob_id },
-  ]);
-  // Teruglezen is de enige harde bevestiging dat hij er ook echt hangt.
-  const aanwezig = await listPointclouds(orderId).catch(() => []);
-  return { ...uitkomst, filename: naam, bytes: grootte, pointclouds: aanwezig };
+  /** MD5 (base64) die de iPad al berekende toen het bestand nog in het
+      geheugen zat — dan hoeft de server maar één keer door Dropbox. */
+  checksum?: string;
+  grootte?: number;
 }
 
 /** Wat er nu werkelijk aan een order hangt. De enige harde bevestiging dat een
@@ -112,7 +57,25 @@ export async function POST(request: Request) {
   try {
     if (body.action === "vanuitDropbox") {
       if (!body.path) return NextResponse.json({ error: "missing_path" }, { status: 400 });
-      return NextResponse.json(await stuurVanuitDropbox(body.orderId, body.path));
+      // Hangt deze scan er al aan (bv. een hervatte upload na een herlaad-
+      // beurt die 'm al eens doorstuurde), dan niet nóg eens — dat zou een
+      // dubbele puntenwolk aan de order hangen.
+      const naam = body.path.split("/").pop() ?? "";
+      const aanwezig = await alAanwezigeNamen(body.orderId);
+      if (naam && aanwezig.has(naam)) {
+        return NextResponse.json({ filename: naam, alAanwezig: true });
+      }
+      // Waarom via de server en niet rechtstreeks vanaf de iPad: de S3-bucket
+      // van Mediatask geeft ons domein geen CORS-toestemming (live
+      // vastgesteld). Met de meegestuurde MD5 is één doorgang Dropbox → S3
+      // genoeg; zonder valt de lib terug op hashen én versturen (twee
+      // doorgangen), even betrouwbaar maar trager.
+      const hint =
+        body.checksum && body.grootte && body.grootte > 0
+          ? { checksum: body.checksum, grootte: body.grootte }
+          : null;
+      const uitkomst = await stuurScanVanuitDropbox(body.orderId, body.path, undefined, hint);
+      return NextResponse.json({ filename: naam, ...uitkomst });
     }
 
     if (body.action === "prepare") {

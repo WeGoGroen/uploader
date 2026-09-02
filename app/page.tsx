@@ -75,6 +75,9 @@ export default function Dashboard() {
   const [drafts, setDrafts] = useState<DraftRecord[] | null>(null);
   const [mediataskOrders, setMediataskOrders] = useState<MediataskOrderSummary[]>([]);
   const [clickupTaskNames, setClickupTaskNames] = useState<string[]>([]);
+  // Wie er op dit apparaat actief is: het af-te-maken-paneel toont alleen
+  // diens werk. De rest van het dashboard blijft over iedereen gaan.
+  const [actieveGebruiker, setActieveGebruiker] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   // Per opgeschoonde adrestekst: de BAG-uitslag, inclusief gelijkende
@@ -94,7 +97,7 @@ export default function Dashboard() {
 
   const load = useCallback(async () => {
     setCalendarError(null);
-    const [evts, drafts, orders, taskNames] = await Promise.all([
+    const [evts, drafts, orders, taskNames, actief] = await Promise.all([
       fetch("/api/calendar/today", { cache: "no-store" })
         .then(async (res) => {
           if (!res.ok) {
@@ -121,11 +124,16 @@ export default function Dashboard() {
         .then((res) => (res.ok ? res.json() : { names: [] }))
         .then((data) => (data.names ?? []) as string[])
         .catch(() => [] as string[]),
+      fetch("/api/clickup/accounts", { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : { active: null }))
+        .then((data) => (data.active ?? null) as string | null)
+        .catch(() => null),
     ]);
     setEvents(evts);
     setDrafts(drafts);
     setMediataskOrders(orders);
     setClickupTaskNames(taskNames);
+    setActieveGebruiker(actief);
   }, []);
 
   useEffect(() => {
@@ -256,7 +264,7 @@ export default function Dashboard() {
 
       <div className="dash-grid">
         <div>
-          <UploadPanel drafts={drafts} />
+          <UploadPanel drafts={drafts} actieveGebruiker={actieveGebruiker} />
           {/* Verwerking bij Mediatask hoort naast het openstaande werk: het is
               werk dat loopt, alleen niet bij ons. */}
           <ScanStatusKaart />

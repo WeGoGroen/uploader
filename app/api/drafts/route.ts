@@ -1,9 +1,25 @@
 import { NextResponse } from "next/server";
 import { listDrafts, saveDraft, type DraftRecord } from "@/lib/drafts";
+import { resolveActiveAccountName } from "@/lib/active-account";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const drafts = await listDrafts();
+    let drafts = await listDrafts();
+
+    // ?mijn=1: alleen het werk van de actieve accountgebruiker. Opt-in, want
+    // de andere aanroepers gebruiken deze lijst om een concept op adres of id
+    // terug te vinden — en dan moet ook het werk van een collega vindbaar
+    // blijven. Concepten zonder eigenaar (van vóór de accounts) blijven
+    // zichtbaar: onzichtbaar werk raakt kwijt.
+    if (new URL(request.url).searchParams.get("mijn") === "1") {
+      const actief = (await resolveActiveAccountName())?.toLowerCase() ?? null;
+      if (actief) {
+        drafts = drafts.filter(
+          (d) => !d.accountName || d.accountName.toLowerCase() === actief
+        );
+      }
+    }
+
     return NextResponse.json({ drafts });
   } catch (err) {
     return NextResponse.json(

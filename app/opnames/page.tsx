@@ -18,74 +18,6 @@ type DraftRecord = Pick<
   | "createdAt"
 >;
 
-interface SyncState {
-  busy: boolean;
-  message: string | null;
-  failed: boolean;
-}
-
-/**
- * Handmatig de finale bestanden uit SharePoint halen. Normaal doet de
- * ClickUp-webhook dit vanzelf zodra de taak op klaar gaat; deze knop is voor
- * opnames van vóór die koppeling, of als de uitbestede partij achteraf nog
- * een bestand toevoegt.
- */
-function SharePointButton({ addressLine, woonplaats }: { addressLine: string; woonplaats: string }) {
-  const [state, setState] = useState<SyncState>({ busy: false, message: null, failed: false });
-
-  async function run() {
-    setState({ busy: true, message: null, failed: false });
-    try {
-      const res = await fetch("/api/sharepoint/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ addressLine, woonplaats }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setState({
-          busy: false,
-          failed: true,
-          message:
-            data?.detail ??
-            (data?.error === "niets_gevonden"
-              ? "Niets gevonden in SharePoint voor dit adres."
-              : "Ophalen is mislukt."),
-        });
-        return;
-      }
-      const copied = (data.copied as string[]).length;
-      const skipped = (data.skipped as string[]).length;
-      const pending = ((data.pending as string[] | undefined) ?? []).length;
-      setState({
-        busy: false,
-        failed: false,
-        message:
-          pending > 0
-            ? `${copied} in Dropbox gezet, ${pending} nog onderweg — de map blijft oranje.`
-            : copied === 0 && skipped > 0
-              ? "Stond er al — niets nieuws opgehaald."
-              : `${copied} bestand${copied === 1 ? "" : "en"} in Dropbox gezet.`,
-      });
-    } catch {
-      setState({ busy: false, failed: true, message: "Ophalen is mislukt." });
-    }
-  }
-
-  return (
-    <>
-      <button className="btn btn-quiet" onClick={run} disabled={state.busy}>
-        {state.busy ? "Bezig met ophalen…" : "Finale bestanden ophalen"}
-      </button>
-      {state.message && (
-        <span className={state.failed ? "conn-err" : "draft-meta"} style={{ marginLeft: 8 }}>
-          {state.message}
-        </span>
-      )}
-    </>
-  );
-}
-
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleString("nl-NL", {
     day: "numeric",
@@ -114,7 +46,9 @@ export default function Opnames() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const res = await fetch("/api/drafts", { cache: "no-store" });
+      // Alleen het eigen af te maken werk: het volledige overzicht (iedereen,
+      // inclusief afgerond) leeft in het Business Control Center.
+      const res = await fetch("/api/drafts?mijn=1", { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Onbekende fout");
       setDrafts(data.drafts ?? []);
@@ -149,10 +83,10 @@ export default function Opnames() {
   }
 
   const unfinished = drafts?.filter((d) => d.status === "concept") ?? [];
-  // Een opname met ontbrekende bijlages hoort niet tussen de afgeronde: de
+  // Een opname met ontbrekende bijlages is óók nog af te maken werk: de
   // ClickUp-taak bestaat, maar de documenten zijn er niet in gekomen.
-  const uploaded = drafts?.filter((d) => d.status === "uploaded" && !d.incompleteDocs?.length) ?? [];
   const incomplete = drafts?.filter((d) => d.status === "uploaded" && !!d.incompleteDocs?.length) ?? [];
+  const nietsTeDoen = drafts !== null && unfinished.length === 0 && incomplete.length === 0;
 
   return (
     <>
@@ -167,14 +101,15 @@ export default function Opnames() {
           </svg>
           Terug naar dashboard
         </a>
-        <span className="eyebrow">Recente opnames</span>
+        <span className="eyebrow">Af te maken</span>
       </header>
 
       <div className="pad" style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}>
-        <h1>Recente opnames</h1>
+        <h1>Nog af te maken</h1>
         <p className="lede">
-          Opnames die je op dit apparaat bent begonnen — afgerond en geüpload naar
-          ClickUp, of nog niet afgemaakt.
+          Alleen jouw werk dat nog niet klaar is: opnames die halverwege zijn
+          blijven staan en taken waar bijlages missen. Wat afgerond is, verdwijnt
+          hier vanzelf.
         </p>
 
         {cijfers && (
@@ -205,8 +140,8 @@ export default function Opnames() {
         {loading && !drafts && <p className="note">Concepten laden…</p>}
         {error && <p className="conn-err">{error}</p>}
 
-        {drafts && drafts.length === 0 && (
-          <p className="note">Nog geen opnames gestart via de app.</p>
+        {nietsTeDoen && (
+          <p className="note">Niets meer af te maken — al je opnames zijn doorgezet.</p>
         )}
 
         {unfinished.length > 0 && (
@@ -273,42 +208,6 @@ export default function Opnames() {
                       <a className="btn btn-quiet" href={d.clickupTaskUrl} target="_blank" rel="noreferrer">
                         Open in ClickUp
                       </a>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {uploaded.length > 0 && (
-          <div className="section">
-            <div className="section-head">
-              <h2>Geüpload naar ClickUp</h2>
-            </div>
-            <div className="draft-list">
-              {uploaded.map((d) => (
-                <div className="draft-row" key={d.id}>
-                  <div className="draft-info">
-                    <span className="pill is-ok">Geüpload</span>
-                    <div>
-                      <div className="draft-title">
-                        {d.straatnaam || d.titel || "Onbekend adres"}
-                      </div>
-                      <div className="draft-meta">
-                        {d.postcode} {d.woonplaats}
-                        {d.accountName ? ` · ${d.accountName}` : ""} · {formatDate(d.updatedAt)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="draft-actions">
-                    {d.clickupTaskUrl && (
-                      <a className="btn btn-quiet" href={d.clickupTaskUrl} target="_blank" rel="noreferrer">
-                        Open in ClickUp
-                      </a>
-                    )}
-                    {d.straatnaam && d.woonplaats && (
-                      <SharePointButton addressLine={d.straatnaam} woonplaats={d.woonplaats} />
                     )}
                   </div>
                 </div>

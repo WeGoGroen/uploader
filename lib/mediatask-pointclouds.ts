@@ -40,42 +40,89 @@ export interface ScanUitkomst {
   naam: string;
   ok: boolean;
   fout?: string;
+  /** Hing al aan de order (op de achtergrond verstuurd tijdens het uploaden)
+      en is dus niet opnieuw verstuurd. */
+  alAanwezig?: boolean;
 }
 
-/** Eén scan doorsturen: aanmelden, uploaden, koppelen. */
-export async function stuurScanVanuitDropbox(
+/**
+ * De bestandsnamen die al als puntenwolk aan een order hangen.
+ *
+ * Nodig sinds scans al tijdens het uploaden (per bestand, op de achtergrond)
+ * doorgestuurd worden: bij het afronden van de order zou alles anders een
+ * tweede keer verstuurd worden en dubbel aan de order komen te hangen.
+ */
+export async function alAanwezigeNamen(orderId: number): Promise<Set<string>> {
+  const aanwezig = await listPointclouds(orderId).catch(() => []);
+  return new Set(
+    aanwezig.map((p) => naamUitUrl(p.url)).filter((n): n is string => Boolean(n))
+  );
+}
+
+/** MD5 die de iPad (of een eerdere doorgang) al berekend heeft. */
+export interface Md5Hint {
+  /** MD5 in base64, het formaat dat S3 in de uploadlink meetekent. */
+  checksum: string;
+  grootte: number;
+}
+
+/**
+ * MD5-cache per Dropbox-pad. Gevuld door de iPad (die hasht het bestand
+ * terwijl het nog in het geheugen zit) of door een eerdere serverdoorgang.
+ * Scheelt bij elke volgende verzending van dezelfde scan de complete
+ * hash-doorgang door Dropbox — de helft van het serververkeer.
+ */
+const MD5_PREFIX = "mediatask:md5:";
+const MD5_TTL = 60 * 60 * 24 * 7;
+
+export async function bewaarMd5(path: string, hint: Md5Hint): Promise<void> {
+  const redis = getOptionalRedis();
+  if (!redis) return;
+  await redis.set(`${MD5_PREFIX}${path}`, JSON.stringify(hint), "EX", MD5_TTL).catch(() => {});
+}
+
+export async function leesMd5(path: string): Promise<Md5Hint | null> {
+  const redis = getOptionalRedis();
+  if (!redis) return null;
+  const ruw = await redis.get(`${MD5_PREFIX}${path}`).catch(() => null);
+  if (!ruw) return null;
+  try {
+    const hint = JSON.parse(ruw) as Md5Hint;
+    return hint.checksum && hint.grootte > 0 ? hint : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * De upload zelf: aanmelden bij Mediatask, één doorgang Dropbox → S3, en
+ * koppelen. Vereist een vooraf bekende MD5 — S3 tekent die mee in de
+ * uploadlink en controleert 'm bij aankomst, dus een verkeerde hash (of een
+ * ondertussen vervangen bestand) wordt daar hard geweigerd.
+ */
+async function uploadNaarMediatask(
   orderId: number,
   path: string,
-  accessToken?: string
+  token: string,
+  hint: Md5Hint
 ): Promise<{ pointcloudId: number; bytes: number; aanwezig: number }> {
   const naam = path.split("/").pop() ?? "scan";
-  const token = accessToken ?? (await getSharedAccessToken());
-
-  // Doorgang 1: meten en hashen. S3 tekent de MD5 mee in de uploadlink, dus
-  // die moet vooraf bekend zijn. Streamen i.p.v. inlezen: een scan van
-  // honderden MB's in het geheugen laat een serverless-functie omvallen.
-  const eerste = await openFileStream(token, path);
-  const hash = createHash("md5");
-  let bytes = 0;
-  for await (const blok of eerste.stream as unknown as AsyncIterable<Uint8Array>) {
-    hash.update(blok);
-    bytes += blok.byteLength;
-  }
-  const checksum = hash.digest("base64");
-  const grootte = bytes || eerste.size;
-
   const doelen = await requestPointcloudUploads(orderId, [
-    { filename: naam, byte_size: String(grootte), checksum, content_type: "application/octet-stream" },
+    {
+      filename: naam,
+      byte_size: String(hint.grootte),
+      checksum: hint.checksum,
+      content_type: "application/octet-stream",
+    },
   ]);
   const doel = doelen.pointclouds?.[0];
   if (!doel?.url) throw new Error("Mediatask gaf geen uploadlink terug");
 
-  // Doorgang 2: dezelfde bytes doorzetten naar S3.
-  const tweede = await openFileStream(token, path);
+  const bron = await openFileStream(token, path);
   const put = await fetch(doel.url, {
     method: "PUT",
-    headers: { ...doel.headers, "Content-Length": String(grootte) },
-    body: tweede.stream,
+    headers: { ...doel.headers, "Content-Length": String(hint.grootte) },
+    body: bron.stream,
     duplex: "half",
   } as RequestInit & { duplex: "half" });
   if (!put.ok) {
@@ -88,7 +135,54 @@ export async function stuurScanVanuitDropbox(
   ]);
   // Teruglezen is de enige harde bevestiging dat hij er ook echt aan hangt.
   const aanwezig = await listPointclouds(orderId).catch(() => []);
-  return { pointcloudId: doel.pointcloud_id, bytes: grootte, aanwezig: aanwezig.length };
+  return { pointcloudId: doel.pointcloud_id, bytes: hint.grootte, aanwezig: aanwezig.length };
+}
+
+/**
+ * Eén scan doorsturen: aanmelden, uploaden, koppelen.
+ *
+ * Met een bekende MD5 (van de iPad of uit de cache) is één doorgang door
+ * Dropbox genoeg. Zonder — of als S3 de bekende hash weigert omdat het
+ * bestand ondertussen anders is — valt dit terug op het oude tweetraps­pad:
+ * eerst streamen om te hashen, dan streamen om te versturen. Het resultaat is
+ * in alle gevallen even betrouwbaar; alleen de snelheid verschilt.
+ */
+export async function stuurScanVanuitDropbox(
+  orderId: number,
+  path: string,
+  accessToken?: string,
+  hint?: Md5Hint | null
+): Promise<{ pointcloudId: number; bytes: number; aanwezig: number }> {
+  const token = accessToken ?? (await getSharedAccessToken());
+
+  const bekend = hint ?? (await leesMd5(path));
+  if (bekend) {
+    try {
+      const uitkomst = await uploadNaarMediatask(orderId, path, token, bekend);
+      void bewaarMd5(path, bekend);
+      return uitkomst;
+    } catch (err) {
+      // Kan van alles zijn (verkeerde hash, maar ook een Mediatask-storing);
+      // de verse-hash-poging hieronder is in beide gevallen het juiste
+      // antwoord en gedraagt zich als de retry die er vroeger ook al was.
+      console.error(`Scan versturen met bekende MD5 mislukt (${path}), opnieuw met verse hash`, err);
+    }
+  }
+
+  // Doorgang 1: meten en hashen. Streamen i.p.v. inlezen: een scan van
+  // honderden MB's in het geheugen laat een serverless-functie omvallen.
+  const eerste = await openFileStream(token, path);
+  const hash = createHash("md5");
+  let bytes = 0;
+  for await (const blok of eerste.stream as unknown as AsyncIterable<Uint8Array>) {
+    hash.update(blok);
+    bytes += blok.byteLength;
+  }
+  const vers: Md5Hint = { checksum: hash.digest("base64"), grootte: bytes || eerste.size };
+  void bewaarMd5(path, vers);
+
+  // Doorgang 2: dezelfde bytes doorzetten naar S3.
+  return uploadNaarMediatask(orderId, path, token, vers);
 }
 
 /**
@@ -106,7 +200,16 @@ export async function stuurScansVanuitDropbox(
   const bestanden = await listFolderFiles(token, `${projectPad}/Optimized`).catch(() => []);
   const uitkomsten: ScanUitkomst[] = [];
 
+  // Wat er al hangt niet nóg eens versturen: scans gaan tegenwoordig al
+  // tijdens het uploaden op de achtergrond mee, en het afronden van de order
+  // komt daar overheen.
+  const alAanwezig = await alAanwezigeNamen(orderId);
+
   for (const bestand of bestanden) {
+    if (alAanwezig.has(bestand.name)) {
+      uitkomsten.push({ naam: bestand.name, ok: true, alAanwezig: true });
+      continue;
+    }
     try {
       await stuurScanVanuitDropbox(orderId, `${projectPad}/Optimized/${bestand.name}`, token);
       uitkomsten.push({ naam: bestand.name, ok: true });

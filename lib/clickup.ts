@@ -118,6 +118,19 @@ export async function getClickUpAccounts(): Promise<ClickUpAccount[]> {
   const fromRedis = await extraAccounts();
   const byName = new Map<string, ClickUpAccount>();
   for (const a of [...fromEnv, ...fromRedis]) byName.set(a.name, a);
+
+  // Voor accounts die uit de omgeving komen wint het omgevings-token, ook als
+  // Redis hetzelfde account kent. De env-token is wat er bij een rotatie in
+  // Vercel wordt vervangen; een oude kopie in Redis mag hem niet blijven
+  // overschaduwen — precies dat hield op 31-08 de hele ClickUp-koppeling op
+  // een ingetrokken token, dwars door elke redeploy heen. Avatar en mailadres
+  // uit Redis blijven wel gelden; alleen het token is heilig.
+  for (const env of fromEnv) {
+    const samengevoegd = byName.get(env.name);
+    if (samengevoegd && env.token && samengevoegd.token !== env.token) {
+      byName.set(env.name, { ...samengevoegd, token: env.token });
+    }
+  }
   return [...byName.values()];
 }
 

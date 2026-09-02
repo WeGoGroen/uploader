@@ -21,11 +21,34 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }
 
+  const pagina = Number(new URL(request.url).searchParams.get("pagina")) || undefined;
   const [orders, agencies, products] = await Promise.allSettled([
-    listOrders(),
+    listOrders(pagina),
     getAgencies(),
     getProducts(),
   ]);
+
+  // Mediatask geeft bij een onbekende parameter soms geen lijst maar een
+  // object terug; dan willen we zíen wat het was in plaats van een kale 500.
+  if (orders.status === "fulfilled" && !Array.isArray(orders.value)) {
+    const ruw = orders.value as unknown;
+    const alsObject = ruw && typeof ruw === "object" ? (ruw as Record<string, unknown>) : null;
+    // Vanaf pagina 2 wikkelt Mediatask de lijst in een data-veld.
+    const lijst =
+      alsObject && Array.isArray(alsObject.data)
+        ? alsObject.data
+        : alsObject && Array.isArray(alsObject.orders)
+          ? alsObject.orders
+          : null;
+    if (lijst) {
+      orders.value = lijst as typeof orders.value;
+    } else {
+      return NextResponse.json(
+        { error: "Mediatask gaf geen orderlijst terug", ruw: JSON.stringify(ruw).slice(0, 400) },
+        { status: 502 }
+      );
+    }
+  }
 
   if (orders.status === "rejected") {
     return NextResponse.json(

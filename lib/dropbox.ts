@@ -1155,3 +1155,20 @@ export async function detailProjectFolders(
 
   return { folders: [...perMap.values()], volledig };
 }
+
+
+/**
+ * Verplaatst of hernoemt één bestand of map. Bestaat het doel al, dan faalt de
+ * aanroep in plaats van stilletjes een "(1)"-kopie te maken — dat gedrag heeft
+ * ons eerder duplicaten opgeleverd.
+ */
+export async function verplaats(accessToken: string, van: string, naar: string): Promise<void> {
+  const res = await fetch(`${DROPBOX_API_BASE}/files/move_v2`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from_path: van, to_path: naar, autorename: false }),
+  });
+  if (res.ok) return;
+  const body = await res.text().catch(() => "");
+  throw new DropboxApiError(res.status, `Dropbox files/move_v2 failed: ${res.status} ${body}`);
+}

@@ -9,6 +9,7 @@ import { enqueue, getServerSnapshot, getSnapshot, removeTask, subscribe } from "
 // hier valt een echte plattegrond uit te snijden.
 import { isPointCloudFile } from "@/lib/pointcloud-read";
 import { meldAfgerond } from "@/lib/opname-melden";
+import { berekenMd5, type Md5Uitkomst } from "@/lib/md5-client";
 
 // Zelfde 4 mappen als op de NEN-pagina. Optimized en RAW staan allebei
 // pagina-breed (dat zijn de scan-/verwerkingsmappen), Additionals en Photo's
@@ -29,9 +30,9 @@ function isDocumentFolder(folder: FolderName): boolean {
 // read-only (crasht de order-aanmaak bij input), en er is geen ander
 // bevestigd werkend veld voor puntenwolk-scans. RAW blijft dus voorlopig
 // alleen in Dropbox staan.
-// Mappen die als downloadlink in de opmerking bij de order komen. Alleen
-// Optimized gaat daarnaast ook écht als bestand naar Mediatask (als
-// puntenwolk); voor de rest is de Dropbox-link de afspraak.
+// Mappen die als downloadlink in de opmerking bij de order komen. Optimized
+// gaat daarnaast als puntenwolk mee, en Photo's/Video/360 gaan als foto's aan
+// de order hangen; voor RAW en Additionals is de Dropbox-link de afspraak.
 const LINK_FOLDERS = ["Optimized", "RAW", "Additionals", "Photo's", "Video"] as const;
 
 interface ExistingFile {
@@ -78,6 +79,17 @@ function DocumentenContent() {
   // Het concept waar deze opname bij hoort; nodig om 'm af te sluiten zodra de
   // order er staat.
   const draftId = params.get("draft") ?? "";
+  // De concept-order die bij de bevestigingspop-up al is aangemaakt. Mét dit
+  // nummer gaat elke scan die bij Dropbox binnenkomt op de achtergrond direct
+  // door naar Mediatask; zonder valt alles terug op de oude weg (order en
+  // scans pas bij het afronden).
+  const orderIdUitUrl = (() => {
+    const n = Number(params.get("orderId"));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  })();
+  // Als state: staat er geen ordernummer in de URL (hervat-pad, herlaadbeurt),
+  // dan maakt de pagina hieronder zelf meteen een concept-order aan.
+  const [vasteOrderId, setVasteOrderId] = useState<number | null>(orderIdUitUrl);
 
   const [existing, setExisting] = useState<Record<string, ExistingFile[]>>({});
   const [loading, setLoading] = useState(true);
@@ -210,6 +222,128 @@ function DocumentenContent() {
     };
   }, [postcode, number, addr]);
 
+  // ---------- Concept-order direct bij binnenkomst ----------
+  // De order hoort er te zijn zodra deze pagina er is: elke scan die daarna
+  // bij Dropbox landt gaat dan meteen op de achtergrond door naar Mediatask,
+  // en het afronden aan het einde is alleen nog opmerking + indienen — geen
+  // lange wachttijd meer op locatie. De server hergebruikt een bestaand
+  // concept voor dit adres, dus een dubbele aanmaak kan hier niet ontstaan.
+  const orderAanmaakGestart = useRef(false);
+  useEffect(() => {
+    if (vasteOrderId || orderAanmaakGestart.current) return;
+    if (!productId || !priorityId || !agencyId || !city || !street || !number) return;
+    let config: Record<string, string> = {};
+    try {
+      config = JSON.parse(productConfiguration);
+    } catch {}
+    if (Object.values(config).every((v) => v === "" || v == null)) return;
+    orderAanmaakGestart.current = true;
+
+    fetch("/api/mediatask/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        draftOnly: true,
+        dropboxFolderPath: folderPath || undefined,
+        productId: Number(productId),
+        priorityId,
+        agencyId,
+        productConfiguration: config,
+        city,
+        street,
+        number,
+        postcode,
+      }),
+    })
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok && data.order?.id) setVasteOrderId(Number(data.order.id));
+      })
+      // Mislukt dit, dan verandert er niets aan de flow: de order ontstaat
+      // dan zoals voorheen alsnog bij het afronden.
+      .catch(() => {});
+  }, [vasteOrderId, productId, priorityId, agencyId, city, street, number, postcode, productConfiguration, folderPath]);
+
+  // ---------- Puntenwolken op de achtergrond naar Mediatask ----------
+  // Zodra een Optimized-bestand volledig bij Dropbox staat, gaat hij meteen
+  // door naar Mediatask — niet pas bij het afronden. Bij het afmaken van de
+  // order slaat de server alles over wat er dan al aan hangt.
+  const [pcStatus, setPcStatus] = useState<Record<string, "bezig" | "klaar" | "fout">>({});
+  const [pcFout, setPcFout] = useState<Record<string, string>>({});
+  // Welke bestanden al doorgestuurd (of bezig) zijn — buiten de state, zodat
+  // een re-render nooit een tweede verzending van hetzelfde bestand start.
+  const pcGestart = useRef<Set<string>>(new Set());
+  // Eén tegelijk: de server streamt elke scan twee keer door, dat moet niet
+  // voor drie scans tegelijk gebeuren.
+  const pcQueue = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    if (!vasteOrderId || !folderPath) return;
+    for (const t of tasks) {
+      if (t.folder !== "Optimized" || t.dropbox !== "done") continue;
+      if (pcGestart.current.has(t.name)) continue;
+      pcGestart.current.add(t.name);
+      const naam = t.name;
+      setPcStatus((s) => ({ ...s, [naam]: "bezig" }));
+      pcQueue.current = pcQueue.current.then(async () => {
+        try {
+          // De hash die bij het kiezen alvast berekend is; scheelt de server
+          // een complete hash-doorgang door Dropbox. Ontbreekt hij (bv. een
+          // hervatte upload na een herlaadbeurt), dan hasht de server zelf.
+          const hash = await (pcHashes.current.get(naam) ?? Promise.resolve(null));
+          const res = await fetch("/api/mediatask/pointclouds", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "vanuitDropbox",
+              orderId: vasteOrderId,
+              path: `${folderPath}/Optimized/${naam}`,
+              ...(hash ? { checksum: hash.checksum, grootte: hash.grootte } : {}),
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error ?? "doorsturen mislukt");
+          setPcStatus((s) => ({ ...s, [naam]: "klaar" }));
+        } catch (err) {
+          // Geen ramp: bij het afronden gaat alles wat nog niet aan de order
+          // hangt alsnog mee. Wel laten zien, zodat niemand denkt dat hij er
+          // al staat.
+          setPcStatus((s) => ({ ...s, [naam]: "fout" }));
+          setPcFout((f) => ({
+            ...f,
+            [naam]: err instanceof Error ? err.message : "doorsturen mislukt",
+          }));
+        }
+      });
+    }
+  }, [tasks, vasteOrderId, folderPath]);
+
+  /** Statusregel onder een Optimized-bestand: waar staat hij bij Mediatask? */
+  function renderPcStatus(naam: string) {
+    if (!vasteOrderId) return null;
+    const st = pcStatus[naam];
+    if (!st) return null;
+    if (st === "bezig") {
+      return (
+        <span className="note" style={{ padding: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span className="spinner" /> Doorsturen naar Mediatask (order #{vasteOrderId})…
+        </span>
+      );
+    }
+    if (st === "klaar") {
+      return (
+        <span className="note" style={{ padding: 0, color: "#1c7a41" }}>
+          ✓ Staat al bij Mediatask (order #{vasteOrderId})
+        </span>
+      );
+    }
+    return (
+      <span className="note" style={{ padding: 0, color: "var(--bad)" }}>
+        ⚠ Doorsturen naar Mediatask mislukte ({pcFout[naam]}) — gaat bij het afronden opnieuw mee.
+      </span>
+    );
+  }
+
   // Zodra er een upload klaar is, de bestandenlijst verversen — de wachtrij
   // zit buiten React, dus dat gebeurt hier op basis van het aantal afgeronde
   // uploads i.p.v. vanuit de upload zelf.
@@ -219,10 +353,20 @@ function DocumentenContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doneCount]);
 
+  // MD5 per Optimized-bestand, berekend op het moment van kiezen — het
+  // bestand zit dan nog in het geheugen. Gaat mee met de achtergrond-upload
+  // naar Mediatask, zodat de server maar één keer door Dropbox hoeft i.p.v.
+  // twee (eerst hashen, dan versturen). De hash is ruim klaar vóór de
+  // Dropbox-upload dat is, dus dit kost nooit extra wachttijd.
+  const pcHashes = useRef<Map<string, Promise<Md5Uitkomst | null>>>(new Map());
+
   // Uploaden gebeurt in een wachtrij buiten React (lib/upload-queue.ts):
   // die blijft draaien als je tussendoor naar de order terugloopt, stuurt de
   // bestanden rechtstreeks naar Dropbox en doet er meerdere tegelijk.
   function uploadFile(folder: FolderName, file: File) {
+    if (folder === "Optimized") {
+      pcHashes.current.set(file.name, berekenMd5(file).catch(() => null));
+    }
     enqueue(folderPath, folder, file, account);
   }
 
@@ -416,6 +560,7 @@ function DocumentenContent() {
                   </button>
                 </span>
               )}
+              {folder === "Optimized" && renderPcStatus(f.name)}
               {folder === "Optimized" && renderFloorPicker(f.name)}
             </li>
           );
@@ -485,6 +630,9 @@ function DocumentenContent() {
             {r.dropbox === "done" && (
               <span className="note" style={{ padding: 0, color: "#1c7a41" }}>✓ Dropbox</span>
             )}
+            {/* Na Dropbox meteen door naar Mediatask — hier zie je per scan of
+                dat al gelukt is, nog loopt of mislukte. */}
+            {folder === "Optimized" && r.dropbox === "done" && renderPcStatus(r.name)}
             {r.dropbox === "error" && (
               <span className="note" style={{ padding: 0, color: "var(--bad)" }}>⚠ Dropbox: {r.dropboxError}</span>
             )}
@@ -512,10 +660,18 @@ function DocumentenContent() {
   // ---------- "Uploaden naar Mediatask" onderaan de pagina ----------
   const [showMediataskModal, setShowMediataskModal] = useState(false);
   const [mediataskSteps, setMediataskSteps] = useState<Record<string, MediataskStepStatus>>({});
+  // Waar: de foto's konden niet als bijlage mee en zijn als Dropbox-link in
+  // het fotoveld gezet. Zichtbaar op de order, maar de verwerker moet er zelf
+  // heen — dat hoort de opnemer te weten voor hij het scherm sluit.
+  const [mediaAlsLink, setMediaAlsLink] = useState(false);
   // Wat Mediatask zélf terugmeldt per scan. Niet "wij hebben het verstuurd"
   // maar "hij hangt er ook echt aan" — dat is het enige wat telt, en het was
   // tot nu toe nergens te zien.
   const [scanBevestigd, setScanBevestigd] = useState<Record<string, number>>({});
+  // Scans die al tijdens het uploaden (op de achtergrond) aan de order zijn
+  // gehangen — die zijn bij het afronden overgeslagen en dat mag de pop-up
+  // best zeggen: het verklaart waarom die stap meteen klaar is.
+  const [scanAlAanwezig, setScanAlAanwezig] = useState<Record<string, boolean>>({});
   /**
    * Verwerking van de puntenwolken aan de kant van Mediatask.
    *
@@ -560,6 +716,10 @@ function DocumentenContent() {
   // als het volledig binnen is — halverwege versturen levert dus een order op
   // zónder scan, zonder dat iemand dat merkt.
   const nogAanHetUploaden = tasks.filter((t) => t.dropbox === "uploading");
+  // Ook wachten op scans die op de achtergrond nog naar Mediatask onderweg
+  // zijn: afronden terwijl zo'n verzending halverwege is, zou dezelfde scan
+  // dubbel aan de order kunnen hangen (de server ziet 'm dan nog niet).
+  const pcNogBezig = Object.values(pcStatus).filter((s) => s === "bezig").length;
 
   function stopVerwerkTimer() {
     if (verwerkTimerRef.current) {
@@ -621,6 +781,7 @@ function DocumentenContent() {
     setMediataskState(null);
     setMediataskOrderId(null);
     setScanBevestigd({});
+    setScanAlAanwezig({});
     setVerwerking(null);
     stopVerwerkTimer();
     setMediataskPct(4);
@@ -657,6 +818,10 @@ function DocumentenContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          // De order die er al staat afmaken i.p.v. een nieuwe aanmaken; de
+          // server slaat de scans over die er (via de achtergrond-uploads) al
+          // aan hangen.
+          orderId: vasteOrderId ?? undefined,
           dropboxFolderPath: folderPath,
           productId: Number(productId),
           priorityId,
@@ -706,11 +871,38 @@ function DocumentenContent() {
       // doet, ongeacht via welke pagina de order ontstaat. Hier alleen nog
       // tonen hoe het afliep.
       const scanFouten: string[] = [];
-      for (const uitkomst of (data.scans ?? []) as { naam: string; ok: boolean; fout?: string }[]) {
+      for (const uitkomst of (data.scans ?? []) as {
+        naam: string;
+        ok: boolean;
+        fout?: string;
+        alAanwezig?: boolean;
+      }[]) {
         setMediataskSteps((s2) => ({ ...s2, [`scan:${uitkomst.naam}`]: uitkomst.ok ? "done" : "error" }));
         if (uitkomst.ok) setScanBevestigd((b) => ({ ...b, [uitkomst.naam]: 1 }));
         else scanFouten.push(`${uitkomst.naam}: ${uitkomst.fout ?? "versturen mislukt"}`);
+        if (uitkomst.alAanwezig) setScanAlAanwezig((a) => ({ ...a, [uitkomst.naam]: true }));
       }
+      // Foto's, video's en 360-opnames: die stuurt de server tijdens het
+      // aanmaken als foto's mee naar de order. Hier alleen tonen hoe het
+      // afliep — en een bestand dat als link is meegegaan apart benoemen, want
+      // dat is iets anders dan een echte bijlage.
+      const media = (data.media ?? []) as {
+        naam: string;
+        map: string;
+        ok: boolean;
+        fout?: string;
+        alAanwezig?: boolean;
+        alsLink?: boolean;
+      }[];
+      for (const uitkomst of media) {
+        setMediataskSteps((s2) => ({
+          ...s2,
+          [`media:${uitkomst.map}/${uitkomst.naam}`]: uitkomst.ok ? "done" : "error",
+        }));
+        if (!uitkomst.ok) scanFouten.push(`${uitkomst.naam}: ${uitkomst.fout ?? "versturen mislukt"}`);
+      }
+      setMediaAlsLink(media.some((m) => m.alsLink));
+
       if (scanFouten.length > 0) setMediataskError(scanFouten.join(" · "));
 
       // Indienen gebeurt op de server bij submitNow; alleen als er scans waren
@@ -827,6 +1019,15 @@ function DocumentenContent() {
                 <span className="dbx-strip-check" aria-hidden="true">✓</span>
                 Map aangemaakt — <span className="dbx-folder-path">{folderPath}</span>
               </span>
+              {/* De order bestaat al sinds de bevestigingspop-up; dat hier
+                  tonen maakt duidelijk waar de scans op de achtergrond heen
+                  gaan. */}
+              {vasteOrderId && (
+                <span className="dbx-strip-progress-label" title={`Mediatask-order #${vasteOrderId}`}>
+                  <span className="dbx-strip-check" aria-hidden="true">✓</span> Order #{vasteOrderId} bij
+                  Mediatask
+                </span>
+              )}
               <button
                 type="button"
                 className="dbx-strip-refresh"
@@ -948,6 +1149,15 @@ function DocumentenContent() {
                   ? "1 scan gaat als puntenwolk mee naar Mediatask: "
                   : `${teVersturenScans.length} scans gaan als puntenwolk mee naar Mediatask: `}
                 {teVersturenScans.map((s) => s.name).join(", ")}
+                {/* Wat op de achtergrond al is doorgestuurd hoeft bij het
+                    afronden niet meer mee — dat scheelt precies de langste
+                    wachttijd van de oude flow. */}
+                {(() => {
+                  const alKlaar = teVersturenScans.filter((s) => pcStatus[s.name] === "klaar").length;
+                  return alKlaar > 0
+                    ? ` — ${alKlaar === teVersturenScans.length ? "allemaal" : alKlaar} al bij Mediatask (order #${vasteOrderId})`
+                    : null;
+                })()}
               </p>
             )}
             <button
@@ -957,7 +1167,8 @@ function DocumentenContent() {
                 loading ||
                 !hasMediataskConfig ||
                 filesZonderVerdieping.length > 0 ||
-                nogAanHetUploaden.length > 0
+                nogAanHetUploaden.length > 0 ||
+                pcNogBezig > 0
               }
               onClick={() => {
                 // Eerst de scan laten zien, daarna pas versturen. Is er geen
@@ -971,6 +1182,8 @@ function DocumentenContent() {
                 ? "Dropbox-bestanden laden…"
                 : nogAanHetUploaden.length > 0
                   ? `Wachten op Dropbox — nog ${nogAanHetUploaden.length} bestand${nogAanHetUploaden.length === 1 ? "" : "en"} bezig`
+                : pcNogBezig > 0
+                  ? `Scans gaan al naar Mediatask — nog ${pcNogBezig} bezig`
                 : filesZonderVerdieping.length > 0
                   ? "Verdiepingen ontbreken nog"
                   : optimizedFile && !scanCheckDone
@@ -1037,6 +1250,7 @@ function DocumentenContent() {
             {(() => {
               const klaar = !!mediataskOrderId && !mediataskError && !mediataskSubmitError;
               const scanSleutels = Object.keys(mediataskSteps).filter((k) => k.startsWith("scan:"));
+              const mediaSleutels = Object.keys(mediataskSteps).filter((k) => k.startsWith("media:"));
               const gevuld = LINK_FOLDERS.filter((f) => (existing[f]?.length ?? 0) > 0 && f !== "Optimized");
               const leeg = LINK_FOLDERS.filter((f) => (existing[f]?.length ?? 0) === 0);
               const teken = (st: MediataskStepStatus | undefined) =>
@@ -1080,7 +1294,9 @@ function DocumentenContent() {
                   <ul className="upload-list">
                     <li className={klasse(mediataskSteps.order)}>
                       {teken(mediataskSteps.order)}
-                      Order aanmaken bij Mediatask
+                      {vasteOrderId
+                        ? `Order #${vasteOrderId} afmaken (staat al bij Mediatask)`
+                        : "Order aanmaken bij Mediatask"}
                     </li>
                     <li className={klasse(mediataskSteps.submit)}>
                       {teken(mediataskSteps.submit)}
@@ -1103,7 +1319,9 @@ function DocumentenContent() {
                                 {st === "busy"
                                   ? "doorsturen…"
                                   : st === "done"
-                                    ? `staat bij Mediatask${scanBevestigd[naam] ? ` (${scanBevestigd[naam]} aan order)` : ""}`
+                                    ? scanAlAanwezig[naam]
+                                      ? "stond al bij Mediatask — tijdens het uploaden doorgestuurd"
+                                      : `staat bij Mediatask${scanBevestigd[naam] ? ` (${scanBevestigd[naam]} aan order)` : ""}`
                                     : st === "error"
                                       ? "niet aangekomen"
                                       : "in de wachtrij"}
@@ -1138,6 +1356,35 @@ function DocumentenContent() {
                           </span>
                         </div>
                       )}
+                    </>
+                  )}
+
+                  {mediaSleutels.length > 0 && (
+                    <>
+                      <p className="upload-groep">
+                        Foto&apos;s en video&apos;s — {mediaAlsLink ? "via de downloadlinks in de opmerking bij de order" : "als foto aan de order"}
+                      </p>
+                      <ul className="upload-list">
+                        {mediaSleutels.map((k) => {
+                          const naam = k.slice(6);
+                          const st = mediataskSteps[k];
+                          return (
+                            <li key={k} className={klasse(st)}>
+                              {teken(st)}
+                              <span className="upload-step-naam">{naam}</span>
+                              <span className="upload-step-note">
+                                {st === "done"
+                                  ? mediaAlsLink
+                                    ? "als link meegegeven"
+                                    : "hangt als foto aan de order"
+                                  : st === "error"
+                                    ? "niet aangekomen"
+                                    : "doorsturen…"}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
                     </>
                   )}
 

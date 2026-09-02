@@ -44,7 +44,15 @@ export interface UploadTask {
   etaSeconds?: number | null;
 }
 
-const MAX_PARALLEL = 3;
+/**
+ * Parallelisme op gewicht i.p.v. op aantal bestanden. "3 bestanden tegelijk"
+ * behandelde 60 foto's van 800KB hetzelfde als 3 video's van 100MB — de
+ * uplink stond bij fotoseries grotendeels leeg. Een klein bestand weegt 1,
+ * een groot bestand (dat zelf al in parallelle blokken gaat) weegt 3: binnen
+ * het budget passen dus 6 foto's, of 2 grote bestanden, of een mengsel.
+ */
+const PARALLEL_BUDGET = 6;
+const GEWICHT_GROOT = 3;
 // Boven deze grens accepteert een enkele Dropbox-upload het bestand niet meer
 // in één keer; dan valt de upload terug op de chunked server-route.
 const DIRECT_UPLOAD_MAX = 140 * 1024 * 1024;
@@ -74,8 +82,16 @@ const PARALLEL_VANAF = 24 * 1024 * 1024;
 let tasks: UploadTask[] = [];
 const listeners = new Set<() => void>();
 const pending: { task: UploadTask; file: File }[] = [];
-let running = 0;
+let runningWeight = 0;
 let seq = 0;
+
+// Eigen rijtje voor het verkleinen van foto's, los van de uploadslots.
+// Vroeger gebeurde het verkleinen bínnen een uploadslot: terwijl de CPU een
+// HEIC decodeerde deed dat netwerkslot niets. Nu werkt de compressie vooruit
+// en krijgen de uploadslots alleen bestanden die klaar zijn om te versturen.
+const compressPending: { task: UploadTask; file: File }[] = [];
+let compressing = 0;
+const COMPRESS_PARALLEL = 2;
 
 function emit() {
   // Nieuwe array-referentie: useSyncExternalStore vergelijkt op identiteit.
@@ -165,8 +181,49 @@ export function enqueue(
   // Meteen vastleggen: als de iPad het tabblad afsluit terwijl dit nog
   // loopt, pakken we 'm bij de volgende keer openen weer op.
   void bewaarUpload({ id: task.id, folderPath, folder, name: file.name, file, account: account ?? null });
-  pending.push({ task, file });
-  pump();
+  routeer(task, file);
+}
+
+/**
+ * Zet een bestand op het juiste rijtje: eerst verkleinen (foto's), of direct
+ * de uploadwachtrij in. Eén plek, zodat ook hervatte en opnieuw geprobeerde
+ * uploads door de compressie gaan — anders zou een hervatte fotoserie
+ * ineens de originelen versturen.
+ */
+function routeer(task: UploadTask, file: File) {
+  if (mayCompressFolder(task.folder) && isCompressibleImage(file)) {
+    compressPending.push({ task, file });
+    pumpCompress();
+  } else {
+    pending.push({ task, file });
+    pump();
+  }
+}
+
+function pumpCompress() {
+  while (compressing < COMPRESS_PARALLEL && compressPending.length > 0) {
+    const next = compressPending.shift()!;
+    compressing++;
+    void (async () => {
+      let file = next.file;
+      // compressImage geeft bij elk probleem het origineel terug; de extra
+      // vangrail hier is voor het geval zelfs dat misgaat — een mislukte
+      // verkleining mag nooit de upload blokkeren.
+      try {
+        file = await compressImage(next.file);
+        if (file !== next.file) {
+          patch(next.task.id, { name: file.name, savedBytes: next.file.size - file.size });
+        }
+      } catch {
+        file = next.file;
+      }
+      pending.push({ task: next.task, file });
+      pump();
+    })().finally(() => {
+      compressing--;
+      pumpCompress();
+    });
+  }
 }
 
 /**
@@ -202,13 +259,10 @@ export async function hervatOpenstaandeUploads(): Promise<string[]> {
       dropbox: "uploading",
       };
     tasks = [...tasks, task];
-    pending.push({ task, file: u.file });
+    routeer(task, u.file);
     nieuw++;
   }
-  if (nieuw > 0) {
-    emit();
-    pump();
-  }
+  if (nieuw > 0) emit();
   return hervat;
 }
 
@@ -256,14 +310,11 @@ export async function probeerOpnieuw(ids: string[]): Promise<number> {
     } else {
       tasks = [...tasks, task];
     }
-    pending.push({ task, file: u.file });
+    routeer(task, u.file);
     gestart++;
   }
 
-  if (gestart > 0) {
-    emit();
-    pump();
-  }
+  if (gestart > 0) emit();
   return gestart;
 }
 
@@ -275,28 +326,34 @@ export function forgetTasks(ids: string[]) {
   emit();
 }
 
+function gewicht(file: File): number {
+  return file.size >= PARALLEL_VANAF ? GEWICHT_GROOT : 1;
+}
+
 function pump() {
-  while (running < MAX_PARALLEL && pending.length > 0) {
-    const next = pending.shift()!;
-    running++;
+  for (;;) {
+    if (pending.length === 0) return;
+    // Het eerste bestand dat nog in het budget past. Een grote video vooraan
+    // mag de foto's erachter niet laten wachten — die passen er wél naast.
+    let idx = pending.findIndex((p) => runningWeight + gewicht(p.file) <= PARALLEL_BUDGET);
+    if (idx === -1) {
+      // Niets past meer; staat er helemaal niets te lopen, dan toch de
+      // eerste nemen — er moet altijd íéts kunnen starten.
+      if (runningWeight > 0) return;
+      idx = 0;
+    }
+    const next = pending.splice(idx, 1)[0];
+    const w = gewicht(next.file);
+    runningWeight += w;
     void runTask(next.task, next.file).finally(() => {
-      running--;
+      runningWeight -= w;
       pump();
     });
   }
 }
 
-async function runTask(task: UploadTask, original: File) {
-  // Foto's eerst verkleinen: dat scheelt vaak een veelvoud aan uploadtijd.
-  // Gebeurt alleen in de foto-mappen; scanbestanden blijven onaangeroerd.
-  let file = original;
-  if (mayCompressFolder(task.folder) && isCompressibleImage(original)) {
-    file = await compressImage(original);
-    if (file !== original) {
-      patch(task.id, { name: file.name, savedBytes: original.size - file.size });
-    }
-  }
-
+async function runTask(task: UploadTask, file: File) {
+  // Verkleinen is hier al gebeurd (zie pumpCompress): dit slot is puur netwerk.
   const fullPath = `${task.folderPath}/${task.folder}/${file.name}`;
   startedAt.set(task.id, Date.now());
   try {
@@ -355,20 +412,23 @@ async function uploadDirect(task: UploadTask, file: File, fullPath: string) {
   }
   const { link } = (await linkRes.json()) as { link: string };
 
-  await new Promise<void>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", link);
-    xhr.setRequestHeader("Content-Type", "application/octet-stream");
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) setProgress(task.id, e.loaded, e.total);
-    };
-    xhr.onload = () =>
-      xhr.status >= 200 && xhr.status < 300
-        ? resolve()
-        : reject(new Error(`Dropbox weigerde het bestand (${xhr.status})`));
-    xhr.onerror = () => reject(new Error("Netwerkfout bij uploaden"));
-    xhr.send(file);
-  });
+  await metBlokRetry(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", link);
+        xhr.setRequestHeader("Content-Type", "application/octet-stream");
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) setProgress(task.id, e.loaded, e.total);
+        };
+        xhr.onload = () =>
+          xhr.status >= 200 && xhr.status < 300
+            ? resolve()
+            : reject(new Error(`Dropbox weigerde het bestand (gaf ${xhr.status})`));
+        xhr.onerror = () => reject(new Error("Netwerkfout bij uploaden"));
+        xhr.send(file);
+      })
+  );
 }
 
 /** Terugval: via onze server (geldt ook voor bestanden > 4MB via chunks). */
@@ -433,6 +493,34 @@ export function blokIndeling(
     .filter(([from]) => gedaan.has(from))
     .reduce((tot, [from, to]) => tot + (to - from), 0);
   return { alle, resterend, alGedaan };
+}
+
+/**
+ * Herkansingen per blok. Eén netwerk-hik op blok 5 van 8 gooide voorheen de
+ * hele poging weg; nu krijgt dat ene blok gewoon nog een kans terwijl de rest
+ * blijft staan. Alleen bij fouten waar herhalen zin heeft (netwerk, 429,
+ * 5xx) — een 401 blijft meteen fataal, daar lost wachten niets aan op.
+ */
+const BLOK_POGINGEN = 3;
+
+function wachtEven(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function blokFoutHerstelbaar(err: unknown): boolean {
+  const melding = err instanceof Error ? err.message : "";
+  return /Netwerkfout/.test(melding) || /gaf (429|5\d\d)/.test(melding);
+}
+
+async function metBlokRetry(stuur: () => Promise<void>): Promise<void> {
+  for (let poging = 1; ; poging++) {
+    try {
+      return await stuur();
+    } catch (err) {
+      if (poging >= BLOK_POGINGEN || !blokFoutHerstelbaar(err)) throw err;
+      await wachtEven(poging === 1 ? 1000 : 3000);
+    }
+  }
 }
 
 function safeArg(value: unknown): string {
@@ -534,28 +622,31 @@ async function chunkedDirectPoging(
       const [from, to] = ranges[i];
       // Het blok dat het bestand compleet maakt sluit de sessie af.
       const arg = { cursor: { session_id: sessionId, offset: from }, close: to === file.size };
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", "https://content.dropboxapi.com/2/files/upload_session/append_v2");
-        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-        xhr.setRequestHeader("Content-Type", "application/octet-stream");
-        xhr.setRequestHeader("Dropbox-API-Arg", safeArg(arg));
-        xhr.upload.onprogress = (e) => {
-          if (!e.lengthComputable) return;
-          inFlight.set(workerId, e.loaded);
-          report();
-        };
-        xhr.onload = () => {
-          inFlight.delete(workerId);
-          if (xhr.status >= 200 && xhr.status < 300) resolve();
-          else reject(new Error(`Dropbox append gaf ${xhr.status}`));
-        };
-        xhr.onerror = () => {
-          inFlight.delete(workerId);
-          reject(new Error("Netwerkfout bij uploaden"));
-        };
-        xhr.send(file.slice(from, to));
-      });
+      await metBlokRetry(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "https://content.dropboxapi.com/2/files/upload_session/append_v2");
+            xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+            xhr.setRequestHeader("Content-Type", "application/octet-stream");
+            xhr.setRequestHeader("Dropbox-API-Arg", safeArg(arg));
+            xhr.upload.onprogress = (e) => {
+              if (!e.lengthComputable) return;
+              inFlight.set(workerId, e.loaded);
+              report();
+            };
+            xhr.onload = () => {
+              inFlight.delete(workerId);
+              if (xhr.status >= 200 && xhr.status < 300) resolve();
+              else reject(new Error(`Dropbox append gaf ${xhr.status}`));
+            };
+            xhr.onerror = () => {
+              inFlight.delete(workerId);
+              reject(new Error("Netwerkfout bij uploaden"));
+            };
+            xhr.send(file.slice(from, to));
+          })
+      );
       uploaded += to - from;
       klaar.add(from);
       // Meteen vastleggen: juist een afgebroken sessie moet dit terugvinden.
@@ -605,16 +696,29 @@ async function uploadChunked(task: UploadTask, file: File, fullPath: string) {
       if (i >= ranges.length) return;
       const [from, to] = ranges[i];
       const chunk = await file.slice(from, to).arrayBuffer();
-      const res = await fetch(
-        `/api/dropbox/upload-chunk?action=append&sessionId=${encodeURIComponent(sessionId)}&offset=${from}${
-          to === file.size ? "&close=1" : ""
-        }`,
-        { method: "POST", body: chunk }
-      );
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error ?? "Uploaden mislukt");
-      }
+      await metBlokRetry(async () => {
+        let res: Response;
+        try {
+          res = await fetch(
+            `/api/dropbox/upload-chunk?action=append&sessionId=${encodeURIComponent(sessionId)}&offset=${from}${
+              to === file.size ? "&close=1" : ""
+            }`,
+            { method: "POST", body: chunk }
+          );
+        } catch {
+          // fetch gooit een kale TypeError bij een netwerkfout; hernoemen
+          // zodat metBlokRetry 'm als herstelbaar herkent.
+          throw new Error("Netwerkfout bij uploaden");
+        }
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          // Statuscode altijd in de melding, zodat metBlokRetry netwerk- en
+          // serverfouten kan herkennen als herstelbaar.
+          throw new Error(
+            data?.error ? `${data.error} (gaf ${res.status})` : `Uploaden mislukt — gaf ${res.status}`
+          );
+        }
+      });
       uploaded += to - from;
       setProgress(task.id, uploaded, file.size);
     }
