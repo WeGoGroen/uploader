@@ -6,6 +6,8 @@ import {
   rechtenVan,
   type UploadRechten,
 } from "@/lib/clickup";
+import { stuurMail } from "@/lib/mail";
+import { uploaderUitnodiging } from "@/lib/mail-sjablonen";
 
 export const maxDuration = 30;
 
@@ -69,6 +71,16 @@ export async function POST(request: Request) {
     );
   }
 
+  /*
+    Vóór het opslaan kijken of deze naam al bestond: dit endpoint bedient én
+    het uitnodigen van iemand nieuws, én het wijzigen van rechten van iemand
+    die er al staat (dezelfde form, hetzelfde POST). Alleen bij een naam die
+    er nog niet was, is er iets om een welkomstmail over te sturen — anders
+    kreeg iemand bij elke rechtenwijziging opnieuw een "welkom".
+  */
+  const voorAf = await getClickUpAccounts().catch(() => []);
+  const bestondAl = voorAf.some((a) => a.name === naam);
+
   try {
     await patchClickUpAccount({ name: naam, email, rechten });
   } catch (err) {
@@ -78,6 +90,20 @@ export async function POST(request: Request) {
     );
   }
 
+  let gemaild = false;
+  if (!bestondAl && email) {
+    const wachtwoord = process.env.APP_PASSWORD;
+    if (wachtwoord) {
+      const { onderwerp, html } = uploaderUitnodiging({
+        naam,
+        appWachtwoord: wachtwoord,
+        rechten: rechten as { energielabel: boolean; nen: boolean; media: boolean },
+      });
+      const resultaat = await stuurMail(onderwerp, html, [email]);
+      gemaild = resultaat.verstuurd;
+    }
+  }
+
   const accounts = await getClickUpAccounts();
   const account = accounts.find((a) => a.name === naam);
   return NextResponse.json({
@@ -85,5 +111,7 @@ export async function POST(request: Request) {
     naam,
     heeftToken: Boolean(account?.token),
     rechten: rechtenVan(account),
+    nieuw: !bestondAl,
+    gemaild,
   });
 }
