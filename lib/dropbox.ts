@@ -688,6 +688,53 @@ function toDirectDownloadUrl(shareUrl: string): string {
     geen dubbele upload nodig, ze staan al in Dropbox. */
 /** Zelfde als getFileDirectLinks, maar mét bestandsnaam — nodig om in een
     Mediatask-opmerking te kunnen zeggen wélk bestand bij welke link hoort. */
+/**
+ * Een tijdelijke link naar één bestand: vier uur geldig, geen blijvend spoor.
+ *
+ * Bewust niet getOrCreateSharedLink: die maakt een permanente deellink, en
+ * dertig bestanden bekijken zou dan dertig bestanden voorgoed deelbaar maken.
+ * Voor het beoordelen van een oplevering wil je precies het omgekeerde — kijken
+ * zonder iets te veranderen.
+ */
+export async function getTemporaryLink(accessToken: string, path: string): Promise<string> {
+  const res = await fetch(`${DROPBOX_API_BASE}/files/get_temporary_link`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    throw new Error(`Dropbox tijdelijke link mislukt (${res.status})`);
+  }
+  const data = (await res.json()) as { link: string };
+  return data.link;
+}
+
+/**
+ * Alle bestanden in een map, met een tijdelijke link per stuk.
+ *
+ * De links worden in groepjes opgehaald: bij dertig bestanden is één-voor-één
+ * wachten zo'n dertig ritjes naar Dropbox achter elkaar, en dan staat het
+ * scherm te wachten op een lijstje.
+ */
+export async function listFolderWithTemporaryLinks(
+  accessToken: string,
+  folderPath: string
+): Promise<{ name: string; size: number; url: string | null }[]> {
+  const files = await listFolderFiles(accessToken, folderPath);
+  const uit: { name: string; size: number; url: string | null }[] = [];
+  const GROEP = 6;
+  for (let i = 0; i < files.length; i += GROEP) {
+    const groep = files.slice(i, i + GROEP);
+    const links = await Promise.all(
+      groep.map((f) =>
+        getTemporaryLink(accessToken, `${folderPath}/${f.name}`).catch(() => null)
+      )
+    );
+    groep.forEach((f, n) => uit.push({ name: f.name, size: f.size, url: links[n] }));
+  }
+  return uit;
+}
+
 export async function getFileLinksWithNames(
   accessToken: string,
   folderPath: string
