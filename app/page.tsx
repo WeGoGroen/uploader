@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { detectServices, extractGrossFloorArea, extractKlant } from "@/lib/calendar-services";
-import { calendarLocationToBagQuery, sameAddress, splitAddress } from "@/lib/address-format";
+import { calendarLocationToBagQuery, normalizeForMatch, sameAddress, splitAddress } from "@/lib/address-format";
 import { checkBagAddress, type BagCheckResult } from "@/lib/bag-check";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 import UploadPanel from "@/components/UploadPanel";
@@ -75,6 +75,11 @@ export default function Dashboard() {
   const [drafts, setDrafts] = useState<DraftRecord[] | null>(null);
   const [mediataskOrders, setMediataskOrders] = useState<MediataskOrderSummary[]>([]);
   const [clickupTaskNames, setClickupTaskNames] = useState<string[]>([]);
+  // Handmatige "toch al gedaan"-bevestigingen — het vangnet voor als de
+  // automatische matching een echt afgeronde opname mist (net iets andere
+  // adresschrijfwijze bij het starten). Zie lib/klaar-meldingen.ts.
+  const [klaarMeldingen, setKlaarMeldingen] = useState<Set<string>>(new Set());
+  const [meldBezig, setMeldBezig] = useState<string | null>(null);
   // Wie er op dit apparaat actief is: het af-te-maken-paneel toont alleen
   // diens werk. De rest van het dashboard blijft over iedereen gaan.
   const [actieveGebruiker, setActieveGebruiker] = useState<string | null>(null);
@@ -91,7 +96,7 @@ export default function Dashboard() {
 
   const load = useCallback(async () => {
     setCalendarError(null);
-    const [evts, drafts, orders, taskNames, actief] = await Promise.all([
+    const [evts, drafts, orders, taskNames, actief, klaarGemeld] = await Promise.all([
       fetch("/api/calendar/today", { cache: "no-store" })
         .then(async (res) => {
           if (!res.ok) {
@@ -122,13 +127,32 @@ export default function Dashboard() {
         .then((res) => (res.ok ? res.json() : { active: null }))
         .then((data) => (data.active ?? null) as string | null)
         .catch(() => null),
+      fetch("/api/klaar-melden", { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : { straten: [] }))
+        .then((data) => new Set((data.straten ?? []) as string[]))
+        .catch(() => new Set<string>()),
     ]);
     setEvents(evts);
     setDrafts(drafts);
     setMediataskOrders(orders);
     setClickupTaskNames(taskNames);
     setActieveGebruiker(actief);
+    setKlaarMeldingen(klaarGemeld);
   }, []);
+
+  async function meldKlaar(street: string) {
+    setMeldBezig(street);
+    try {
+      await fetch("/api/klaar-melden", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ street }),
+      });
+      await load();
+    } finally {
+      setMeldBezig(null);
+    }
+  }
 
   useEffect(() => {
     load().finally(() => setLoading(false));
@@ -190,6 +214,12 @@ export default function Dashboard() {
   // administratie, die kan achterlopen) of er al een energielabel-taak bestaat.
   function hasClickUpTask(street: string): boolean {
     return clickupTaskNames.some((name) => sameAddress(name, street));
+  }
+
+  // Vangnet, zie lib/klaar-meldingen.ts: een expliciete "ik heb dit echt
+  // gedaan"-bevestiging telt net zo goed mee als een automatische match.
+  function isHandmatigKlaarGemeld(street: string): boolean {
+    return klaarMeldingen.has(normalizeForMatch(splitAddress(street).street));
   }
 
   return (
@@ -275,8 +305,9 @@ export default function Dashboard() {
                 // groen vinkje op werk dat nog gedaan moet worden.
                 const incompleteDocs = draft?.incompleteDocs ?? [];
                 const energielabelDone =
-                  incompleteDocs.length === 0 &&
-                  (hasClickUpTask(statusStreet) || draft?.status === "uploaded" || !!draft?.clickupTaskUrl);
+                  isHandmatigKlaarGemeld(statusStreet) ||
+                  (incompleteDocs.length === 0 &&
+                    (hasClickUpTask(statusStreet) || draft?.status === "uploaded" || !!draft?.clickupTaskUrl));
                 const energielabelStarted = !!draft;
                 const nenDone = hasMediataskOrder(statusStreet) || !!draft?.heeftMediatask;
                 const time = formatTime(e.start);
@@ -371,9 +402,20 @@ export default function Dashboard() {
                         ) : energielabelStarted ? (
                           <StatusPill label="Energielabel: concept" tone="busy" />
                         ) : (
-                          <a href={`/energielabel?addr=${encodeURIComponent(bagQuery)}`} className="btn btn-quiet">
-                            Energielabel starten
-                          </a>
+                          <>
+                            <a href={`/energielabel?addr=${encodeURIComponent(bagQuery)}`} className="btn btn-quiet">
+                              Energielabel starten
+                            </a>
+                            <button
+                              type="button"
+                              className="today-appt-service-tag"
+                              title="Al geüpload, maar staat hier nog als niet gedaan? Meld het handmatig."
+                              disabled={meldBezig === statusStreet}
+                              onClick={() => meldKlaar(statusStreet)}
+                            >
+                              {meldBezig === statusStreet ? "Bezig…" : "Toch al gedaan?"}
+                            </button>
+                          </>
                         ))}
                       {services.nen &&
                         (nenDone ? (

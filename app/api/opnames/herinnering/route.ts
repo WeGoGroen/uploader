@@ -119,7 +119,8 @@ export async function GET(request: Request) {
     const res = await stuurMail(
       `${SOORT_LABEL[h.soort]} niet afgemaakt — ${h.draft.straatnaam || h.draft.titel}`,
       opmaak(h),
-      [email]
+      [email],
+      "herinnering_opname"
     );
     // Pas als vlag zetten ná verzending: mislukt het, dan mag de volgende
     // ronde het opnieuw proberen i.p.v. het stil te laten vallen.

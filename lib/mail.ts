@@ -22,7 +22,14 @@ export async function stuurMail(
    * berichten die bij één persoon horen — een herinnering over een eigen
    * opname hoort niet bij het hele kantoor in de bus te vallen.
    */
-  aanOverride?: string[]
+  aanOverride?: string[],
+  /**
+   * Voor het archief in het Business Control Center: welk soort mail dit is.
+   * Vrije tekst, want dit dashboard heeft geen mailkoppeling van zichzelf en
+   * hoeft dus geen vaste lijst met soorten te kennen — het toont gewoon wat
+   * hier binnenkomt.
+   */
+  soort = "onbekend"
 ): Promise<MailResultaat> {
   const key = process.env.RESEND_API_KEY;
   // Vaste ontvangers, bewust in de code en niet in een omgevingsvariabele: een
@@ -40,8 +47,16 @@ export async function stuurMail(
   // de accounthouder; dat is hier precies de bedoeling.
   const van = process.env.MAIL_FROM || "WeGoGroen <onboarding@resend.dev>";
 
-  if (!key) return { verstuurd: false, reden: "RESEND_API_KEY ontbreekt" };
-  if (naar.length === 0) return { verstuurd: false, reden: "geen ontvangers ingesteld" };
+  if (!key) {
+    const resultaat = { verstuurd: false, reden: "RESEND_API_KEY ontbreekt" };
+    await archiveer(soort, onderwerp, naar, resultaat);
+    return resultaat;
+  }
+  if (naar.length === 0) {
+    const resultaat = { verstuurd: false, reden: "geen ontvangers ingesteld" };
+    await archiveer(soort, onderwerp, naar, resultaat);
+    return resultaat;
+  }
 
   async function verstuur(aan: string[]): Promise<Response> {
     return fetch("https://api.resend.com/emails", {
@@ -70,10 +85,53 @@ export async function stuurMail(
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      return { verstuurd: false, reden: `Resend gaf ${res.status}: ${body.slice(0, 200)}` };
+      const resultaat = { verstuurd: false, reden: `Resend gaf ${res.status}: ${body.slice(0, 200)}` };
+      await archiveer(soort, onderwerp, aan, resultaat);
+      return resultaat;
     }
-    return { verstuurd: true, ontvangers: aan };
+    const resultaat = { verstuurd: true, ontvangers: aan };
+    await archiveer(soort, onderwerp, aan, resultaat);
+    return resultaat;
   } catch (err) {
-    return { verstuurd: false, reden: err instanceof Error ? err.message : "onbekende fout" };
+    const resultaat = { verstuurd: false, reden: err instanceof Error ? err.message : "onbekende fout" };
+    await archiveer(soort, onderwerp, naar, resultaat);
+    return resultaat;
+  }
+}
+
+/**
+ * Meldt een verzendpoging aan het archief in het Business Control Center —
+ * gelukt of niet, want een mislukte poging is minstens zo interessant als een
+ * geslaagde.
+ *
+ * Dit dashboard heeft zelf geen database; het BCC wel, dus daar staat het
+ * archief. Hetzelfde dienst-token waarmee de uploader er al binnenkomt voor
+ * andere dingen, nu de andere kant op. Puur aanvulling: lukt het melden niet
+ * (BCC onbereikbaar, geen koppeling ingesteld), dan is de mail zelf gewoon
+ * verstuurd en verandert er verder niets.
+ */
+async function archiveer(
+  soort: string,
+  onderwerp: string,
+  ontvangers: string[],
+  resultaat: MailResultaat
+): Promise<void> {
+  const basis = (process.env.CONTROL_CENTER_URL ?? "").replace(/\/+$/, "");
+  const token = process.env.CONTROL_CENTER_TOKEN;
+  if (!basis || !token) return;
+  try {
+    await fetch(`${basis}/api/mails`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        soort,
+        onderwerp,
+        ontvangers,
+        verstuurd: resultaat.verstuurd,
+        reden: resultaat.reden ?? null,
+      }),
+    });
+  } catch {
+    // Aanvulling, geen voorwaarde — zie hierboven.
   }
 }

@@ -34,6 +34,6 @@ export async function POST(request: Request) {
   }
 
   const { onderwerp, html } = bccUitnodiging({ naam, code, beheerder: body?.beheerder ?? null });
-  const resultaat = await stuurMail(onderwerp, html, [email]);
+  const resultaat = await stuurMail(onderwerp, html, [email], "uitnodiging_bcc");
   return NextResponse.json(resultaat);
 }

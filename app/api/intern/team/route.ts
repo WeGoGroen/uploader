@@ -99,7 +99,7 @@ export async function POST(request: Request) {
         appWachtwoord: wachtwoord,
         rechten: rechten as { energielabel: boolean; nen: boolean; media: boolean },
       });
-      const resultaat = await stuurMail(onderwerp, html, [email]);
+      const resultaat = await stuurMail(onderwerp, html, [email], "uitnodiging_upload");
       gemaild = resultaat.verstuurd;
     }
   }

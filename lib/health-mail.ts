@@ -157,7 +157,9 @@ export async function mailBijStoring(
 
   const res = await stuurMail(
     `⚠ WeGoGroen upload portaal: ${storingen.length} ${storingen.length === 1 ? "storing" : "storingen"}`,
-    opmaak(rapport, storingen)
+    opmaak(rapport, storingen),
+    undefined,
+    "storing"
   );
   return res.verstuurd
     ? `mail verstuurd naar ${res.ontvangers?.join(", ")}`

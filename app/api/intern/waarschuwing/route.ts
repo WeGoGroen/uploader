@@ -52,6 +52,11 @@ export async function POST(request: Request) {
     else onbekend.push(wie);
   }
 
-  const resultaat = await stuurMail(body.onderwerp, body.html, aan.size > 0 ? [...aan] : undefined);
+  const resultaat = await stuurMail(
+    body.onderwerp,
+    body.html,
+    aan.size > 0 ? [...aan] : undefined,
+    "waarschuwing_bcc"
+  );
   return NextResponse.json({ ...resultaat, onbekend });
 }
