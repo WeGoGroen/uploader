@@ -63,6 +63,11 @@ export default function TodayAppointments({
   const [mediataskOrders, setMediataskOrders] = useState<MediataskOrderSummary[]>([]);
   const [clickupTaskNames, setClickupTaskNames] = useState<string[]>([]);
   const [connected, setConnected] = useState(true);
+  // Welke "Bedoelde je?"-suggestie al is aangeklikt, per adres — anders
+  // blijft dat blok na de keuze gewoon zichtbaar staan, want de BAG-uitslag
+  // zelf verandert niet door een klik. Gekeyd op de BAG-zoektekst, net als
+  // bagInfo hierboven.
+  const [pickedFix, setPickedFix] = useState<Set<string>>(new Set());
   // Per opgeschoonde adrestekst: de BAG-uitslag, inclusief gelijkende
   // adressen als het adres zelf niet bestaat. Gekeyd op de adrestekst (niet
   // het event-id), zodat een in de agenda gecorrigeerd adres meteen een
@@ -183,7 +188,7 @@ export default function TodayAppointments({
           // bij aanklikken gebeurt.
           const bagQuery = calendarLocationToBagQuery(address);
           const bag = bagInfo[bagQuery];
-          const bagMissing = bag?.ok === false;
+          const bagMissing = bag?.ok === false && !pickedFix.has(bagQuery);
 
           // Grijs tonen als de afspraak expliciet de ándere dienst noemt
           // (bv. een pure NEN2580-afspraak op de energielabel-pagina), of als
@@ -249,7 +254,10 @@ export default function TodayAppointments({
                           key={label}
                           type="button"
                           className="today-appt-fix-btn"
-                          onClick={() => onPick(label, klant, extractGrossFloorArea(e.description))}
+                          onClick={() => {
+                            setPickedFix((p) => new Set(p).add(bagQuery));
+                            onPick(label, klant, extractGrossFloorArea(e.description));
+                          }}
                         >
                           {label}
                         </button>
@@ -259,7 +267,14 @@ export default function TodayAppointments({
                     onUseLocation && (
                       <>
                         <span className="today-appt-fix-label">Geen gelijkend adres gevonden.</span>
-                        <button type="button" className="today-appt-fix-btn" onClick={onUseLocation}>
+                        <button
+                          type="button"
+                          className="today-appt-fix-btn"
+                          onClick={() => {
+                            setPickedFix((p) => new Set(p).add(bagQuery));
+                            onUseLocation();
+                          }}
+                        >
                           📍 Adressen in de buurt
                         </button>
                       </>
