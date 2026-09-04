@@ -322,6 +322,14 @@ export default function Dashboard() {
                 };
                 const klant = extractKlant(e.description);
                 const grossFloorArea = extractGrossFloorArea(e.description);
+                // Is al het gedetecteerde werk voor dit adres al klaar, dan
+                // helpt een BAG-waarschuwing niemand meer — er valt niets
+                // meer te starten. Zonder deze check bleef "Bedoelde je?"
+                // voor altijd staan bij een al afgeronde opname (de keuze
+                // leeft alleen in React-state en is weg na een ververs of
+                // herlaad), terwijl de groene pil er al naast stond.
+                const bagBlocking =
+                  bagMissing && (!services.energielabel || !energielabelDone) && (!services.nen || !nenDone);
 
                 return (
                   <div className="draft-row" key={e.id} style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -335,7 +343,7 @@ export default function Dashboard() {
                         <div className="draft-title">{street}</div>
                         {cityLine && <div className="draft-meta">{cityLine}</div>}
                         <div className="today-appt-services" style={{ marginTop: 6 }}>
-                          {bagMissing && (
+                          {bagBlocking && (
                             <span className="today-appt-service-tag is-warning">⚠ Niet in BAG</span>
                           )}
                           {picked && (
@@ -362,7 +370,7 @@ export default function Dashboard() {
                         {/* Adres bestaat niet in de BAG: meteen de gevonden
                             gelijkende adressen aanbieden — één tik zet het
                             juiste adres klaar voor de knoppen hiernaast. */}
-                        {bagMissing && (
+                        {bagBlocking && (
                           <div className="today-appt-fix">
                             {bag!.similar.length > 0 ? (
                               <>
