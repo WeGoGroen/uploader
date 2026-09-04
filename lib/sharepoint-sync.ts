@@ -7,6 +7,7 @@ import {
   listFilePathsRecursive,
   projectFolderPath,
   setProjectFolderStatus,
+  statusFromName,
   sanitizePathSegment,
   saveUrl,
   type ProjectKind,
@@ -248,21 +249,15 @@ export async function syncSharePointFiles(input: {
     );
   }
 
-  // Oranje zolang de overdracht loopt. Bij honderden adressen wil je kunnen
-  // zien welke map nog onderweg is en welke af is.
-  //
-  // Let op: dit hernoemt de map (het bolletje zit ín de naam), dus het pad
-  // verandert hier. Verder werken op het pad van vóór het hernoemen schrijft
-  // naar een pad dat niet meer bestaat — en Dropbox maakt dat dan gewoon aan,
-  // met een dubbele map als resultaat. Daarom het teruggegeven pad gebruiken.
-  const naStatus = await setProjectFolderStatus(
-    dropboxToken,
-    input.kind,
-    input.woonplaats,
-    input.addressLine,
-    "bezig"
-  ).catch(() => null);
-  const projectPath = naStatus ?? bestaand.path;
+  // Bewust GEEN oranje bolletje bij de start. Dat leek netjes ("je ziet dat
+  // hij bezig is"), maar het betekende twee hernoemingen per run — en ClickUp
+  // vuurt de webhook bij elke statusaanraking opnieuw af, dus een al groene
+  // map ging telkens 🟢→🟠→🟢. Op Windows vecht de Dropbox-client die
+  // naamswijzigingen uit met Verkenner, en dan krijgt iedereen die de map
+  // open heeft "map in gebruik"-meldingen. Een run duurt bovendien minder dan
+  // een minuut; het oranje was toch nauwelijks te zien. Het bolletje wordt nu
+  // alleen nog aan het eind gezet, en alleen als de status echt verandert.
+  const projectPath = bestaand.path;
 
   const result: SyncResult = {
     status: "bezig",
@@ -429,13 +424,19 @@ export async function syncSharePointFiles(input: {
           ? "compleet"
           : "ontbreekt";
 
-  await setProjectFolderStatus(
-    dropboxToken,
-    input.kind,
-    input.woonplaats,
-    input.addressLine,
-    result.status
-  ).catch(() => null);
+  // Alleen hernoemen als het bolletje echt verandert. Een map die al groen is
+  // en groen blijft wordt niet aangeraakt — dat is het verschil tussen één
+  // naamswijziging per statusovergang en een gestage stroom waar de
+  // Windows-client van in de knoop raakt.
+  if (statusFromName(bestaand.name) !== result.status) {
+    await setProjectFolderStatus(
+      dropboxToken,
+      input.kind,
+      input.woonplaats,
+      input.addressLine,
+      result.status
+    ).catch(() => null);
+  }
 
   return result;
 }
