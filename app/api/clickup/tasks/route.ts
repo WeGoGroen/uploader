@@ -2,15 +2,7 @@ import { NextResponse } from "next/server";
 import { getRecentTaskNames, requireClickUpConfig } from "@/lib/clickup";
 import { getActiveAccountName } from "@/lib/active-account";
 import { getOptionalRedis } from "@/lib/redis";
-
-const CACHE_KEY = "clickup:taaknamen";
-/**
- * Kort cachen. Deze lijst wordt bij élke dashboardlading opgehaald, en met
- * meerdere opnemers tegelijk zou dat bij vijf pagina's een veelvoud aan
- * ClickUp-aanroepen geven. Een paar minuten oud is ruim genoeg: het gaat om
- * "is dit adres al gedaan", niet om iets dat per seconde verandert.
- */
-const CACHE_SECONDEN = 180;
+import { CACHE_KEY, CACHE_SECONDEN } from "@/lib/clickup-taken-cache";
 
 export async function GET() {
   const redis = getOptionalRedis();

@@ -3,6 +3,7 @@ import { createTask, requireClickUpConfig } from "@/lib/clickup";
 import { getActiveAccountName } from "@/lib/active-account";
 import { ensureProjectFolder } from "@/lib/dropbox";
 import { getOptionalRedis } from "@/lib/redis";
+import { verversTaakCache } from "@/lib/clickup-taken-cache";
 import type { AddressDetails } from "@/lib/pdok";
 
 // Zelfde labels als in ClickUp's eigen prioriteit-dropdown.
@@ -124,6 +125,9 @@ export async function POST(request: Request) {
     if (redis && slot) {
       await redis.set(slot, JSON.stringify(antwoord), "EX", 30 * 24 * 60 * 60).catch(() => {});
     }
+    // Zonder dit zou het dashboard tot drie minuten "nog niet gedaan" tonen
+    // over precies de taak die net is aangemaakt.
+    await verversTaakCache();
     return NextResponse.json(antwoord);
   } catch (err) {
     console.error("Failed to create ClickUp task", err);
