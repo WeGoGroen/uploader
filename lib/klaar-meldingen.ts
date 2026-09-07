@@ -1,5 +1,5 @@
 import { requireRedis } from "@/lib/redis";
-import { normalizeForMatch, splitAddress } from "@/lib/address-format";
+import { adresSleutel, splitAddress } from "@/lib/address-format";
 
 /**
  * Vangnet voor wanneer de automatische matching (ClickUp-taaknaam of concept
@@ -16,7 +16,7 @@ import { normalizeForMatch, splitAddress } from "@/lib/address-format";
  * opnemer op dat moment zag, zodat een verkeerde klik nooit een ander adres
  * groen kleurt.
  */
-const KEY = (street: string) => `klaar-melding:${normalizeForMatch(splitAddress(street).street)}`;
+const KEY = (street: string) => `klaar-melding:${adresSleutel(splitAddress(street).street)}`;
 
 // Een agendadag is voldoende, maar afspraken schuiven weleens door — twee
 // weken geeft ruim de marge zonder dat de sleutel voor altijd blijft hangen.

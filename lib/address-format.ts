@@ -8,6 +8,59 @@ export function normalizeForMatch(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+/** Romeinse etage-aanduidingen die in Amsterdamse adressen voorkomen (I t/m X). */
+const ROMEINS: Record<string, string> = {
+  i: "1",
+  ii: "2",
+  iii: "3",
+  iv: "4",
+  v: "5",
+  vi: "6",
+  vii: "7",
+  viii: "8",
+  ix: "9",
+  x: "10",
+};
+
+/**
+ * Brengt de toevoeging achter het huisnummer terug tot één schrijfwijze.
+ *
+ * Dezelfde woning wordt tussen agenda, ClickUp en de BAG in verschillende
+ * notaties geschreven, en dat is geen slordigheid maar gewoonte: in Amsterdam
+ * heet de derde etage zowel "206 III" als "206-3", en de begane grond zowel
+ * "5-HS" als "5-H" of "5 huis". Zonder deze gelijkstelling ziet de app die
+ * als drie verschillende panden en blijft werk dat al gedaan is rood staan —
+ * precies wat er bij Ceintuurbaan 206 III en Van Bossestraat 5-HS gebeurde.
+ *
+ * Alleen deze twee families worden gelijkgesteld, en alleen op de plek ná het
+ * huisnummer. Een gewone huisletter blijft dus onderscheidend ("5A" is niet
+ * "5B"), en "Dam 1" wordt nooit "Dam 10". Van de Romeinse cijfers alleen die
+ * uit i/v/x bestaan: daarmee blijven veelgebruikte huisletters als C, D, L en
+ * M gewoon letters in plaats van 100, 500, 50 en 1000.
+ */
+function normaliseerToevoeging(toevoeging: string): string {
+  const kaal = toevoeging.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!kaal) return "";
+  if (kaal === "hs" || kaal === "h" || kaal === "huis" || kaal === "bg") return "h";
+  return ROMEINS[kaal] ?? kaal;
+}
+
+/**
+ * De sleutel waarop twee adressen vergeleken worden: straatnaam, huisnummer
+ * en een tot één schrijfwijze teruggebrachte toevoeging. Herkent de app geen
+ * huisnummer, dan valt hij terug op de kale tekst — liever geen match dan een
+ * gokje.
+ */
+export function adresSleutel(street: string): string {
+  // Het huisnummer is het eerste getal dat alleen nog een toevoeging achter
+  // zich heeft; een cijfer ín de straatnaam ("1e Jan Steenstraat 5") wordt zo
+  // niet voor het huisnummer aangezien, want daar volgt nog een woord op.
+  const match = street.trim().match(/^(.+?)\s+(\d+)\s*[-\s/]?\s*([A-Za-z0-9]*)$/);
+  if (!match) return normalizeForMatch(street);
+  const [, naam, nummer, toevoeging] = match;
+  return `${normalizeForMatch(naam)}${nummer}${normaliseerToevoeging(toevoeging)}`;
+}
+
 /**
  * Vergelijkt twee adresteksten uit verschillende bronnen (agenda-afspraak,
  * ClickUp-taaknaam, Mediatask-order) en zegt of het om hetzelfde pand gaat.
@@ -18,17 +71,19 @@ export function normalizeForMatch(value: string): string {
  * dashboard betekende dat een vals "✓ geüpload": de startknop verdween en
  * het werk bleef stilletjes liggen.
  *
- * De regel is daarom: knip de postcode/plaats eraf en eis dat de resterende
- * straatregel (mét huisnummer, huisletter en toevoeging) exact gelijk is.
- * Huisletters onderscheiden echte adressen — "Dam 1" en "Dam 1A" zijn twee
- * panden — dus die mogen niet tegen elkaar wegvallen. Wijkt een notatie af,
- * dan is het gevolg een gemiste match: de startknop blijft staan terwijl het
- * werk al gedaan is. Dat ziet de opnemer meteen, terwijl een vals vinkje juist
- * verbergt wat er nog moet gebeuren.
+ * De regel is daarom: knip de postcode/plaats eraf en eis dat straatnaam,
+ * huisnummer én toevoeging gelijk zijn. Huisletters onderscheiden echte
+ * adressen — "Dam 1" en "Dam 1A" zijn twee panden — dus die mogen niet tegen
+ * elkaar wegvallen.
+ *
+ * Wat wél tegen elkaar wegvalt, is dezelfde etage in een andere schrijfwijze
+ * ("206 III" = "206-3", "5-HS" = "5-H"); zie adresSleutel. Dat is geen
+ * versoepeling maar een correctie: het gaat daar aantoonbaar om hetzelfde
+ * pand, en zonder die gelijkstelling bleef afgerond werk rood staan.
  */
 export function sameAddress(a: string, b: string): boolean {
-  const ka = normalizeForMatch(splitAddress(a).street);
-  const kb = normalizeForMatch(splitAddress(b).street);
+  const ka = adresSleutel(splitAddress(a).street);
+  const kb = adresSleutel(splitAddress(b).street);
   return !!ka && ka === kb;
 }
 

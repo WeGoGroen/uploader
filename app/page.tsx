@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { detectServices, extractGrossFloorArea, extractKlant } from "@/lib/calendar-services";
-import { calendarLocationToBagQuery, normalizeForMatch, sameAddress, splitAddress } from "@/lib/address-format";
+import { adresSleutel, calendarLocationToBagQuery, sameAddress, splitAddress } from "@/lib/address-format";
 import { checkBagAddress, type BagCheckResult } from "@/lib/bag-check";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 import UploadPanel from "@/components/UploadPanel";
@@ -219,7 +219,7 @@ export default function Dashboard() {
   // Vangnet, zie lib/klaar-meldingen.ts: een expliciete "ik heb dit echt
   // gedaan"-bevestiging telt net zo goed mee als een automatische match.
   function isHandmatigKlaarGemeld(street: string): boolean {
-    return klaarMeldingen.has(normalizeForMatch(splitAddress(street).street));
+    return klaarMeldingen.has(adresSleutel(splitAddress(street).street));
   }
 
   return (

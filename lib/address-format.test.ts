@@ -145,4 +145,35 @@ describe("sameAddress", () => {
     expect(sameAddress("", "Dam 1")).toBe(false);
     expect(sameAddress("   ", "")).toBe(false);
   });
+
+  // Twee opnemers stonden vandaag op hetzelfde pand, met in de agenda twee
+  // schrijfwijzen van dezelfde etage. De ClickUp-taak heette "Ceintuurbaan
+  // 206-3", dus bij de één werd het werk groen en bij de ander niet.
+  it("treats a Roman floor number as the same address as its digit", () => {
+    expect(sameAddress("Ceintuurbaan 206 III, 1072 GC Amsterdam", "Ceintuurbaan 206-3")).toBe(true);
+    expect(sameAddress("Ceintuurbaan 206 III", "Ceintuurbaan 206-3 1072GC Amsterdam")).toBe(true);
+    expect(sameAddress("Jan Steenstraat 12 II", "Jan Steenstraat 12-2")).toBe(true);
+  });
+
+  // "huis" (begane grond) wordt zowel HS, H als huis geschreven — dit is het
+  // geval Van Bossestraat 5-HS.
+  it("treats the ground-floor notations as one address", () => {
+    expect(sameAddress("Van Bossestraat 5-HS", "Van Bossestraat 5-H")).toBe(true);
+    expect(sameAddress("Van Bossestraat 5 huis, 1051JR Amsterdam", "Van Bossestraat 5-HS")).toBe(true);
+  });
+
+  // De gelijkstelling mag nooit twee échte adressen op één hoop gooien.
+  it("keeps genuinely different units apart", () => {
+    expect(sameAddress("Ceintuurbaan 206 III", "Ceintuurbaan 206-2")).toBe(false);
+    expect(sameAddress("Ceintuurbaan 206 III", "Ceintuurbaan 207-3")).toBe(false);
+    expect(sameAddress("Van Bossestraat 5-HS", "Van Bossestraat 5-1")).toBe(false);
+    // Huisletters die géén etage zijn blijven onderscheidend.
+    expect(sameAddress("Kalverstraat 220 A", "Kalverstraat 220 B")).toBe(false);
+    expect(sameAddress("Kalverstraat 220 C", "Kalverstraat 220-100")).toBe(false);
+  });
+
+  it("still reads the house number when the street name starts with a digit", () => {
+    expect(sameAddress("1e Jan Steenstraat 5", "1e Jan Steenstraat 5, 1072 NC Amsterdam")).toBe(true);
+    expect(sameAddress("1e Jan Steenstraat 5", "1e Jan Steenstraat 50")).toBe(false);
+  });
 });
