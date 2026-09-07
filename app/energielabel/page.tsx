@@ -93,6 +93,34 @@ function findFieldByPrefix(fields: ClickUpField[], prefix: string): ClickUpField
   return fields.find((f) => f.name.startsWith(prefix));
 }
 
+/**
+ * De nummering die het team zelf in de veldnaam zet, als reeks getallen:
+ * "D8.1 Polycam link - Begane grond" → [8, 1], "Mo-7 ..." → [7].
+ *
+ * ClickUp geeft velden terug in de volgorde waarin ze ooit zijn aangemaakt,
+ * niet op nummer. Daardoor stond D8.5 (Extra) zomaar boven D8.2 (1e
+ * verdieping) en las de Polycam-lijst niet van beneden naar boven, terwijl je
+ * de etages in die volgorde loopt. Een veld zonder nummer zakt naar onderen.
+ */
+function fieldSortKey(name: string): number[] {
+  // Bewust niet op een spatie splitsen: "D8.6Polycam link" mist die spatie.
+  const naNaam = name.trim().replace(/^[A-Za-z]+/, "");
+  const cijfers = naNaam.match(/^[\s\-.]*(\d+(?:[.\-]\d+)*)/);
+  return cijfers ? cijfers[1].split(/[.\-]/).map(Number) : [Number.MAX_SAFE_INTEGER];
+}
+
+function vergelijkOpNummer(a: ClickUpField, b: ClickUpField): number {
+  const ka = fieldSortKey(a.name);
+  const kb = fieldSortKey(b.name);
+  for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
+    // Korter is eerder: "D8" staat boven "D8.1".
+    const va = ka[i] ?? -1;
+    const vb = kb[i] ?? -1;
+    if (va !== vb) return va - vb;
+  }
+  return 0;
+}
+
 /** A3 Bouwjaar heeft één optie per jaartal ("1920"), met "<1650" als vangnet
     voor alles daarvoor. */
 function matchYearOption(year: number, options: ClickUpFieldOption[]): string | undefined {
@@ -422,7 +450,6 @@ export default function Home() {
   // Pas na een geblokkeerde poging om verder te gaan markeren we lege
   // verplichte velden rood — niet meteen bij het openen van de pagina.
   const [showRequiredErrors, setShowRequiredErrors] = useState(false);
-  const [showRequiredErrorsD, setShowRequiredErrorsD] = useState(false);
   const [requiredError, setRequiredError] = useState<string | null>(null);
 
   const [creating, setCreating] = useState(false);
@@ -797,7 +824,7 @@ export default function Home() {
     return keys.map((key) => ({
       key,
       title: GROUP_TITLES[key] ?? key,
-      fields: byGroup.get(key)!,
+      fields: [...byGroup.get(key)!].sort(vergelijkOpNummer),
     }));
   }, [meta]);
 
@@ -812,9 +839,9 @@ export default function Home() {
     () => groupedFields.find((g) => g.key === "D") ?? null,
     [groupedFields]
   );
-  // D1 Aantal Rekenzone's krijgt een eigen kaart boven de rest van de
-  // documentatie — dat bepaalt de rest van de indeling, dus dat wil je als
-  // eerste zien i.p.v. ergens tussen de Polycam-links.
+  // D1 Aantal Rekenzone's krijgt een eigen kaart onderaan de technische
+  // velden: het bepaalt de rest van de indeling, dus het hoort ingevuld te
+  // zijn vóór de Dropbox-map en de Polycam-links in beeld komen.
   const rekenzonesField = useMemo(
     () => (documentationGroup ? findFieldByPrefix(documentationGroup.fields, "D1") : undefined),
     [documentationGroup]
@@ -824,25 +851,27 @@ export default function Home() {
     [documentationGroup, rekenzonesField]
   );
 
-  // Welke verplichte velden op de technische-veldenstap nog leeg zijn. D1
-  // hoort bij de documentatiestap en telt hier dus niet mee — dezelfde grens
-  // die goToDropboxStep hanteert. Hiermee kan de opnemer vóór het klikken al
-  // zien hoeveel er nog mist, i.p.v. pas ná een geblokkeerde poging.
+  // Welke verplichte velden op de technische-veldenstap nog leeg zijn.
+  // Hiermee kan de opnemer vóór het klikken al zien hoeveel er nog mist,
+  // i.p.v. pas ná een geblokkeerde poging.
   // Bewust over technicalGroups i.p.v. meta.fields: ClickUp levert de velden
   // in een eigen volgorde, terwijl de pagina ze gegroepeerd toont. Door de
   // weergavevolgorde te volgen springt "ga erheen" naar het bovenste lege
   // veld en noemt de foutmelding ze in de volgorde waarin je ze tegenkomt.
-  // Groep D (documentatie) zit hier niet in — die heeft zijn eigen stap.
-  const missingRequiredFields = useMemo(
-    () =>
-      technicalGroups
-        .flatMap((g) => g.fields)
-        .filter((f) => isRequiredField(f) && isEmptyFieldValue(fieldValues[f.id])),
+  // D1 staat als eigen kaart onderaan deze stap en sluit de rij dus af; de
+  // rest van groep D heeft een eigen stap en telt hier niet mee.
+  const missingRequiredFields = useMemo(() => {
+    const uitGroepen = technicalGroups
+      .flatMap((g) => g.fields)
+      .filter((f) => isRequiredField(f) && isEmptyFieldValue(fieldValues[f.id]));
+    // D1 is altijd verplicht, ook als ClickUp het veld niet zo markeert.
+    return rekenzonesField && isEmptyFieldValue(fieldValues[rekenzonesField.id])
+      ? [...uitGroepen, rekenzonesField]
+      : uitGroepen;
     // isRequiredField leest meta en fieldValues, dus die twee zijn de echte
     // afhankelijkheden naast de groepen zelf.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [technicalGroups, meta, fieldValues]
-  );
+  }, [technicalGroups, meta, fieldValues, rekenzonesField]);
   const missingByGroup = useMemo(() => {
     const counts = new Map<string, number>();
     for (const f of missingRequiredFields) {
@@ -942,7 +971,6 @@ export default function Home() {
     setStep("search");
     setFieldValues({});
     setShowRequiredErrors(false);
-    setShowRequiredErrorsD(false);
     setRequiredError(null);
     setCollapsedGroups(new Set(DEFAULT_COLLAPSED));
     setDropboxFolder(null);
@@ -1245,7 +1273,6 @@ export default function Home() {
     setShowManualSearch(false);
     setFieldValues({});
     setShowRequiredErrors(false);
-    setShowRequiredErrorsD(false);
     setRequiredError(null);
     setStep("search");
     setDropboxFolder(null);
@@ -1340,13 +1367,6 @@ export default function Home() {
   }
 
   async function goToDocumentsStep() {
-    if (rekenzonesField && isEmptyFieldValue(fieldValues[rekenzonesField.id])) {
-      setShowRequiredErrorsD(true);
-      setRequiredError(`Vul eerst het verplichte veld in: ${rekenzonesField.name}.`);
-      window.scrollTo(0, 0);
-      return;
-    }
-    setShowRequiredErrorsD(false);
     setRequiredError(null);
     setStep("documents");
     window.scrollTo(0, 0);
@@ -1960,6 +1980,18 @@ export default function Home() {
                 </div>
               );
             })}
+
+            {/* D1 hoort qua nummering bij de documentatie, maar bepaalt de
+                indeling van al het werk daarna — dus vullen we het hier in,
+                als afsluiting van de technische velden. */}
+            {rekenzonesField && (
+              <div className="section">
+                <div className="section-head">
+                  <h2>{rekenzonesField.name}</h2>
+                </div>
+                <div className="section-body is-single-wide">{renderField(rekenzonesField)}</div>
+              </div>
+            )}
           </div>
 
           <div className="form-foot">
@@ -2000,20 +2032,7 @@ export default function Home() {
             </div>
           )}
 
-          {showRequiredErrorsD && requiredError && (
-            <div className="banner is-bad" style={{ margin: "0 0 16px" }}>{requiredError}</div>
-          )}
-
           <div className="sections">
-            {rekenzonesField && (
-              <div className="section">
-                <div className="section-head">
-                  <h2>{rekenzonesField.name}</h2>
-                </div>
-                <div className="section-body is-single-wide">{renderField(rekenzonesField)}</div>
-              </div>
-            )}
-
             {documentationGroup && (
               <div className="section">
                 <div className="section-head">
