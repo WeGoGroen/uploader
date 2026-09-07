@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
-import { detailProjectFolders, getSharedAccessToken } from "@/lib/dropbox";
+import { detailProjectFolders, getFolderStatuses, getSharedAccessToken, stripStatusMarker } from "@/lib/dropbox";
 
 export const maxDuration = 60;
 
@@ -24,11 +24,19 @@ export async function GET(request: Request) {
   }
 
   const token = await getSharedAccessToken();
+  // De overdrachtsstatus per projectmap leeft in Redis (kaal pad in kleine
+  // letters), niet meer in de mapnaam — zie lib/dropbox.ts.
+  const statussen = await getFolderStatuses();
   const mappen = await Promise.all(
     HOOFDMAPPEN.map(async (root) => {
       try {
         const { folders, volledig } = await detailProjectFolders(token, root);
-        return { root, volledig, projecten: folders, fout: null as string | null };
+        const projecten = folders.map((f) => ({
+          ...f,
+          sharepoint:
+            statussen[`${root}/${stripStatusMarker(f.name)}`.toLowerCase()] ?? null,
+        }));
+        return { root, volledig, projecten, fout: null as string | null };
       } catch (err) {
         return {
           root,

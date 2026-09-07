@@ -7,7 +7,6 @@ import {
   listFilePathsRecursive,
   projectFolderPath,
   setProjectFolderStatus,
-  statusFromName,
   sanitizePathSegment,
   saveUrl,
   type ProjectKind,
@@ -424,19 +423,16 @@ export async function syncSharePointFiles(input: {
           ? "compleet"
           : "ontbreekt";
 
-  // Alleen hernoemen als het bolletje echt verandert. Een map die al groen is
-  // en groen blijft wordt niet aangeraakt — dat is het verschil tussen één
-  // naamswijziging per statusovergang en een gestage stroom waar de
-  // Windows-client van in de knoop raakt.
-  if (statusFromName(bestaand.name) !== result.status) {
-    await setProjectFolderStatus(
-      dropboxToken,
-      input.kind,
-      input.woonplaats,
-      input.addressLine,
-      result.status
-    ).catch(() => null);
-  }
+  // Status vastleggen — in Redis, niet meer in de mapnaam. Draagt de map nog
+  // een bolletje uit de oude aanpak, dan wordt hij hier eenmalig schoon
+  // hernoemd; daarna raakt niets de naam nog aan.
+  await setProjectFolderStatus(
+    dropboxToken,
+    input.kind,
+    input.woonplaats,
+    input.addressLine,
+    result.status
+  ).catch(() => null);
 
   return result;
 }

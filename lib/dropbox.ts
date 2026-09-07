@@ -978,10 +978,17 @@ export async function listFilePathsRecursive(
 
 /**
  * Dropbox kent wél gekleurde mappen in de webinterface, maar biedt daar geen
- * API voor — het staat al jaren als wens in hun eigen forum. De werkbare vorm
- * is daarom een gekleurd bolletje vóór de mapnaam: dat is zichtbaar op web,
- * desktop én mobiel, en sorteert de mappen die aandacht vragen bovendien bij
- * elkaar.
+ * API voor. De eerste oplossing was een gekleurd bolletje vóór de mapnaam.
+ * Dat bleek een vergissing: Windows-programma's (opslaan-dialogen, oudere
+ * software) struikelen over zo'n emoji in het pad, en elke statuswissel
+ * hernoemde de map onder open Verkenner-vensters vandaan — met "map in
+ * gebruik"-meldingen en mislukte opslag-acties als gevolg, precies op de
+ * geautomatiseerde mappen.
+ *
+ * De status leeft daarom nu in Redis (één hash, sleutel = kaal pad in kleine
+ * letters) en is zichtbaar in het Business Control Center. De mapnaam blijft
+ * schoon. De markers hieronder bestaan nog om bestaande bolletjes te
+ * herkennen en op te ruimen.
  */
 export const FOLDER_STATUS_MARKERS = {
   /** Alles uit SharePoint staat erin. */
@@ -1071,12 +1078,22 @@ export async function findProjectFolder(
   }
 }
 
+const STATUS_HASH = "sharepoint:mapstatus";
+
+/** Redis-veld voor een projectmap: kaal pad, kleine letters. Zo overleeft de
+    status het opruimen van een bolletje uit de naam. */
+function statusVeld(root: string, naam: string): string {
+  return `${root}/${stripStatusMarker(naam)}`.toLowerCase();
+}
+
 /**
- * Zet (of vervangt) het statusbolletje voor de projectmap. Geeft het nieuwe
- * pad terug, zodat de aanroeper daarna met de juiste naam verder kan.
+ * Legt de overdrachtsstatus van een projectmap vast — in Redis, niet meer in
+ * de mapnaam. Geeft het (schone) pad terug.
  *
- * Hernoemen is veilig voor de deel-link die in de ClickUp-taak staat: Dropbox
- * hangt zo'n link aan de map zelf, niet aan het pad, dus die blijft werken.
+ * Zelfherstellend: draagt de map nog een bolletje uit de oude aanpak, dan
+ * wordt hij hier eenmalig naar de kale naam hernoemd. Dat is veilig voor de
+ * deel-link in de ClickUp-taak: Dropbox hangt zo'n link aan de map zelf,
+ * niet aan het pad.
  */
 export async function setProjectFolderStatus(
   accessToken: string,
@@ -1088,28 +1105,100 @@ export async function setProjectFolderStatus(
   const huidig = await findProjectFolder(accessToken, kind, woonplaats, straatEnNummer);
   if (!huidig) return null;
 
-  const kaal = stripStatusMarker(huidig.name);
-  const nieuweNaam = `${FOLDER_STATUS_MARKERS[status]} ${kaal}`;
-  if (huidig.name === nieuweNaam) return huidig.path;
-
   const root = huidig.path.slice(0, huidig.path.lastIndexOf("/"));
-  const nieuwPad = `${root}/${nieuweNaam}`;
 
+  const redis = getOptionalRedis();
+  if (redis) {
+    await redis.hset(STATUS_HASH, statusVeld(root, huidig.name), status).catch(() => {});
+  }
+
+  const kaal = stripStatusMarker(huidig.name);
+  if (huidig.name === kaal) return huidig.path;
+  return schoonMapNaamOp(accessToken, huidig.path, `${root}/${kaal}`);
+}
+
+/** Haalt een oud statusbolletje uit de mapnaam. Conflict (schone naam bestaat
+    al, bv. het bekende duplicaat) is niet fataal: dan blijft het oude pad. */
+async function schoonMapNaamOp(
+  accessToken: string,
+  vanPad: string,
+  naarPad: string
+): Promise<string> {
   const res = await fetch(`${DROPBOX_API_BASE}/files/move_v2`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ from_path: huidig.path, to_path: nieuwPad, autorename: false }),
+    body: JSON.stringify({ from_path: vanPad, to_path: naarPad, autorename: false }),
   });
-  if (res.ok) return nieuwPad;
-
+  if (res.ok) return naarPad;
   const body = await res.text().catch(() => "");
-  // Naam is al bezet (bv. twee rondes tegelijk): niet fataal, de bestanden
-  // staan er dan gewoon onder de bestaande naam.
-  if (res.status === 409 && body.includes("to/conflict")) return huidig.path;
+  if (res.status === 409 && body.includes("to/conflict")) return vanPad;
   throw new DropboxApiError(res.status, `Dropbox files/move_v2 failed: ${res.status} ${body}`);
+}
+
+/** Alle vastgelegde statussen, veld = kaal pad in kleine letters. */
+export async function getFolderStatuses(): Promise<Record<string, string>> {
+  const redis = getOptionalRedis();
+  if (!redis) return {};
+  return (await redis.hgetall(STATUS_HASH).catch(() => ({}))) as Record<string, string>;
+}
+
+/**
+ * Eenmalige opruimronde: haalt de bolletjes uit alle projectmapnamen van een
+ * hoofdmap, en bewaart de status die erin zat eerst in Redis zodat er niets
+ * verloren gaat. Geeft terug wat er hernoemd is en wat niet kon.
+ */
+export async function verwijderStatusMarkers(
+  accessToken: string,
+  root: string
+): Promise<{ hernoemd: string[]; overgeslagen: string[] }> {
+  const redis = getOptionalRedis();
+  const hernoemd: string[] = [];
+  const overgeslagen: string[] = [];
+
+  let cursor: string | null = null;
+  for (;;) {
+    const res: Response = await fetch(
+      `${DROPBOX_API_BASE}/files/list_folder${cursor ? "/continue" : ""}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(cursor ? { cursor } : { path: root, recursive: false }),
+      }
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      if (res.status === 409 && body.includes("path/not_found")) break;
+      throw new DropboxApiError(res.status, `Dropbox list_folder failed: ${res.status} ${body}`);
+    }
+    const data = (await res.json()) as {
+      entries: { ".tag": string; name: string; path_display?: string }[];
+      cursor: string;
+      has_more: boolean;
+    };
+
+    for (const entry of data.entries) {
+      if (entry[".tag"] !== "folder") continue;
+      const status = statusFromName(entry.name);
+      if (!status) continue;
+
+      if (redis) {
+        await redis.hset(STATUS_HASH, statusVeld(root, entry.name), status).catch(() => {});
+      }
+      const vanPad = entry.path_display ?? `${root}/${entry.name}`;
+      const naarPad = `${root}/${stripStatusMarker(entry.name)}`;
+      const uitkomst = await schoonMapNaamOp(accessToken, vanPad, naarPad).catch(() => vanPad);
+      if (uitkomst === naarPad) hernoemd.push(entry.name);
+      else overgeslagen.push(entry.name);
+    }
+
+    if (!data.has_more) break;
+    cursor = data.cursor;
+  }
+
+  return { hernoemd, overgeslagen };
 }
 
 
