@@ -129,17 +129,31 @@ export async function requireGedeeldeMediataskConfig(): Promise<{ token: string;
  */
 export async function requireMediataskConfig(): Promise<{ token: string; baseUrl: string }> {
   const gedeeld = await requireGedeeldeMediataskConfig();
+  const eigen = await persoonlijkeMediataskSleutel();
+  return eigen ? { ...gedeeld, token: eigen } : gedeeld;
+}
+
+/**
+ * De sleutel die op het account van de ingelogde persoon staat, of niets.
+ *
+ * Apart, omdat twee vragen hetzelfde antwoord nodig hebben: met welke sleutel
+ * werken we, en werkt deze persoon op zijn eigen sleutel? Dat tweede is niet
+ * hetzelfde als "de sleutel wijkt af van de gedeelde": de gedeelde sleutel
+ * hoort bij een Mediatask-account van een van ons, en zodra die persoon hem op
+ * zijn eigen account zet is het wel degelijk zijn sleutel.
+ */
+async function persoonlijkeMediataskSleutel(): Promise<string | null> {
   try {
     const { getActiveAccountName } = await import("@/lib/active-account");
     const { getClickUpAccounts } = await import("@/lib/clickup");
     const naam = await getActiveAccountName();
-    if (!naam) return gedeeld;
+    if (!naam) return null;
     const account = (await getClickUpAccounts()).find((a) => a.name === naam);
-    if (account?.mediataskToken) return { ...gedeeld, token: account.mediataskToken };
+    return account?.mediataskToken ?? null;
   } catch {
     // Geen verzoek-scope of geen opslag: dan is de gedeelde sleutel het antwoord.
+    return null;
   }
-  return gedeeld;
 }
 
 /**
@@ -158,8 +172,8 @@ export async function requireMediataskConfig(): Promise<{ token: string; baseUrl
  * dat is precies wat je niet wilt hoeven raden.
  */
 export async function huidigeMediataskGebruiker(): Promise<{ id: number; eigen: boolean } | null> {
-  const gedeeld = await requireGedeeldeMediataskConfig();
   const actief = await requireMediataskConfig();
+  const eigen = Boolean(await persoonlijkeMediataskSleutel());
   try {
     const res = await fetch(`${actief.baseUrl}/api/me`, {
       headers: { "X-Api-Token": actief.token },
@@ -168,7 +182,7 @@ export async function huidigeMediataskGebruiker(): Promise<{ id: number; eigen: 
     if (!res.ok) return null;
     const body = (await res.json()) as { user?: { id?: number } };
     if (!body.user?.id) return null;
-    return { id: body.user.id, eigen: actief.token !== gedeeld.token };
+    return { id: body.user.id, eigen };
   } catch {
     return null;
   }

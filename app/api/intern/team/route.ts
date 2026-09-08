@@ -8,7 +8,7 @@ import {
   type UploadRechten,
 } from "@/lib/clickup";
 import { haalPersoneel, zetCode } from "@/lib/personeel";
-import { controleerMediataskSleutel } from "@/lib/mediatask";
+import { controleerMediataskSleutel, requireGedeeldeMediataskConfig } from "@/lib/mediatask";
 import { stuurMail } from "@/lib/mail";
 import { uploaderUitnodiging } from "@/lib/mail-sjablonen";
 import { STARTCODE } from "@/lib/auth";
@@ -108,10 +108,39 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }
   const body = (await request.json().catch(() => null)) as
-    | { naam?: string; code?: string; mediataskToken?: string }
+    | { naam?: string; code?: string; mediataskToken?: string; gedeeldeSleutel?: boolean }
     | null;
   const naam = body?.naam?.trim() ?? "";
   if (!naam) return NextResponse.json({ error: "naam ontbreekt" }, { status: 400 });
+
+  /*
+    "De gedeelde sleutel is van deze persoon."
+
+    Die sleutel hoort bij één Mediatask-account, en al het werk dat erop
+    gemaakt wordt staat dus al op zijn naam. Hem daar opnieuw laten plakken is
+    onnodig — en erger: dan zou een sleutel die hier veilig staat alsnog via
+    twee apps en een browser gaan reizen. Daarom kopieert de uploader hem
+    intern, en gaat over de lijn alleen de vraag.
+  */
+  if (body?.gedeeldeSleutel) {
+    try {
+      const { token } = await requireGedeeldeMediataskConfig();
+      const uitkomst = await controleerMediataskSleutel(token);
+      if (!uitkomst.ok) {
+        return NextResponse.json(
+          { error: uitkomst.reden ?? "de gedeelde sleutel wordt door Mediatask geweigerd" },
+          { status: 400 }
+        );
+      }
+      await patchClickUpAccount({ name: naam, mediataskToken: token });
+      return NextResponse.json({ ok: true, mediataskUserId: uitkomst.userId });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message.slice(0, 200) : "opslaan mislukt" },
+        { status: 500 }
+      );
+    }
+  }
 
   const sleutel = body?.mediataskToken?.trim();
   if (sleutel) {
