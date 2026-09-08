@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { useRechten } from "@/components/RechtenProvider";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   forgetTasks,
@@ -49,6 +50,7 @@ export default function UploadResume() {
   // melding legt zich daar bovenop de knoppen.
   const pad = usePathname();
   const opDashboard = pad === "/" || pad.startsWith("/media");
+  const rechten = useRechten();
   const [ids, setIds] = useState<string[]>([]);
   const [dismissed, setDismissed] = useState(false);
   const allTasks = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
@@ -66,7 +68,18 @@ export default function UploadResume() {
   const [herstart, setHerstart] = useState<string[]>([]);
   const [kwijt, setKwijt] = useState(false);
 
-  const tasks = allTasks.filter((t) => ids.includes(t.id));
+  /*
+    Alleen hervatten wat deze persoon ook mag doen.
+
+    De uploadwachtrij hoort bij het apparaat, niet bij het account - op een
+    gedeelde iPad staat dus ook het werk van een collega erin. Zonder deze
+    filter kreeg iemand zonder energielabelrecht een "hervat"-knop naar een
+    formulier waar hij niet mag komen: klikken eindigt dan op de omleiding
+    terug naar het dashboard.
+  */
+  const magHervatten = (folderPath: string) =>
+    /NEN/i.test(folderPath) ? rechten.nen : /Media/i.test(folderPath) ? rechten.media : rechten.energielabel;
+  const tasks = allTasks.filter((t) => ids.includes(t.id) && magHervatten(t.folderPath));
   const busy = tasks.some((t) => t.dropbox === "uploading");
   const failed = tasks.filter((t) => t.dropbox === "error");
 
