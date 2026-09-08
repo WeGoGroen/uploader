@@ -9,6 +9,8 @@ interface ConnectionStatus {
   ok: boolean;
   label: string | null;
   error: string | null;
+  /** Bewust uitgezet in de instellingen; geen storing. */
+  uit?: boolean;
 }
 
 interface StatusResponse {
@@ -50,6 +52,29 @@ const INLOG_ROUTE: Record<string, string> = {
 
 function SvcRow({ name, status }: { name: string; status: ConnectionStatus }) {
   const isOk = status.connected && status.ok;
+
+  /*
+    Uitgezet ziet er anders uit dan kapot.
+
+    Een koppeling die je bewust niet gebruikt hoort geen rode driehoek met
+    "HERSTELLEN" te krijgen — dan staat de statuslijst permanent te roepen om
+    iets dat niemand gaat repareren, en kijkt niemand er meer naar. Een gedoofd
+    streepje zegt genoeg: hij doet niets, en dat klopt zo.
+  */
+  if (status.uit) {
+    return (
+      <a href="/instellingen" className="svc is-uit">
+        <span className="svc-check" aria-hidden="true" style={{ opacity: 0.35 }}>
+          —
+        </span>
+        <span className="svc-name">{name}</span>
+        <span className="svc-live" style={{ opacity: 0.5 }}>
+          UIT
+        </span>
+      </a>
+    );
+  }
+
   // Een verbroken koppeling is geen detail maar werk dat stilligt, dus krijgt
   // hij een tag die je niet kunt missen — en die meteen naar de juiste plek
   // gaat in plaats van naar een instellingenpagina waar je zelf moet zoeken.

@@ -7,6 +7,8 @@ interface ConnectionStatus {
   ok: boolean;
   label: string | null;
   error: string | null;
+  /** Bewust uitgezet; er wordt niet meer gemeten. */
+  uit?: boolean;
 }
 
 interface StatusResponse {
@@ -22,10 +24,19 @@ interface StatusResponse {
 /** Statusstreep in de zijkant van een kaart: rood bij een probleem, grijs als
     er nog niets is ingesteld, niets als het in orde is. */
 function cardClass(status: ConnectionStatus): string {
+  if (status.uit) return "conn is-off";
   return `conn ${status.ok ? "" : status.connected ? "is-bad" : "is-off"}`.trim();
 }
 
 function Pill({ status }: { status: ConnectionStatus }) {
+  if (status.uit) {
+    return (
+      <span className="pill is-off">
+        <span className="dot is-off" />
+        Uitgezet
+      </span>
+    );
+  }
   const cls = !status.connected ? "is-off" : status.ok ? "is-ok" : "is-bad";
   const label = !status.connected ? "Niet ingesteld" : status.ok ? "Verbonden" : "Probleem";
   return (
@@ -49,7 +60,7 @@ function Pill({ status }: { status: ConnectionStatus }) {
 function ConnCard({ status, children }: { status: ConnectionStatus; children: ReactNode }) {
   const [handmatig, setHandmatig] = useState<boolean | null>(null);
   const kinderen = Children.toArray(children);
-  const open = handmatig ?? !status.ok;
+  const open = handmatig ?? (!status.ok && !status.uit);
 
   return (
     <div className={`${cardClass(status)}${open ? " is-open" : " is-dicht"}`}>
@@ -69,7 +80,32 @@ function ConnCard({ status, children }: { status: ConnectionStatus; children: Re
   );
 }
 
-function ClickUpCard({ status }: { status: ConnectionStatus }) {
+function ClickUpCard({ status, onChanged }: { status: ConnectionStatus; onChanged: () => void }) {
+  const [bezig, setBezig] = useState(false);
+
+  /*
+    ClickUp aan of uit.
+
+    ClickUp hangt aan één dienst: energielabels. Wie alleen NEN2580 en media
+    doet heeft er geen token voor, en kreeg tot nu toe elke controleronde
+    dezelfde rode melding — in het statusmenu én in de storingenlijst. Dat is
+    geen storing maar een koppeling die niet gebruikt wordt, en dat verschil
+    hoort het scherm te kennen.
+  */
+  const wissel = async () => {
+    setBezig(true);
+    try {
+      await fetch("/api/koppelingen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dienst: "clickup", uit: !status.uit }),
+      });
+      onChanged();
+    } finally {
+      setBezig(false);
+    }
+  };
+
   return (
     <ConnCard status={status}>
       <div className="conn-top">
@@ -90,10 +126,13 @@ function ClickUpCard({ status }: { status: ConnectionStatus }) {
       </div>
       {status.error && <p className="conn-err">{status.error}</p>}
       <p className="conn-hint">
-        Geen inlogknop hier — dit werkt via een persoonlijk API-token in{" "}
-        <code>CLICKUP_TOKEN</code> op de server (.env.local). Aanmaken via ClickUp
-        → avatar → Settings → Apps → API Token.
+        {status.uit
+          ? "ClickUp staat uit: er wordt niet meer gemeten en er komen geen storingsmeldingen meer over. Energielabels aanmaken werkt zolang dit uitstaat niet."
+          : "Geen inlogknop hier — dit werkt via een persoonlijk API-token op de server (CLICKUP_TOKEN). Aanmaken via ClickUp → avatar → Settings → Apps → API Token."}
       </p>
+      <button type="button" className="btn-refresh" onClick={wissel} disabled={bezig}>
+        {bezig ? "Bezig…" : status.uit ? "ClickUp weer aanzetten" : "ClickUp uitzetten"}
+      </button>
     </ConnCard>
   );
 }
@@ -560,6 +599,15 @@ function Storingen() {
   const [rapport, setRapport] = useState<Gezondheid | null>(null);
   const [bezig, setBezig] = useState(false);
   const [fout, setFout] = useState<string | null>(null);
+  /*
+    Standaard dicht.
+
+    De lijst is een geruststelling die je één keer per dag wilt kunnen
+    openslaan, geen mededeling die elke keer om je aandacht vraagt als je hier
+    komt voor iets anders. Het aantal in de kop zegt al of er iets aan de hand
+    is; de regels zelf zijn er pas toe als je ze gaat oplossen.
+  */
+  const [open, setOpen] = useState(false);
 
   // Eerst de laatste uitslag: die staat klaar en is er meteen. Een verse
   // controle draait alle diensten langs en duurt seconden — dat is een keuze
@@ -592,12 +640,47 @@ function Storingen() {
   return (
     <section className="set-sectie">
       <div className="set-sectie-head">
-        <div>
-          <h2>Storingen</h2>
-          <p className="set-sectie-uitleg">
-            Wat de automatische controle als laatste zag. Alleen wat aandacht vraagt staat hier.
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            background: "none",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+            textAlign: "left",
+            font: "inherit",
+            color: "inherit",
+          }}
+        >
+          <svg
+            className={`chev${open ? " is-open" : ""}`}
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span>
+            <h2 style={{ margin: 0 }}>
+              Storingen
+              {rapport && (
+                <span style={{ marginLeft: 8, opacity: 0.6, fontWeight: 500 }}>
+                  {alles.length === 0 ? "alles in orde" : alles.length}
+                </span>
+              )}
+            </h2>
+            <p className="set-sectie-uitleg" style={{ margin: "2px 0 0" }}>
+              Wat de automatische controle als laatste zag. Alleen wat aandacht vraagt staat hier.
+            </p>
+          </span>
+        </button>
         <button className="btn-refresh" onClick={nuControleren} disabled={bezig}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={bezig ? "spin" : undefined}>
             <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -606,18 +689,20 @@ function Storingen() {
         </button>
       </div>
 
-      {fout && <p className="conn-err">{fout}</p>}
+      {open && fout && <p className="conn-err">{fout}</p>}
 
-      {!rapport && !fout && <p className="note" style={{ padding: 0 }}>Nog geen controle gedraaid.</p>}
+      {open && !rapport && !fout && (
+        <p className="note" style={{ padding: 0 }}>Nog geen controle gedraaid.</p>
+      )}
 
-      {rapport && alles.length === 0 && (
+      {open && rapport && alles.length === 0 && (
         <div className="set-rustig">
           <span className="dot is-ok" />
           Alles in orde — geen storingen gevonden.
         </div>
       )}
 
-      {alles.length > 0 && (
+      {open && alles.length > 0 && (
         <ul className="sig-list">
           {alles.map((c) => (
             <li key={c.naam} className={c.ok ? "is-warn" : "is-bad"}>
@@ -637,7 +722,7 @@ function Storingen() {
         </ul>
       )}
 
-      {rapport && (
+      {open && rapport && (
         <p className="sig-time">Gecontroleerd op {new Date(rapport.tijdstip).toLocaleString("nl-NL")}</p>
       )}
     </section>
@@ -727,7 +812,7 @@ export default function Instellingen() {
             <div className="conn-grid">
               <SharePointCard status={status.sharepoint} onSaved={load} />
               <DropboxCard status={status.dropbox} />
-              <ClickUpCard status={status.clickup} />
+              <ClickUpCard status={status.clickup} onChanged={load} />
               <GoogleCard status={status.google} />
               <MediataskCard status={status.mediatask} onSaved={load} />
               <BagCard status={status.bag} />

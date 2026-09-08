@@ -15,6 +15,7 @@ import {
 } from "@/lib/microsoft";
 import { listDrafts } from "@/lib/drafts";
 import { getTeams, requireClickUpConfig, getListCustomFields, getClickUpAccounts } from "@/lib/clickup";
+import { staatUit } from "@/lib/koppelingen";
 import { getAgencies, listOrders, listPointclouds } from "@/lib/mediatask";
 import { suggestAddresses } from "@/lib/pdok";
 import { calendarLocationToBagQuery } from "@/lib/address-format";
@@ -384,6 +385,10 @@ export async function draaiControles(): Promise<Gezondheidsrapport> {
     }),
 
     meet("ClickUp", async () => {
+      // Uitgezet is geen storing: wie geen energielabels doet heeft hier geen
+      // token voor, en een lijst die daar elke ronde rood over kleurt leert
+      // iedereen om niet meer te kijken.
+      if (await staatUit("clickup")) return "staat uit";
       const { token, listId } = await requireClickUpConfig(null);
       const [teams, velden] = await Promise.all([getTeams(token), getListCustomFields(token, listId)]);
       if (!teams[0]) throw new Error("geen workspace gevonden");
