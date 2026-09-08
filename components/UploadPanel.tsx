@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useSyncExternalStore } from "react";
+import { useRechten } from "@/components/RechtenProvider";
 import { getServerSnapshot, getSnapshot, probeerOpnieuw, subscribe } from "@/lib/upload-queue";
 import {
   PRODUCT_LABEL,
@@ -38,6 +39,7 @@ export default function UploadPanel({
   drafts: OverzichtDraft[] | null;
   actieveGebruiker: string | null;
 }) {
+  const rechten = useRechten();
   const alleTaken = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const [herstart, setHerstart] = useState<string[]>([]);
   const [kwijt, setKwijt] = useState<string[]>([]);
@@ -160,11 +162,23 @@ export default function UploadPanel({
 
                 <div className="up-voet">
                   <div className="up-tags">
-                    {r.producten.map((p) => (
-                      <a key={p.soort} className={`up-kind is-${p.soort}`} href={p.href}>
-                        {PRODUCT_LABEL[p.soort]}
-                      </a>
-                    ))}
+                    {/*
+                      Alleen de producten die deze persoon ook mag doen.
+
+                      Zonder deze filter stond hier voor Jelle een link
+                      "Energielabel" bij een adres - een knop die op de
+                      omleiding uitloopt omdat hij dat recht niet heeft. Het
+                      adres zelf mag hij wel zien: hij heeft er NEN2580 op
+                      gedaan, en dat werk hoort niet te verdwijnen omdat er
+                      toevallig ook een energielabel bij hoort.
+                    */}
+                    {r.producten
+                      .filter((p) => rechten[p.soort] ?? true)
+                      .map((p) => (
+                        <a key={p.soort} className={`up-kind is-${p.soort}`} href={p.href}>
+                          {PRODUCT_LABEL[p.soort]}
+                        </a>
+                      ))}
                     {r.gebruiker && <span className="up-user">{r.gebruiker}</span>}
                   </div>
 
