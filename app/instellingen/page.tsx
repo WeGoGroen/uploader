@@ -130,9 +130,21 @@ function ClickUpCard({ status, onChanged }: { status: ConnectionStatus; onChange
           ? "ClickUp staat uit: er wordt niet meer gemeten en er komen geen storingsmeldingen meer over. Energielabels aanmaken werkt zolang dit uitstaat niet."
           : "Geen inlogknop hier — dit werkt via een persoonlijk API-token op de server (CLICKUP_TOKEN). Aanmaken via ClickUp → avatar → Settings → Apps → API Token."}
       </p>
-      <button type="button" className="btn-refresh" onClick={wissel} disabled={bezig}>
-        {bezig ? "Bezig…" : status.uit ? "ClickUp weer aanzetten" : "ClickUp uitzetten"}
-      </button>
+      {/* Een schakelaar en geen knop: aan/uit is een stand, geen handeling.
+          Bij een knop moet je eerst de tekst lezen om te weten wat er nú is. */}
+      <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: bezig ? "wait" : "pointer" }}>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={!status.uit}
+          disabled={bezig}
+          onChange={wissel}
+          style={{ width: 18, height: 18, accentColor: "var(--accent)" }}
+        />
+        <span style={{ fontSize: 13, fontWeight: 600 }}>
+          {bezig ? "Bezig…" : status.uit ? "ClickUp staat uit" : "ClickUp staat aan"}
+        </span>
+      </label>
     </ConnCard>
   );
 }

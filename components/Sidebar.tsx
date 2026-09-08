@@ -61,19 +61,9 @@ function SvcRow({ name, status }: { name: string; status: ConnectionStatus }) {
     iets dat niemand gaat repareren, en kijkt niemand er meer naar. Een gedoofd
     streepje zegt genoeg: hij doet niets, en dat klopt zo.
   */
-  if (status.uit) {
-    return (
-      <a href="/instellingen" className="svc is-uit">
-        <span className="svc-check" aria-hidden="true" style={{ opacity: 0.35 }}>
-          —
-        </span>
-        <span className="svc-name">{name}</span>
-        <span className="svc-live" style={{ opacity: 0.5 }}>
-          UIT
-        </span>
-      </a>
-    );
-  }
+  // Uitgezet betekent: hoort hier niet meer te staan. Een gedoofde regel is
+  // nog steeds een regel die je elke keer leest en wegdenkt.
+  if (status.uit) return null;
 
   // Een verbroken koppeling is geen detail maar werk dat stilligt, dus krijgt
   // hij een tag die je niet kunt missen — en die meteen naar de juiste plek
@@ -181,9 +171,17 @@ export default function Sidebar({
     accounts?.accounts?.find((a) => a.name === (accountName ?? accounts.active))?.avatar ?? null;
 
   function loadAll() {
-    fetch("/api/clickup/list-meta", { cache: "no-store" })
+    /*
+      Wie er onderaan staat, komt uit de sessie en niet uit ClickUp.
+
+      Het stond hier op de ClickUp-gebruikersnaam, en die is er alleen als
+      iemand een persoonlijk token heeft geplakt. Jelle doet geen energielabels
+      en heeft dus geen token — bij hem bleef er daardoor "Laden…" staan, voor
+      altijd. De naam waaronder je werkt weet de app nu gewoon zelf.
+    */
+    fetch("/api/auth/wie", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setAccountName(data?.account?.username ?? null))
+      .then((data) => setAccountName(data?.naam ?? null))
       .catch(() => {});
 
     // res.ok checken is hier geen franje: bij een 401 (uitgelogd) komt er
@@ -278,7 +276,6 @@ export default function Sidebar({
             label="NEN2580"
             actief={pathname === "/nen"}
             bezig={bezigNen}
-            tag={{ woord: "bèta", soort: "beta" }}
           />
         )}
         {rechten.media && (

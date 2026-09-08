@@ -1,18 +1,28 @@
 import { NextResponse } from "next/server";
 import { addClickUpAccount, getAuthorizedUser, getClickUpAccounts, patchClickUpAccount } from "@/lib/clickup";
 import { getActiveAccountName } from "@/lib/active-account";
+import { isBeheerder } from "@/lib/sessie-server";
 
-/** Lijst van geconfigureerde gebruikers + wie er nu actief is (geen tokens). */
+/**
+ * Wie er in de app werken (nooit tokens).
+ *
+ * Een medewerker krijgt alleen zichzelf terug. Wie er verder in dienst zijn,
+ * met welk mailadres, is niets wat je nodig hebt om op te nemen — en de
+ * zijbalk heeft er maar één ding van nodig: je eigen avatar.
+ */
 export async function GET() {
   const accounts = await getClickUpAccounts();
   const active = (await getActiveAccountName()) ?? accounts[0]?.name ?? null;
+  const magAlles = await isBeheerder();
+  const zichtbaar = magAlles ? accounts : accounts.filter((a) => a.name === active);
   return NextResponse.json({
-    accounts: accounts.map((a) => ({
+    accounts: zichtbaar.map((a) => ({
       name: a.name,
       avatar: a.avatar ?? null,
       email: a.email ?? null,
     })),
     active,
+    beheerder: magAlles,
   });
 }
 

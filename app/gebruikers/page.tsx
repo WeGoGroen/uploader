@@ -11,6 +11,8 @@ interface Account {
 interface AccountsResponse {
   accounts: Account[];
   active: string | null;
+  /** Alleen een beheerder krijgt de hele lijst; een medewerker alleen zichzelf. */
+  beheerder?: boolean;
 }
 
 function initials(name: string): string {
@@ -168,12 +170,6 @@ export default function Gebruikers() {
   const [tokenBusy, setTokenBusy] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
 
-  const [name, setName] = useState("");
-  const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
   const load = useCallback(() => {
     fetch("/api/clickup/accounts", { cache: "no-store" })
       .then((res) => res.json())
@@ -264,35 +260,6 @@ export default function Gebruikers() {
     }
   }
 
-  async function submit() {
-    if (!name.trim() || !token.trim()) return;
-    setBusy(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const res = await fetch("/api/clickup/accounts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), token: token.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(
-          data?.error === "invalid_token"
-            ? "Dit token wordt geweigerd door ClickUp. Controleer of je 'm goed hebt gekopieerd."
-            : "Toevoegen is mislukt. Probeer het opnieuw."
-        );
-        return;
-      }
-      setSuccess(`${name.trim()} is toegevoegd en is nu het actieve account op dit apparaat.`);
-      setName("");
-      setToken("");
-      load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <>
       <header className="topline">
@@ -313,6 +280,9 @@ export default function Gebruikers() {
 
         <MijnCode />
 
+        {/* Het team inzien is beheerderswerk. Een opnemer heeft hier alleen
+            zijn eigen code en token te zoeken. */}
+        {accounts?.beheerder && (
         <div className="section">
           <div className="section-head">
             <h2>Bestaande gebruikers</h2>
@@ -439,64 +409,8 @@ export default function Gebruikers() {
             </div>
           )}
         </div>
+        )}
 
-        <div className="conn user-add-card">
-          <div className="conn-top">
-            <div className="conn-heading">
-              <span className="conn-icon" style={{ background: "rgba(74, 222, 128, 0.14)", color: "#1c7a41" }}>
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle cx="9" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.8" />
-                  <path d="M3 19c1-3.4 3.4-5.2 6-5.2s5 1.8 6 5.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                  <path d="M18 8v5M15.5 10.5h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                </svg>
-              </span>
-              <div>
-                <div className="conn-name">Nieuwe gebruiker toevoegen</div>
-                <p className="conn-role" style={{ margin: "2px 0 0" }}>
-                  Elk teamlid krijgt een eigen ClickUp-token, zodat taken op de juiste naam komen te staan.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="section-body is-single-wide" style={{ padding: 0, marginTop: 4 }}>
-            <div className="addr-edit-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div className="field">
-                <label htmlFor="g-name">Naam</label>
-                <input
-                  id="g-name"
-                  className="control"
-                  placeholder="Bijv. Yannick"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="g-token">ClickUp API-token</label>
-                <input
-                  id="g-token"
-                  className="control"
-                  placeholder="pk_..."
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                />
-              </div>
-            </div>
-            <p className="conn-hint">
-              Aanmaken via ClickUp → avatar rechtsboven → Settings → Apps → API Token.
-              Het token wordt bij het opslaan direct gecontroleerd bij ClickUp.
-            </p>
-            {error && <p className="conn-err">{error}</p>}
-            {success && <p className="note" style={{ color: "var(--accent-text)", padding: 0 }}>{success}</p>}
-            <button
-              className="btn btn-primary"
-              disabled={busy || !name.trim() || !token.trim()}
-              onClick={submit}
-            >
-              {busy ? "Bezig met controleren…" : "Gebruiker toevoegen"}
-            </button>
-          </div>
-        </div>
       </div>
     </>
   );
