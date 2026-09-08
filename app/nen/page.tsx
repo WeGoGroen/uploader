@@ -259,23 +259,7 @@ export default function UploadNen() {
   // Een losse NEN-opname schreef niets naar de server, dus niemand kon zien
   // dát hij liep. Nu wel — inclusief een hartslag, want de tijd tussen twee
   // formulierwijzigingen zegt niets over of iemand nog bezig is.
-  const nenMelding: OpnameMelding | null = address
-    ? {
-        id: `nen-${address.straatnaam} ${houseNumber(address)}, ${address.woonplaatsnaam}`,
-        soort: "nen",
-        straatnaam: `${address.straatnaam} ${houseNumber(address)}`,
-        postcode: address.postcode,
-        woonplaats: address.woonplaatsnaam,
-        accountName: account,
-      }
-    : null;
 
-  useEffect(() => {
-    if (!nenMelding) return;
-    meldGestart(nenMelding);
-    return startHartslag(nenMelding);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nenMelding?.id, nenMelding?.accountName]);
 
   function startEditingAddress() {
     if (!address) return;
@@ -357,6 +341,52 @@ export default function UploadNen() {
     { key: "style", value: "" },
     { key: "option", value: "" },
   ]);
+
+  /*
+    De keuzes meebewaren, zodat een halve opname er nog staat als je terugkomt.
+
+    Alleen het adres werd vastgelegd. Wie halverwege wegklikte en later
+    terugkwam, kreeg de makelaar weer op leeg - en dan blokkeert het scherm bij
+    "documenten uploaden" op een veld dat je al ingevuld had. Dit zijn de
+    keuzes die je zelf maakt; wat uit Mediatask of de agenda komt, wordt toch
+    opnieuw opgehaald.
+  */
+  const nenKeuzes = {
+    agencyId,
+    manualAgencyId,
+    productId,
+    manualProductId,
+    priorityId,
+    manualPriorityId,
+    productConfig,
+  };
+  const nenMelding: OpnameMelding | null = address
+    ? {
+        id: `nen-${address.straatnaam} ${houseNumber(address)}, ${address.woonplaatsnaam}`,
+        soort: "nen",
+        straatnaam: `${address.straatnaam} ${houseNumber(address)}`,
+        postcode: address.postcode,
+        woonplaats: address.woonplaatsnaam,
+        accountName: account,
+        state: { keuzes: nenKeuzes },
+      }
+    : null;
+
+  useEffect(() => {
+    if (!nenMelding) return;
+    meldGestart(nenMelding);
+    return startHartslag(nenMelding);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nenMelding?.id, nenMelding?.accountName]);
+
+  // Ook opslaan zodra je iets kiest; het effect hierboven kijkt alleen naar het
+  // adres, en dan zou de makelaar pas bij de volgende hartslag vastliggen.
+  useEffect(() => {
+    if (!nenMelding) return;
+    const t = setTimeout(() => meldGestart(nenMelding), 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agencyId, manualAgencyId, productId, manualProductId, priorityId, manualPriorityId, productConfig]);
   const [extraPhotoUrls, setExtraPhotoUrls] = useState("");
   const [extraDrawingUrls, setExtraDrawingUrls] = useState("");
 
@@ -555,6 +585,37 @@ export default function UploadNen() {
       const mediatask = draft.state?.mediatask as { orderId: number; state: string } | undefined;
       if (mediatask) {
         setResult({ orderId: mediatask.orderId, state: mediatask.state });
+      }
+
+      /*
+        De keuzes van de vorige keer terugzetten.
+
+        Bewust ná de matching hierboven: wat jij zelf gekozen hebt weegt
+        zwaarder dan wat er uit de agendanaam te raden viel. Alleen invullen
+        wat er ook echt staat - een leeg bewaard veld mag een geslaagde match
+        niet wegdrukken.
+      */
+      const keuzes = draft.state?.keuzes as
+        | {
+            agencyId?: string;
+            manualAgencyId?: string;
+            productId?: number | "";
+            manualProductId?: string;
+            priorityId?: string;
+            manualPriorityId?: string;
+            productConfig?: Record<string, string>;
+          }
+        | undefined;
+      if (keuzes) {
+        if (keuzes.agencyId) setAgencyId(keuzes.agencyId);
+        if (keuzes.manualAgencyId) setManualAgencyId(keuzes.manualAgencyId);
+        if (keuzes.productId) setProductId(keuzes.productId);
+        if (keuzes.manualProductId) setManualProductId(keuzes.manualProductId);
+        if (keuzes.priorityId) setPriorityId(keuzes.priorityId);
+        if (keuzes.manualPriorityId) setManualPriorityId(keuzes.manualPriorityId);
+        if (keuzes.productConfig && Object.keys(keuzes.productConfig).length > 0) {
+          setProductConfig(keuzes.productConfig);
+        }
       }
     }
   }
