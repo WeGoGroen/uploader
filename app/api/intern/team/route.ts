@@ -4,8 +4,10 @@ import {
   getClickUpAccounts,
   patchClickUpAccount,
   rechtenVan,
+  verwijderAccount,
   type UploadRechten,
 } from "@/lib/clickup";
+import { haalPersoneel, zetCode } from "@/lib/personeel";
 import { stuurMail } from "@/lib/mail";
 import { uploaderUitnodiging } from "@/lib/mail-sjablonen";
 import { STARTCODE } from "@/lib/auth";
@@ -28,16 +30,88 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }
 
+  /*
+    De inlogcodes gaan hier wél mee, de ClickUp-tokens niet.
+
+    Dat lijkt inconsequent maar is het niet: een inlogcode geeft toegang tot
+    deze ene app en wordt door een beheerder uitgedeeld, dus die moet hij
+    kunnen teruglezen om een collega op weg te helpen. Een ClickUp-token is een
+    sleutel tot de hele werkruimte van iemand anders. En zodra iemand zijn code
+    zelf vervangt staat er hier niets meer — dan kent alleen hij hem nog.
+  */
+  const mensen = await haalPersoneel();
   const accounts = await getClickUpAccounts();
   return NextResponse.json({
-    team: accounts.map((a) => ({
-      naam: a.name,
-      email: a.email ?? null,
-      avatar: a.avatar ?? null,
-      heeftToken: Boolean(a.token),
-      rechten: rechtenVan(a),
-    })),
+    team: accounts.map((a) => {
+      const persoon = mensen.find((p) => p.naam === a.name);
+      return {
+        naam: a.name,
+        email: a.email ?? null,
+        avatar: a.avatar ?? null,
+        heeftToken: Boolean(a.token),
+        rechten: rechtenVan(a),
+        rol: persoon?.rol ?? "medewerker",
+        codeGewijzigd: persoon?.codeGewijzigd ?? false,
+        codeKlaar: persoon?.codeKlaar ?? null,
+      };
+    }),
   });
+}
+
+/**
+ * Een account verwijderen.
+ *
+ * Alleen wat in Redis staat kan weg; een account uit de omgeving
+ * (CLICKUP_ACCOUNTS/CLICKUP_TOKEN) komt bij de volgende aanroep terug, en dat
+ * zeggen we dan ook in plaats van te doen alsof het gelukt is.
+ */
+export async function DELETE(request: Request) {
+  if (!isInternRequest(request)) {
+    return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
+  }
+  const naam = new URL(request.url).searchParams.get("naam")?.trim() ?? "";
+  if (!naam) return NextResponse.json({ error: "naam ontbreekt" }, { status: 400 });
+
+  try {
+    const weg = await verwijderAccount(naam);
+    if (!weg) {
+      return NextResponse.json(
+        {
+          error:
+            "Dit account staat in de omgevingsvariabelen van de app en kan hier niet weg. Haal het uit CLICKUP_ACCOUNTS in Vercel.",
+        },
+        { status: 409 }
+      );
+    }
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message.slice(0, 200) : "verwijderen mislukt" },
+      { status: 500 }
+    );
+  }
+}
+
+/** Een code instellen voor iemand; blijft leesbaar tot hij hem zelf vervangt. */
+export async function PATCH(request: Request) {
+  if (!isInternRequest(request)) {
+    return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
+  }
+  const body = (await request.json().catch(() => null)) as { naam?: string; code?: string } | null;
+  const naam = body?.naam?.trim() ?? "";
+  const code = body?.code ?? "";
+  if (!naam || !/^[0-9]{4}$/.test(code)) {
+    return NextResponse.json({ error: "naam en een viercijferige code zijn verplicht" }, { status: 400 });
+  }
+  try {
+    await zetCode(naam, code, true);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message.slice(0, 200) : "opslaan mislukt" },
+      { status: 500 }
+    );
+  }
 }
 
 /** Nodigt iemand uit of werkt zijn rechten bij. */

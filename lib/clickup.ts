@@ -79,6 +79,16 @@ export interface ClickUpAccount {
    */
   codeHash?: string;
   codeSalt?: string;
+  /**
+   * De code zoals een beheerder hem laatst zelf zette, leesbaar.
+   *
+   * Staat leeg zodra de eigenaar hem zelf verandert: vanaf dat moment kent
+   * niemand hem meer behalve hijzelf, want verder ligt de code alleen gehasht
+   * vast. Dit is precies de afweging die het Business Control Center ook maakt
+   * - een beheerder moet een nieuwe collega op weg kunnen helpen zonder dat
+   * iedereen elkaars zelfgekozen code kan meelezen.
+   */
+  codeKlaar?: string;
 }
 
 const EXTRA_ACCOUNTS_KEY = "clickup:accounts:extra";
@@ -169,6 +179,26 @@ export async function addClickUpAccount(account: ClickUpAccount): Promise<void> 
 }
 
 /**
+ * Haalt een account weg uit Redis.
+ *
+ * Geeft false terug als het account alleen uit de omgeving komt: dat staat in
+ * CLICKUP_ACCOUNTS of CLICKUP_TOKEN op de server en komt bij de volgende
+ * aanroep gewoon weer terug. Stil "ok" antwoorden zou betekenen dat het scherm
+ * zegt dat iemand weg is terwijl hij morgen weer in de lijst staat.
+ */
+export async function verwijderAccount(naam: string): Promise<boolean> {
+  const redis = requireRedis();
+  const huidig = await extraAccounts();
+  const over = huidig.filter((a) => a.name !== naam);
+  if (over.length !== huidig.length) {
+    await redis.set(EXTRA_ACCOUNTS_KEY, JSON.stringify(over));
+  }
+  // Ook als hij niet in Redis stond kan hij uit de omgeving komen; dan is er
+  // niets verwijderd en hoort de beller dat te weten.
+  return !envAccounts().some((a) => a.name === naam);
+}
+
+/**
  * Werkt een deel van een account bij (bv. alleen de avatar, of alleen het
  * token) zonder de rest te verliezen. Een account dat alleen via
  * CLICKUP_ACCOUNTS bestaat, krijgt zo een Redis-override met dezelfde naam —
@@ -183,6 +213,8 @@ export async function patchClickUpAccount(patch: {
   rol?: "medewerker" | "beheerder";
   codeHash?: string;
   codeSalt?: string;
+  /** Leesbare kopie; null wist hem (de eigenaar koos zelf een code). */
+  codeKlaar?: string | null;
 }): Promise<void> {
   const current = await getClickUpAccounts();
   const existing = current.find((a) => a.name === patch.name);
@@ -200,6 +232,7 @@ export async function patchClickUpAccount(patch: {
     rol: patch.rol ?? existing?.rol,
     codeHash: patch.codeHash ?? existing?.codeHash,
     codeSalt: patch.codeSalt ?? existing?.codeSalt,
+    codeKlaar: patch.codeKlaar === null ? undefined : patch.codeKlaar ?? existing?.codeKlaar,
   });
 }
 

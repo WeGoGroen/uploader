@@ -23,6 +23,9 @@ export interface Persoon {
   rol: "medewerker" | "beheerder";
   /** Heeft deze persoon de startcode 0000 al vervangen? */
   codeGewijzigd: boolean;
+  /** De code zoals een beheerder hem zette; leeg zodra de eigenaar hem zelf
+      verandert. Bij de startcode staat hier 0000, want die kent iedereen. */
+  codeKlaar: string | null;
 }
 
 /**
@@ -45,6 +48,7 @@ function naarPersoon(a: ClickUpAccount): Persoon {
     avatar: a.avatar ?? null,
     rol: a.rol === "beheerder" ? "beheerder" : "medewerker",
     codeGewijzigd: Boolean(a.codeHash),
+    codeKlaar: a.codeHash ? a.codeKlaar ?? null : STARTCODE,
   };
 }
 
@@ -87,11 +91,23 @@ export async function controleerCode(
   return { ok: verschil === 0, persoon: naarPersoon(account) };
 }
 
-/** Zet een nieuwe code. Vier cijfers, net als in het Business Control Center. */
-export async function zetCode(naam: string, code: string): Promise<void> {
+/**
+ * Zet een nieuwe code. Vier cijfers, net als in het Business Control Center.
+ *
+ * `bewaarLeesbaar` is het verschil tussen een beheerder die een code uitdeelt
+ * (die moet hij kunnen doorgeven, dus blijft hij leesbaar staan) en iemand die
+ * zijn eigen code kiest (die hoort niemand anders te kennen, dus wist hij de
+ * leesbare kopie).
+ */
+export async function zetCode(naam: string, code: string, bewaarLeesbaar = false): Promise<void> {
   if (!/^[0-9]{4}$/.test(code)) throw new Error("De code bestaat uit vier cijfers.");
   const salt = nieuweSalt();
-  await patchClickUpAccount({ name: naam, codeSalt: salt, codeHash: await hashCode(code, salt) });
+  await patchClickUpAccount({
+    name: naam,
+    codeSalt: salt,
+    codeHash: await hashCode(code, salt),
+    codeKlaar: bewaarLeesbaar ? code : null,
+  });
 }
 
 export async function zetRol(naam: string, rol: "medewerker" | "beheerder"): Promise<void> {
