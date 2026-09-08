@@ -92,15 +92,28 @@ function ClickUpCard({ status, onChanged }: { status: ConnectionStatus; onChange
     geen storing maar een koppeling die niet gebruikt wordt, en dat verschil
     hoort het scherm te kennen.
   */
+  const [fout, setFout] = useState<string | null>(null);
+
   const wissel = async () => {
     setBezig(true);
+    setFout(null);
     try {
-      await fetch("/api/koppelingen", {
+      const res = await fetch("/api/koppelingen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dienst: "clickup", uit: !status.uit }),
       });
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      // Zonder deze controle mislukte het stil: de schakelaar sprong terug en
+      // je wist niet of het aan jou lag of aan de app.
+      if (!res.ok) throw new Error(body.error ?? "omzetten mislukt");
       onChanged();
+      // De statuslijst in de zijbalk laadt alleen bij het openen van een
+      // pagina. Zonder dit sein bleef daar "ClickUp LIVE" staan terwijl hij
+      // hier al uit stond - en dan lijkt de schakelaar het niet te doen.
+      window.dispatchEvent(new Event("koppelingen-gewijzigd"));
+    } catch (err) {
+      setFout(err instanceof Error ? err.message : "omzetten mislukt");
     } finally {
       setBezig(false);
     }
@@ -145,6 +158,7 @@ function ClickUpCard({ status, onChanged }: { status: ConnectionStatus; onChange
           {bezig ? "Bezig…" : status.uit ? "ClickUp staat uit" : "ClickUp staat aan"}
         </span>
       </label>
+      {fout && <p className="conn-err">{fout}</p>}
     </ConnCard>
   );
 }

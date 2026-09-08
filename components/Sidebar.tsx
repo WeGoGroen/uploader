@@ -207,6 +207,21 @@ export default function Sidebar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onLoginPage]);
 
+  /*
+    Meteen bijwerken als er in de instellingen een koppeling omgaat.
+
+    Deze lijst werd alleen bij het openen van een pagina geladen. Zette je
+    ClickUp uit, dan bleef hier "ClickUp LIVE" staan tot je toevallig ergens
+    heen navigeerde - en dan lijkt de schakelaar in de instellingen kapot,
+    terwijl hij zijn werk allang gedaan had.
+  */
+  useEffect(() => {
+    const bij = () => loadAll();
+    window.addEventListener("koppelingen-gewijzigd", bij);
+    return () => window.removeEventListener("koppelingen-gewijzigd", bij);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!menuOpen) return;
     const close = (e: MouseEvent) => {
