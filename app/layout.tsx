@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
+import { huidigeRechten } from "@/lib/rechten-server";
 import LocationPermission from "@/components/LocationPermission";
 import UploadResume from "@/components/UploadResume";
 import "./globals.css";
@@ -20,7 +21,18 @@ export const metadata: Metadata = {
   description: "Adres opzoeken via BAG en automatisch een ClickUp-taak aanmaken",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  /*
+    De uploadrechten hier ophalen en meegeven, niet in de zijbalk zelf.
+
+    De zijbalk is een client-component; die zou de rechten pas ná het laden
+    kennen en de knoppen dus eerst tonen en daarna weghalen. Dat is precies wat
+    er misging: Jelle heeft geen energielabelrecht, maar zag de knop wél staan
+    en werd na het klikken teruggestuurd. Server-side meegeven betekent dat een
+    knop die je niet mag er ook nooit staat.
+  */
+  const { rechten } = await huidigeRechten();
+
   return (
     <html
       lang="nl"
@@ -30,7 +42,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <LocationPermission />
         <UploadResume />
         <div className="shell">
-          <Sidebar />
+          <Sidebar rechten={rechten} />
           <div className="main">{children}</div>
         </div>
       </body>

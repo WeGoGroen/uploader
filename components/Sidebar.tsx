@@ -152,7 +152,13 @@ function NavUpload({
   );
 }
 
-export default function Sidebar() {
+export default function Sidebar({
+  rechten,
+}: {
+  /** Wat deze persoon mag uploaden. Komt server-side mee uit de layout, zodat
+      een knop die je niet mag er nooit staat - ook niet even. */
+  rechten: { energielabel: boolean; nen: boolean; media: boolean };
+}) {
   const pathname = usePathname();
   const [accountName, setAccountName] = useState<string | null>(null);
   const [svc, setSvc] = useState<StatusResponse | null>(null);
@@ -258,26 +264,32 @@ export default function Sidebar() {
             bestaat, en als vierde en vijfde regel in een rij gelijkvormige
             links waren ze niet te onderscheiden van navigatie. */}
         <span className="nav-groep">Uploaden</span>
-        <NavUpload
-          href="/energielabel"
-          label="Energielabel"
-          actief={pathname === "/energielabel"}
-          bezig={bezigEnergie}
-        />
-        <NavUpload
-          href="/nen"
-          label="NEN2580"
-          actief={pathname === "/nen"}
-          bezig={bezigNen}
-          tag={{ woord: "bèta", soort: "beta" }}
-        />
-        <NavUpload
-          href="/media"
-          label="Media"
-          actief={pathname.startsWith("/media")}
-          bezig={bezigMedia}
-          tag={{ woord: "binnenkort", soort: "binnenkort" }}
-        />
+        {rechten.energielabel && (
+          <NavUpload
+            href="/energielabel"
+            label="Energielabel"
+            actief={pathname === "/energielabel"}
+            bezig={bezigEnergie}
+          />
+        )}
+        {rechten.nen && (
+          <NavUpload
+            href="/nen"
+            label="NEN2580"
+            actief={pathname === "/nen"}
+            bezig={bezigNen}
+            tag={{ woord: "bèta", soort: "beta" }}
+          />
+        )}
+        {rechten.media && (
+          <NavUpload
+            href="/media"
+            label="Media"
+            actief={pathname.startsWith("/media")}
+            bezig={bezigMedia}
+            tag={{ woord: "binnenkort", soort: "binnenkort" }}
+          />
+        )}
       </nav>
 
       <div className="side-block is-compact" style={{ marginTop: "auto" }}>
