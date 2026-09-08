@@ -8,6 +8,7 @@ import {
 } from "@/lib/clickup";
 import { stuurMail } from "@/lib/mail";
 import { uploaderUitnodiging } from "@/lib/mail-sjablonen";
+import { STARTCODE } from "@/lib/auth";
 
 export const maxDuration = 30;
 
@@ -92,16 +93,15 @@ export async function POST(request: Request) {
 
   let gemaild = false;
   if (!bestondAl && email) {
-    const wachtwoord = process.env.APP_PASSWORD;
-    if (wachtwoord) {
-      const { onderwerp, html } = uploaderUitnodiging({
-        naam,
-        appWachtwoord: wachtwoord,
-        rechten: rechten as { energielabel: boolean; nen: boolean; media: boolean },
-      });
-      const resultaat = await stuurMail(onderwerp, html, [email], "uitnodiging_upload");
-      gemaild = resultaat.verstuurd;
-    }
+    // Geen gedeeld wachtwoord meer in de mail: iedereen logt in onder zijn
+    // eigen naam en begint op de startcode, die hij daarna zelf vervangt.
+    const { onderwerp, html } = uploaderUitnodiging({
+      naam,
+      startcode: STARTCODE,
+      rechten: rechten as { energielabel: boolean; nen: boolean; media: boolean },
+    });
+    const resultaat = await stuurMail(onderwerp, html, [email], "uitnodiging_upload");
+    gemaild = resultaat.verstuurd;
   }
 
   const accounts = await getClickUpAccounts();

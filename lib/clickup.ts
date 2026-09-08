@@ -70,6 +70,15 @@ export interface ClickUpAccount {
    * dan is er via ClickUp geen adres te vinden.
    */
   email?: string;
+  /** Beheerders mogen accounts en koppelingen beheren. Afwezig = medewerker. */
+  rol?: "medewerker" | "beheerder";
+  /**
+   * De persoonlijke inlogcode, gehasht. Afwezig betekent: nog de startcode
+   * 0000 — zo hoeft er niets gemigreerd te worden en kan iedereen meteen naar
+   * binnen op de code die hij toch al kreeg.
+   */
+  codeHash?: string;
+  codeSalt?: string;
 }
 
 const EXTRA_ACCOUNTS_KEY = "clickup:accounts:extra";
@@ -99,10 +108,23 @@ function envAccounts(): ClickUpAccount[] {
 async function extraAccounts(): Promise<ClickUpAccount[]> {
   const redis = getOptionalRedis();
   if (!redis) return [];
-  const raw = await redis.get(EXTRA_ACCOUNTS_KEY);
-  if (!raw) return [];
-  const parsed = JSON.parse(raw) as ClickUpAccount[];
-  return Array.isArray(parsed) ? parsed : [];
+  /*
+    Een hapering hier mag niemand buitensluiten.
+
+    Sinds iedereen met zijn eigen naam inlogt, is deze lijst het inlogscherm:
+    gooit hij, dan is er geen enkel account om uit te kiezen en komt niemand de
+    app meer in — ook de eigenaar niet. Bij een storing valt de app daarom
+    terug op wat er in de omgeving staat (CLICKUP_ACCOUNTS/CLICKUP_TOKEN), en
+    meldt de ochtendcontrole dat er accounts missen.
+  */
+  try {
+    const raw = await redis.get(EXTRA_ACCOUNTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ClickUpAccount[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -158,6 +180,9 @@ export async function patchClickUpAccount(patch: {
   avatar?: string | null;
   email?: string | null;
   rechten?: Partial<UploadRechten>;
+  rol?: "medewerker" | "beheerder";
+  codeHash?: string;
+  codeSalt?: string;
 }): Promise<void> {
   const current = await getClickUpAccounts();
   const existing = current.find((a) => a.name === patch.name);
@@ -172,6 +197,9 @@ export async function patchClickUpAccount(patch: {
     avatar: patch.avatar === null ? undefined : patch.avatar ?? existing?.avatar,
     email: patch.email === null ? undefined : patch.email ?? existing?.email,
     rechten: patch.rechten ?? existing?.rechten,
+    rol: patch.rol ?? existing?.rol,
+    codeHash: patch.codeHash ?? existing?.codeHash,
+    codeSalt: patch.codeSalt ?? existing?.codeSalt,
   });
 }
 

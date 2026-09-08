@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { getServerSnapshot, getSnapshot, subscribe } from "@/lib/upload-queue";
 
@@ -154,7 +154,6 @@ function NavUpload({
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const [accountName, setAccountName] = useState<string | null>(null);
   const [svc, setSvc] = useState<StatusResponse | null>(null);
   const [accounts, setAccounts] = useState<AccountsResponse | null>(null);
@@ -214,21 +213,21 @@ export default function Sidebar() {
     return () => document.removeEventListener("click", close);
   }, [menuOpen]);
 
-  async function switchAccount(name: string) {
-    if (switching || name === accounts?.active) {
-      setMenuOpen(false);
-      return;
-    }
+  /**
+   * Uitloggen in plaats van wisselen.
+   *
+   * Van gebruiker wisselen was één klik in dit menu — geen code, geen
+   * bevestiging. Nu hoort de naam bij de inlog, dus wisselen betekent: sessie
+   * weg, en op het inlogscherm je eigen code invullen.
+   */
+  async function uitloggen() {
+    if (switching) return;
     setSwitching(true);
     try {
-      await fetch("/api/clickup/accounts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      setMenuOpen(false);
-      loadAll();
-      router.refresh();
+      await fetch("/api/auth/uitloggen", { method: "POST" });
+      // Harde navigatie: de middleware moet de lege cookie meteen zien,
+      // anders komt de volgende pagina nog uit de cache van de oude sessie.
+      window.location.href = "/login";
     } finally {
       setSwitching(false);
     }
@@ -349,31 +348,22 @@ export default function Sidebar() {
           </span>
           <span className="user-id">
             <b>{accountName ?? "Laden…"}</b>
-            <span>ClickUp-account</span>
+            <span>ingelogd</span>
           </span>
           <svg className="user-chev" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
 
-        {menuOpen && accounts && (
+        {menuOpen && (
           <div className="user-menu" role="menu">
-            <span className="user-menu-label">Wissel van gebruiker</span>
-            {accounts.accounts.map((a) => (
-              <button
-                key={a.name}
-                type="button"
-                className="user-menu-item"
-                onClick={() => switchAccount(a.name)}
-              >
-                {a.name}
-                {a.name === accounts.active && <span className="tick">✓</span>}
-              </button>
-            ))}
-            <div className="user-menu-sep" />
             <a href="/gebruikers" className="user-menu-item" onClick={() => setMenuOpen(false)}>
-              <span className="user-menu-plus">+</span> Gebruiker toevoegen
+              Mijn gegevens en code
             </a>
+            <div className="user-menu-sep" />
+            <button type="button" className="user-menu-item" onClick={uitloggen} disabled={switching}>
+              {switching ? "Bezig…" : "Uitloggen"}
+            </button>
           </div>
         )}
       </div>

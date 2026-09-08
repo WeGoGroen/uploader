@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { haalUitgezet, isKoppeling, zetKoppeling } from "@/lib/koppelingen";
+import { isBeheerder } from "@/lib/sessie-server";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,13 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!(await isBeheerder())) {
+    return NextResponse.json(
+      { error: "Alleen een beheerder kan koppelingen aan- of uitzetten." },
+      { status: 403 }
+    );
+  }
+
   const body = (await request.json().catch(() => null)) as { dienst?: string; uit?: boolean } | null;
   const dienst = body?.dienst ?? "";
   if (!isKoppeling(dienst)) {
