@@ -38,6 +38,14 @@ export interface MediataskOrder {
   state: string;
   output_link?: string | null;
   address?: string;
+  /**
+   * Wie de order bij Mediatask heeft aangemaakt.
+   *
+   * Zij leiden dat af uit de API-sleutel waarmee hij binnenkwam, en geven het
+   * bij elke order terug. Dit is de enige betrouwbare eigenaar: onze eigen
+   * administratie kent de orders niet die buiten deze app om zijn gemaakt.
+   */
+  owner?: { id: number; full_name?: string; username?: string } | null;
 }
 
 export class MediataskApiError extends Error {

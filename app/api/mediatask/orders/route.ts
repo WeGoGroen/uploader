@@ -11,10 +11,21 @@ export const maxDuration = 300;
  * Geeft de (meest recente) Mediatask-orders terug — gebruikt om per adres
  * real-time te checken of er al een NEN2580-order bestaat, i.p.v. te
  * vertrouwen op onze eigen concept-administratie.
+ *
+ * Bewust niet gefilterd op eigenaar, en bewust wél uitgekleed. Niet gefilterd,
+ * omdat de vraag "staat dit adres er al?" over het hele bureau gaat: een order
+ * die een collega gisteren aanmaakte moet je vinden, anders maak je er een
+ * tweede. Uitgekleed, omdat het antwoord daarvoor niet meer nodig heeft dan
+ * het adres — wie wat gedaan heeft, met welk bureau en welke deadline, hoort
+ * niet in de browser van iedereen terecht te komen.
  */
 export async function GET() {
   try {
-    const orders = await listOrders();
+    const orders = (await listOrders()).map((o) => ({
+      id: o.id,
+      address: o.address,
+      state: o.state,
+    }));
     return NextResponse.json({ orders });
   } catch (err) {
     return NextResponse.json(

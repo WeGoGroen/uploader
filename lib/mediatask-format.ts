@@ -33,3 +33,22 @@ export function matchGrossFloorAreaBracket(size: number, values: string[] | unde
   }
   return null;
 }
+
+/**
+ * Alleen de orders die bij Mediatask op naam van deze gebruiker staan.
+ *
+ * De orderlijst die Mediatask teruggeeft is die van het hele bureau, ook als
+ * je hem met je eigen sleutel opvraagt. Wie dat over het hoofd ziet, bouwt een
+ * "jouw werk"-lijst waar het werk van collega's in staat — zo verscheen de
+ * scan van de een op het dashboard van de ander.
+ *
+ * Een order zonder eigenaar valt af. Dat is de veilige kant: liever een order
+ * missen die van jou is (hij staat ook bij Mediatask zelf) dan er een tonen
+ * die van iemand anders is.
+ */
+export function eigenOrders<T extends { owner?: { id: number } | null }>(
+  orders: T[],
+  gebruikerId: number
+): T[] {
+  return orders.filter((o) => o.owner?.id === gebruikerId);
+}
