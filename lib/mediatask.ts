@@ -96,7 +96,14 @@ export async function saveMediataskCredentials(token: string, baseUrl: string): 
   await redis.set(MEDIATASK_CREDENTIALS_KEY, JSON.stringify({ token, baseUrl: baseUrl.replace(/\/$/, "") }));
 }
 
-export async function requireMediataskConfig(): Promise<{ token: string; baseUrl: string }> {
+/**
+ * De gedeelde sleutel: van het bedrijf, niet van een persoon.
+ *
+ * Blijft de basis voor alles wat teambreed of zonder inlog draait — de
+ * ochtendcontrole, de agent die opleveringen ophaalt, en het uitlezen van
+ * bureaus en producten.
+ */
+export async function requireGedeeldeMediataskConfig(): Promise<{ token: string; baseUrl: string }> {
   const stored = await getStoredMediataskCredentials();
   if (stored) return stored;
   const token = process.env.MEDIATASK_API_TOKEN;
@@ -105,6 +112,67 @@ export async function requireMediataskConfig(): Promise<{ token: string; baseUrl
     throw new Error("Mediatask is niet geconfigureerd (MEDIATASK_API_TOKEN / MEDIATASK_API_BASE ontbreken)");
   }
   return { token, baseUrl: baseUrl.replace(/\/$/, "") };
+}
+
+/**
+ * De sleutel van wie er nu werkt, met de gedeelde als terugval.
+ *
+ * Mediatask leidt de eigenaar van een order af uit de sleutel waarmee hij is
+ * aangemaakt. Met alleen de gedeelde sleutel kwam al het werk daardoor op naam
+ * van één persoon te staan, terwijl iedere opnemer daar een eigen account
+ * heeft. Wie zijn eigen sleutel heeft geplakt, maakt vanaf nu orders op zijn
+ * eigen naam; wie dat nog niet gedaan heeft werkt gewoon door op de gedeelde,
+ * zodat er tijdens de overgang niets stilvalt.
+ *
+ * Buiten een verzoek om (cron, agent) is er geen sessie en dus geen persoon —
+ * dan is de gedeelde sleutel het juiste antwoord, niet een fout.
+ */
+export async function requireMediataskConfig(): Promise<{ token: string; baseUrl: string }> {
+  const gedeeld = await requireGedeeldeMediataskConfig();
+  try {
+    const { getActiveAccountName } = await import("@/lib/active-account");
+    const { getClickUpAccounts } = await import("@/lib/clickup");
+    const naam = await getActiveAccountName();
+    if (!naam) return gedeeld;
+    const account = (await getClickUpAccounts()).find((a) => a.name === naam);
+    if (account?.mediataskToken) return { ...gedeeld, token: account.mediataskToken };
+  } catch {
+    // Geen verzoek-scope of geen opslag: dan is de gedeelde sleutel het antwoord.
+  }
+  return gedeeld;
+}
+
+/**
+ * Controleert een persoonlijke sleutel bij Mediatask zelf.
+ *
+ * Zonder deze controle sla je een typefout stil op, en merkt de opnemer het
+ * pas als hij in het veld een order probeert aan te maken. /api/me geeft het
+ * gebruikersnummer terug dat bij de sleutel hoort — precies wat Mediatask
+ * straks als eigenaar op de order zet.
+ */
+export async function controleerMediataskSleutel(
+  token: string
+): Promise<{ ok: boolean; userId?: number; reden?: string }> {
+  let baseUrl: string;
+  try {
+    baseUrl = (await requireGedeeldeMediataskConfig()).baseUrl;
+  } catch (err) {
+    return { ok: false, reden: err instanceof Error ? err.message : "Mediatask niet geconfigureerd" };
+  }
+  try {
+    const res = await fetch(`${baseUrl}/api/me`, {
+      headers: { "X-Api-Token": token },
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      return { ok: false, reden: `Mediatask weigert deze sleutel (${res.status}).` };
+    }
+    const body = (await res.json()) as { user?: { id?: number } };
+    if (!body.user?.id) return { ok: false, reden: "Mediatask gaf geen gebruiker terug bij deze sleutel." };
+    return { ok: true, userId: body.user.id };
+  } catch {
+    return { ok: false, reden: "Mediatask is nu niet bereikbaar." };
+  }
 }
 
 export async function mediataskFetch<T>(path: string, init?: RequestInit): Promise<T> {

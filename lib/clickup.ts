@@ -89,6 +89,15 @@ export interface ClickUpAccount {
    * iedereen elkaars zelfgekozen code kan meelezen.
    */
   codeKlaar?: string;
+  /**
+   * Persoonlijke Mediatask-API-sleutel.
+   *
+   * Mediatask bepaalt de eigenaar van een order aan de hand van de sleutel
+   * waarmee hij is aangemaakt. Met één gedeelde sleutel komt dus al het werk
+   * op naam van één persoon te staan, ook al heeft iedere opnemer daar een
+   * eigen account. Zelfde opzet als het ClickUp-token hierboven.
+   */
+  mediataskToken?: string;
 }
 
 const EXTRA_ACCOUNTS_KEY = "clickup:accounts:extra";
@@ -215,6 +224,7 @@ export async function patchClickUpAccount(patch: {
   codeSalt?: string;
   /** Leesbare kopie; null wist hem (de eigenaar koos zelf een code). */
   codeKlaar?: string | null;
+  mediataskToken?: string;
 }): Promise<void> {
   const current = await getClickUpAccounts();
   const existing = current.find((a) => a.name === patch.name);
@@ -233,6 +243,7 @@ export async function patchClickUpAccount(patch: {
     codeHash: patch.codeHash ?? existing?.codeHash,
     codeSalt: patch.codeSalt ?? existing?.codeSalt,
     codeKlaar: patch.codeKlaar === null ? undefined : patch.codeKlaar ?? existing?.codeKlaar,
+    mediataskToken: patch.mediataskToken ?? existing?.mediataskToken,
   });
 }
 

@@ -8,6 +8,7 @@ import {
   type UploadRechten,
 } from "@/lib/clickup";
 import { haalPersoneel, zetCode } from "@/lib/personeel";
+import { controleerMediataskSleutel } from "@/lib/mediatask";
 import { stuurMail } from "@/lib/mail";
 import { uploaderUitnodiging } from "@/lib/mail-sjablonen";
 import { STARTCODE } from "@/lib/auth";
@@ -49,6 +50,9 @@ export async function GET(request: Request) {
         email: a.email ?? null,
         avatar: a.avatar ?? null,
         heeftToken: Boolean(a.token),
+        // Alleen of hij er een heeft. De sleutel zelf blijft hier, net als het
+        // ClickUp-token: hij maakt orders op iemands eigen naam aan.
+        heeftMediataskToken: Boolean(a.mediataskToken),
         rechten: rechtenVan(a),
         rol: persoon?.rol ?? "medewerker",
         codeGewijzigd: persoon?.codeGewijzigd ?? false,
@@ -92,16 +96,43 @@ export async function DELETE(request: Request) {
   }
 }
 
-/** Een code instellen voor iemand; blijft leesbaar tot hij hem zelf vervangt. */
+/**
+ * Een code of een Mediatask-sleutel instellen voor iemand.
+ *
+ * De sleutel wordt eerst bij Mediatask nagekeken. Een typefout stil opslaan
+ * betekent dat de opnemer het pas merkt als hij in het veld een order wil
+ * aanmaken — en dan staat hij met een klant in huis.
+ */
 export async function PATCH(request: Request) {
   if (!isInternRequest(request)) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }
-  const body = (await request.json().catch(() => null)) as { naam?: string; code?: string } | null;
+  const body = (await request.json().catch(() => null)) as
+    | { naam?: string; code?: string; mediataskToken?: string }
+    | null;
   const naam = body?.naam?.trim() ?? "";
+  if (!naam) return NextResponse.json({ error: "naam ontbreekt" }, { status: 400 });
+
+  const sleutel = body?.mediataskToken?.trim();
+  if (sleutel) {
+    const uitkomst = await controleerMediataskSleutel(sleutel);
+    if (!uitkomst.ok) {
+      return NextResponse.json({ error: uitkomst.reden ?? "sleutel afgekeurd" }, { status: 400 });
+    }
+    try {
+      await patchClickUpAccount({ name: naam, mediataskToken: sleutel });
+      return NextResponse.json({ ok: true, mediataskUserId: uitkomst.userId });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message.slice(0, 200) : "opslaan mislukt" },
+        { status: 500 }
+      );
+    }
+  }
+
   const code = body?.code ?? "";
-  if (!naam || !/^[0-9]{4}$/.test(code)) {
-    return NextResponse.json({ error: "naam en een viercijferige code zijn verplicht" }, { status: 400 });
+  if (!/^[0-9]{4}$/.test(code)) {
+    return NextResponse.json({ error: "een viercijferige code of een Mediatask-sleutel is verplicht" }, { status: 400 });
   }
   try {
     await zetCode(naam, code, true);
