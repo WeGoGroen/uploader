@@ -261,3 +261,22 @@ describe("adviseur op de tag", () => {
     expect(r[0].gebruiker).toBe("Y. Bakker");
   });
 });
+
+describe("waar een openstaande opname heen linkt", () => {
+  it("stuurt een NEN-opname naar de NEN-pagina", () => {
+    // Stond vast op /energielabel, ook voor NEN. Wie geen energielabelrecht
+    // heeft werd daardoor weggestuurd en kwam niet meer bij zijn eigen upload.
+    const [regel] = bouwOpenstaand(
+      [],
+      [concept({ id: "nen-Herengracht 518-H, Amsterdam", straatnaam: "Herengracht 518-H", heeftMediatask: true })]
+    );
+    expect(regel.producten[0].soort).toBe("nen");
+    expect(regel.producten[0].href).toBe("/nen?addr=Herengracht%20518-H");
+  });
+
+  it("stuurt een energielabel-opname nog steeds naar het concept", () => {
+    const [regel] = bouwOpenstaand([], [concept({ id: "abc", straatnaam: "Dam 5" })]);
+    expect(regel.producten[0].soort).toBe("energielabel");
+    expect(regel.producten[0].href).toBe("/energielabel?draft=abc");
+  });
+});

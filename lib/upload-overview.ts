@@ -210,7 +210,20 @@ export function bouwOpenstaand(
 
     // Een concept met een Mediatask-order hoort bij de NEN-kant.
     const soort: Soort = d.heeftMediatask ? "nen" : "energielabel";
-    const href = `/energielabel?draft=${d.id}`;
+    /*
+      En dan hoort de link daar ook heen te wijzen.
+
+      Dit stond vast op /energielabel, ook voor NEN-opnames. Klikte je op zo'n
+      regel, dan kwam je op het energielabelformulier terecht - en wie dat
+      recht niet heeft (Jelle doet alleen NEN2580 en media) werd meteen
+      teruggestuurd naar het dashboard. Zo kon je niet meer terug naar je eigen
+      onafgemaakte NEN-upload: de enige weg erheen liep langs een deur die voor
+      jou dicht zat.
+    */
+    const href =
+      soort === "nen"
+        ? `/nen?addr=${encodeURIComponent(d.straatnaam || d.titel || adres)}`
+        : `/energielabel?draft=${d.id}`;
     voegProductToe(regel, soort, href);
     // De adviseur op de opname wint van de ingelogde gebruiker. Bij opslaan
     // vastgelegd, dus hier geen veldenlijst en geen rekenwerk meer nodig.
