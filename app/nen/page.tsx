@@ -359,7 +359,7 @@ export default function UploadNen() {
     het moest onthouden. Het laden van config en concept duurt langer dan de
     debounce, dus dat ging altijd mis.
   */
-  const keuzesGeladen = useRef(false);
+  const [keuzesGeladen, setKeuzesGeladen] = useState(false);
 
   const nenKeuzes = {
     agencyId,
@@ -383,20 +383,23 @@ export default function UploadNen() {
     : null;
 
   useEffect(() => {
-    if (!nenMelding) return;
+    // Ook dit meldeffect wacht op het herstel. Deed het dat niet, dan schreef
+    // het bij het openen de nog lege keuzes weg — en /api/drafts vervangt de
+    // hele state, dus daarmee was de bewaarde makelaar meteen verdwenen.
+    if (!nenMelding || !keuzesGeladen) return;
     meldGestart(nenMelding);
     return startHartslag(nenMelding);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nenMelding?.id, nenMelding?.accountName]);
+  }, [nenMelding?.id, nenMelding?.accountName, keuzesGeladen]);
 
   // Ook opslaan zodra je iets kiest; het effect hierboven kijkt alleen naar het
   // adres, en dan zou de makelaar pas bij de volgende hartslag vastliggen.
   useEffect(() => {
-    if (!nenMelding || !keuzesGeladen.current) return;
+    if (!nenMelding || !keuzesGeladen) return;
     const t = setTimeout(() => meldGestart(nenMelding), 800);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agencyId, manualAgencyId, productId, manualProductId, priorityId, manualPriorityId, productConfig]);
+  }, [agencyId, manualAgencyId, productId, manualProductId, priorityId, manualPriorityId, productConfig, keuzesGeladen]);
   const [extraPhotoUrls, setExtraPhotoUrls] = useState("");
   const [extraDrawingUrls, setExtraDrawingUrls] = useState("");
 
@@ -501,6 +504,8 @@ export default function UploadNen() {
     setMtPostcode(a.postcode);
 
     const straatEnNummer = `${a.straatnaam} ${houseNumber(a)}`;
+    // Ander adres: weer op slot tot de keuzes van dát adres binnen zijn.
+    setKeuzesGeladen(false);
 
     // De Dropbox-map wordt hier bewust NIET aangemaakt. Het adres mag op dit
     // punt nog gecorrigeerd worden ("Aanpassen"), en de mapnaam bevat het
@@ -631,7 +636,7 @@ export default function UploadNen() {
 
     // Vanaf nu telt wat er op het scherm staat als jouw keuze en mag het
     // opgeslagen worden.
-    keuzesGeladen.current = true;
+    setKeuzesGeladen(true);
   }
 
   const selectedProduct = config?.products.find((p) => p.id === productId) ?? null;
