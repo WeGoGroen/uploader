@@ -1,4 +1,5 @@
 import type { UploadTask } from "@/lib/upload-queue";
+import { opnameLink } from "@/lib/opname-link";
 import { normalizeForMatch, sameAddress, splitAddress } from "@/lib/address-format";
 import type { DraftSamenvatting } from "@/lib/drafts";
 
@@ -231,10 +232,7 @@ export function bouwOpenstaand(
       onafgemaakte NEN-upload: de enige weg erheen liep langs een deur die voor
       jou dicht zat.
     */
-    const href =
-      soort === "nen"
-        ? `/nen?addr=${encodeURIComponent(d.straatnaam || d.titel || adres)}`
-        : `/energielabel?draft=${d.id}`;
+    const href = opnameLink({ ...d, soort, straatnaam: d.straatnaam || d.titel || adres });
     voegProductToe(regel, soort, href);
     // De adviseur op de opname wint van de ingelogde gebruiker. Bij opslaan
     // vastgelegd, dus hier geen veldenlijst en geen rekenwerk meer nodig.

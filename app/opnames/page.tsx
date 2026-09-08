@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRechten } from "@/components/RechtenProvider";
+import { opnameLink } from "@/lib/opname-link";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 
 type DraftRecord = Pick<
@@ -182,7 +183,7 @@ export default function Opnames() {
                     </div>
                   </div>
                   <div className="draft-actions">
-                    <a className="btn btn-primary" href={`/energielabel?draft=${d.id}`}>
+                    <a className="btn btn-primary" href={opnameLink(d)}>
                       Verder afmaken
                     </a>
                     <button className="btn-text" onClick={() => removeDraft(d.id)}>
@@ -218,7 +219,7 @@ export default function Opnames() {
                     </div>
                   </div>
                   <div className="draft-actions">
-                    <a className="btn btn-primary" href={`/energielabel?draft=${d.id}`}>
+                    <a className="btn btn-primary" href={opnameLink(d)}>
                       Bijlages opnieuw uploaden
                     </a>
                     {d.clickupTaskUrl && (
