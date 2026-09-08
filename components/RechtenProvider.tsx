@@ -28,16 +28,38 @@ const RechtenContext = createContext<UploadRechten>({
   media: false,
 });
 
+/**
+ * Onder welke naam je werkt.
+ *
+ * Dit werd op vier schermen uit ClickUp gehaald (/api/clickup/list-meta), en
+ * die kent alleen mensen met een persoonlijk token. Jelle doet geen
+ * energielabels en heeft er dus geen — zijn opnames werden daardoor zonder
+ * naam opgeslagen. Gevolg: werk van niemand, dat op ieders dashboard verschijnt
+ * omdat het aan geen enkel account te koppelen was. Wie je bent staat in de
+ * sessie, en die is er altijd.
+ */
+const NaamContext = createContext<string | null>(null);
+
 export function useRechten(): UploadRechten {
   return useContext(RechtenContext);
 }
 
+export function useIkBen(): string | null {
+  return useContext(NaamContext);
+}
+
 export default function RechtenProvider({
   rechten,
+  naam,
   children,
 }: {
   rechten: UploadRechten;
+  naam: string | null;
   children: React.ReactNode;
 }) {
-  return <RechtenContext.Provider value={rechten}>{children}</RechtenContext.Provider>;
+  return (
+    <NaamContext.Provider value={naam}>
+      <RechtenContext.Provider value={rechten}>{children}</RechtenContext.Provider>
+    </NaamContext.Provider>
+  );
 }

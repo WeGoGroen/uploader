@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useIkBen } from "@/components/RechtenProvider";
 import { useRouter } from "next/navigation";
 import type { AddressDetails, AddressSuggestion, NearbyAddress } from "@/lib/pdok";
 import TodayAppointments from "@/components/TodayAppointments";
@@ -192,13 +193,11 @@ export default function UploadNen() {
   // gecommit binnen dezelfde afhandeling).
   // Wie er ingelogd is; hoort bij de melding dat deze opname loopt, zodat een
   // herinnering bij de juiste persoon terechtkomt.
-  const [account, setAccount] = useState<string | null>(null);
-  useEffect(() => {
-    fetch("/api/clickup/list-meta", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setAccount(d?.account?.username ?? null))
-      .catch(() => {});
-  }, []);
+  // Uit de sessie, niet uit ClickUp: wie geen persoonlijk ClickUp-token heeft
+  // (iedereen die geen energielabels doet) kreeg hier null, en dan werd zijn
+  // opname zonder naam opgeslagen — werk van niemand, dat bij iedereen in de
+  // lijst kwam te staan.
+  const account = useIkBen();
 
   const [klantHint, setKlantHint] = useState<string | null>(null);
   const [grossFloorAreaHint, setGrossFloorAreaHint] = useState<number | null>(null);

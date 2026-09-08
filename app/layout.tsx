@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
 import { huidigeRechten } from "@/lib/rechten-server";
+import { huidigeSessie } from "@/lib/sessie-server";
 import RechtenProvider from "@/components/RechtenProvider";
 import LocationPermission from "@/components/LocationPermission";
 import UploadResume from "@/components/UploadResume";
@@ -33,6 +34,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     knop die je niet mag er ook nooit staat.
   */
   const { rechten } = await huidigeRechten();
+  const sessie = await huidigeSessie();
 
   return (
     <html
@@ -42,7 +44,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col">
         <LocationPermission />
         <UploadResume />
-        <RechtenProvider rechten={rechten}>
+        <RechtenProvider rechten={rechten} naam={sessie?.naam ?? null}>
           <div className="shell">
             <Sidebar rechten={rechten} />
             <div className="main">{children}</div>
