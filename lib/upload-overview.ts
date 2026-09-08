@@ -13,6 +13,7 @@ export type OverzichtDraft = Pick<
   | "accountName"
   | "incompleteDocs"
   | "updatedAt"
+  | "soort"
   | "heeftMediatask"
   | "adviseur"
   | "ontbrekendeVelden"
@@ -208,8 +209,18 @@ export function bouwOpenstaand(
     const bestaand = [...perAdres.values()].find((r) => sameAddress(r.adres, d.straatnaam));
     const regel = bestaand ?? regelVoor(adres);
 
-    // Een concept met een Mediatask-order hoort bij de NEN-kant.
-    const soort: Soort = d.heeftMediatask ? "nen" : "energielabel";
+    /*
+      Wat je gestart hebt, blijft wat het is.
+
+      Dit werd afgeleid uit "heeft deze opname een Mediatask-order?" - en zo
+      lang die er nog niet was (upload nog bezig, of het aanmaken mislukt),
+      gold een NEN-opname als energielabel. Terwijl de app allang weet waar je
+      begonnen bent: wie via het menu op NEN2580 klikt, legt bij het opslaan
+      soort "nen" vast. Die herkomst is het antwoord, niet wat er later
+      toevallig wel of niet is aangemaakt. De Mediatask-order blijft de
+      terugval voor opnames van vóór dat veld.
+    */
+    const soort: Soort = d.soort === "nen" || d.heeftMediatask ? "nen" : "energielabel";
     /*
       En dan hoort de link daar ook heen te wijzen.
 

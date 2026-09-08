@@ -280,3 +280,16 @@ describe("waar een openstaande opname heen linkt", () => {
     expect(regel.producten[0].href).toBe("/energielabel?draft=abc");
   });
 });
+
+describe("een opname blijft de soort waarmee hij begon", () => {
+  it("houdt een NEN-opname op NEN, ook zonder Mediatask-order", () => {
+    // Zolang de order er nog niet is (upload bezig, of aanmaken mislukt) gold
+    // dit vroeger als energielabel — met een link naar het verkeerde formulier.
+    const [regel] = bouwOpenstaand(
+      [],
+      [concept({ id: "nen-Dam 1, Amsterdam", straatnaam: "Dam 1", soort: "nen" })]
+    );
+    expect(regel.producten[0].soort).toBe("nen");
+    expect(regel.producten[0].href).toBe("/nen?addr=Dam%201");
+  });
+});
