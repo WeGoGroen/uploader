@@ -351,6 +351,16 @@ export default function UploadNen() {
     keuzes die je zelf maakt; wat uit Mediatask of de agenda komt, wordt toch
     opnieuw opgehaald.
   */
+  /*
+    Pas opslaan als de bewaarde keuzes zijn teruggezet.
+
+    Zonder deze rem schreef het effect hieronder bij het openen van de pagina
+    meteen de lege beginwaarden weg - en wiste daarmee precies de makelaar die
+    het moest onthouden. Het laden van config en concept duurt langer dan de
+    debounce, dus dat ging altijd mis.
+  */
+  const keuzesGeladen = useRef(false);
+
   const nenKeuzes = {
     agencyId,
     manualAgencyId,
@@ -382,7 +392,7 @@ export default function UploadNen() {
   // Ook opslaan zodra je iets kiest; het effect hierboven kijkt alleen naar het
   // adres, en dan zou de makelaar pas bij de volgende hartslag vastliggen.
   useEffect(() => {
-    if (!nenMelding) return;
+    if (!nenMelding || !keuzesGeladen.current) return;
     const t = setTimeout(() => meldGestart(nenMelding), 800);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -618,6 +628,10 @@ export default function UploadNen() {
         }
       }
     }
+
+    // Vanaf nu telt wat er op het scherm staat als jouw keuze en mag het
+    // opgeslagen worden.
+    keuzesGeladen.current = true;
   }
 
   const selectedProduct = config?.products.find((p) => p.id === productId) ?? null;
