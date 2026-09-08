@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Sidebar from "@/components/Sidebar";
 import { huidigeRechten } from "@/lib/rechten-server";
+import RechtenProvider from "@/components/RechtenProvider";
 import LocationPermission from "@/components/LocationPermission";
 import UploadResume from "@/components/UploadResume";
 import "./globals.css";
@@ -41,10 +42,12 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col">
         <LocationPermission />
         <UploadResume />
-        <div className="shell">
-          <Sidebar rechten={rechten} />
-          <div className="main">{children}</div>
-        </div>
+        <RechtenProvider rechten={rechten}>
+          <div className="shell">
+            <Sidebar rechten={rechten} />
+            <div className="main">{children}</div>
+          </div>
+        </RechtenProvider>
       </body>
     </html>
   );

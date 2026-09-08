@@ -6,6 +6,7 @@ import { adresSleutel, calendarLocationToBagQuery, sameAddress, splitAddress } f
 import { checkBagAddress, type BagCheckResult } from "@/lib/bag-check";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 import UploadPanel from "@/components/UploadPanel";
+import { useRechten } from "@/components/RechtenProvider";
 import ScanStatusKaart from "@/components/ScanStatus";
 
 interface MediataskOrderSummary {
@@ -96,16 +97,9 @@ function StatusPill({
 export default function Dashboard() {
   // Alles toestaan tot het antwoord binnen is: anders knipperen de knoppen
   // weg en weer terug bij elke paginaopening.
-  const [rechten, setRechten] = useState({ energielabel: true, nen: true, media: true });
-
-  useEffect(() => {
-    fetch("/api/rechten", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d: { rechten?: { energielabel: boolean; nen: boolean; media: boolean } }) => {
-        if (d.rechten) setRechten(d.rechten);
-      })
-      .catch(() => {});
-  }, []);
+  // Komt server-side mee (zie de layout): er is dus geen moment waarop het
+  // scherm nog niet weet wat je mag en voor de zekerheid alles toont.
+  const rechten = useRechten();
 
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
