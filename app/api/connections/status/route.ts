@@ -3,7 +3,7 @@ import { suggestAddresses } from "@/lib/pdok";
 import { getAuthorizedUser, requireClickUpConfig } from "@/lib/clickup";
 import { getActiveAccountName, resolveActiveAccountName } from "@/lib/active-account";
 import { getCurrentAccount, getSharedAccessToken, requireDropboxConfig } from "@/lib/dropbox";
-import { getAgencies, requireMediataskConfig } from "@/lib/mediatask";
+import { getAgencies, huidigeMediataskGebruiker, requireMediataskConfig } from "@/lib/mediatask";
 import { getAccessTokenForAccount, getCurrentAccount as getGoogleAccount, requireGoogleConfig } from "@/lib/google-calendar";
 import {
   getDefaultDriveId,
@@ -105,7 +105,13 @@ export async function GET() {
     mediatask.connected = true;
     const agencies = await getAgencies();
     mediatask.ok = true;
-    mediatask.label = `${agencies.length} bureau${agencies.length === 1 ? "" : "s"}`;
+    // Op wiens naam je orders komen te staan is belangrijker dan het aantal
+    // bureaus: met de gedeelde sleutel staat al het werk op één persoon.
+    const wie = await huidigeMediataskGebruiker();
+    const bureaus = `${agencies.length} bureau${agencies.length === 1 ? "" : "s"}`;
+    mediatask.label = wie
+      ? `${wie.eigen ? "eigen sleutel" : "gedeelde sleutel"} · gebruiker ${wie.id} · ${bureaus}`
+      : bureaus;
   } catch (err) {
     mediatask.error = mediatask.connected
       ? "Token wordt geweigerd door Mediatask."

@@ -150,6 +150,30 @@ export async function requireMediataskConfig(): Promise<{ token: string; baseUrl
  * gebruikersnummer terug dat bij de sleutel hoort — precies wat Mediatask
  * straks als eigenaar op de order zet.
  */
+/**
+ * Onder welke Mediatask-gebruiker de app op dit moment werkt.
+ *
+ * Nodig om te kunnen zien of je op je eigen sleutel werkt of nog op de
+ * gedeelde: dat verschil bepaalt op wiens naam je orders komen te staan, en
+ * dat is precies wat je niet wilt hoeven raden.
+ */
+export async function huidigeMediataskGebruiker(): Promise<{ id: number; eigen: boolean } | null> {
+  const gedeeld = await requireGedeeldeMediataskConfig();
+  const actief = await requireMediataskConfig();
+  try {
+    const res = await fetch(`${actief.baseUrl}/api/me`, {
+      headers: { "X-Api-Token": actief.token },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { user?: { id?: number } };
+    if (!body.user?.id) return null;
+    return { id: body.user.id, eigen: actief.token !== gedeeld.token };
+  } catch {
+    return null;
+  }
+}
+
 export async function controleerMediataskSleutel(
   token: string
 ): Promise<{ ok: boolean; userId?: number; reden?: string }> {
