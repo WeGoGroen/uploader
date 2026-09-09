@@ -35,10 +35,12 @@ export function leesbareFout(err: unknown): string {
   if (/not_found/i.test(t)) return "het bestand staat niet meer in Dropbox";
   if (/insufficient_space/i.test(t)) return "Dropbox zit vol";
   if (/expired_access_token|invalid_access_token/i.test(t)) return "de Dropbox-koppeling is verlopen";
-  // Een 403 is bij Mediatask geen tokenprobleem maar een orderprobleem: de
-  // order is geen concept meer. "Geen toegang" stuurde iedereen naar de
-  // koppeling kijken, terwijl daar niets aan mankeert.
-  if (/\b403\b/.test(t)) return "Mediatask neemt niets meer aan bij deze order (403) — hij is waarschijnlijk al ingediend";
+  // Een 403 gaat bij Mediatask over déze order: hij is niet van de sleutel
+  // waarmee geüpload wordt, of hij is geen concept meer. "Geen toegang"
+  // stuurde iedereen naar de koppeling kijken, terwijl daar niets aan
+  // mankeert. Welke van de twee het is, zegt weigeringUitleg erbij zodra de
+  // toestand van de order opgehaald kon worden.
+  if (/\b403\b/.test(t)) return "Mediatask neemt niets aan bij deze order (403) — de order hoort niet bij deze sleutel of is al ingediend";
   if (/\b401\b/.test(t)) return "Mediatask weigerde het verzoek (geen toegang)";
   if (/\b(429)\b/.test(t)) return "te veel verzoeken tegelijk — probeer het zo nog eens";
   if (/\b(50\d)\b/.test(t)) return "Mediatask of Dropbox gaf een serverfout";

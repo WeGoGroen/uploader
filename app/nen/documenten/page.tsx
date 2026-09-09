@@ -350,7 +350,7 @@ function DocumentenContent() {
       <span className="note" style={{ padding: 0, color: "var(--bad)" }}>
         ⚠ Doorsturen naar Mediatask mislukte ({pcFout[naam]}){" "}
         {pcDefinitief[naam]
-          ? "— hier verandert opnieuw proberen niets aan. Ga terug naar de order en start het versturen opnieuw; er komt dan een vers concept waar de scan wél in kan."
+          ? "— aan déze order komt hij niet meer; nog eens proberen verandert daar niets aan. Ga terug naar de order en start opnieuw, dan komt er een vers concept."
           : "— gaat bij het afronden opnieuw mee."}
       </span>
     );
@@ -1486,7 +1486,7 @@ function DocumentenContent() {
                 ⚠ Order #{mediataskOrderId} staat klaar bij Mediatask maar is bewust nog niet ingediend:{" "}
                 {mediataskNietIngediend} Een ingediende order neemt geen scan meer aan, dus hij blijft concept.{" "}
                 {mediataskGeenHerstel
-                  ? "Aan déze order komt niets meer bij: ga terug naar de order en start het versturen opnieuw, dan komt er een vers concept waar de scan wél in kan."
+                  ? "Aan déze order komt niets meer bij; nog eens versturen verandert daar niets aan. Ga terug naar de order en start opnieuw, dan komt er een vers concept. Blijft het misgaan, dan zit het in de Mediatask-sleutel en niet in de scan — zie de melding hierboven."
                   : "Verhelp de fout hierboven en druk opnieuw op versturen — dezelfde order wordt dan afgemaakt, er komt geen tweede bij."}
               </p>
             )}

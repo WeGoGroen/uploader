@@ -163,14 +163,19 @@ describe("stuurScansVanuitDropbox", () => {
     expect(dropbox.openFileStream).toHaveBeenCalledTimes(1);
   });
 
-  it("valt terug op de korte melding als de order gewoon een concept is", async () => {
-    dropbox.listFolderFiles.mockResolvedValue([{ name: "12 3.dp" }]);
+  it("wijst bij een order die nog concept is naar de sleutel, niet naar indienen", async () => {
+    // Dit is Balboastraat 12-4: een order van nog geen minuut oud die al
+    // geweigerd werd. "Al ingediend" is daar aantoonbaar niet de reden, en die
+    // melding zou een dag zoeken in de verkeerde hoek kosten.
+    dropbox.listFolderFiles.mockResolvedValue([{ name: "12 4.dp" }]);
     nepNetwerk({ orderState: "draft" });
 
     const [uitkomst] = await stuurScansVanuitDropbox(7, "/map");
 
     expect(uitkomst.ok).toBe(false);
-    expect(uitkomst.fout).toContain("403");
+    expect(uitkomst.fout).toContain("nog een concept");
+    expect(uitkomst.fout).toContain("Mediatask-sleutel");
+    expect(uitkomst.fout).not.toContain("ingediend");
   });
 
   it("laat een fout aan één bestand de rest niet tegenhouden", async () => {

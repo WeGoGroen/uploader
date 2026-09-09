@@ -85,7 +85,12 @@ function describeMediataskError(status: number, body: string, endpoint: string):
   // raadselachtiger; dan is het endpoint het enige wat nog informatie draagt.
   const zinnig = detail && detail !== "{}" && detail !== "[]" ? `: ${detail.slice(0, 200)}` : "";
   if (status === 403) {
-    return `Mediatask stond ${endpoint} niet toe (403)${zinnig}. Dit is wat een order doet die geen concept meer is: eenmaal ingediend neemt Mediatask er geen bestanden meer bij.`;
+    // Bewust géén oorzaak aanwijzen: een 403 op een order betekent óf "hij is
+    // niet van deze sleutel" óf "hij is geen concept meer", en welke van de
+    // twee het is staat in de toestand van de order — niet in dit antwoord.
+    // Eén van de twee gokken stuurt de helft van de keren de verkeerde kant op;
+    // zie weigeringUitleg, die de order erbij haalt.
+    return `Mediatask stond ${endpoint} niet toe (403)${zinnig}`;
   }
   return `Mediatask weigerde het verzoek (${status}) op ${endpoint}${zinnig}`;
 }
@@ -196,20 +201,33 @@ export function getOrder(id: number): Promise<MediataskOrder> {
 }
 
 /**
- * Verklaart een weigering uit de toestand van de order, of null als die daar
- * niet aan ligt.
+ * Verklaart een weigering uit de toestand van de order, of null als de order
+ * niet op te halen is.
  *
- * De API zegt bij zo'n weigering alleen "403" met een leeg antwoordlichaam;
- * de verklaring staat in de toestand van de order. Een concept neemt bestanden
- * aan, een ingediende order niet meer — en dát is het verschil tussen "nog
- * eens proberen" en "hier komt nooit meer een scan bij". Alleen aanroepen als
- * er al iets misging: het kost een extra verzoek.
+ * De API zegt bij een weigering alleen "403" met een leeg antwoordlichaam. De
+ * verklaring staat in de order, en het zijn er twee die er totaal anders
+ * uitzien:
+ *
+ *  - De order is geen concept meer. Dan is hij ingediend en neemt Mediatask er
+ *    niets meer bij; opnieuw proberen heeft geen zin en er moet een nieuwe
+ *    order komen.
+ *  - De order is nog wél een concept. Dan ligt het niet aan de toestand maar
+ *    aan de sleutel: deze Mediatask-sleutel mag niet aan déze order schrijven.
+ *    Dat overkomt een order die met een ándere sleutel is aangemaakt — of die
+ *    van een collega is en via de conceptzoeker is hergebruikt.
+ *
+ * Die twee door elkaar halen kost een dag zoeken in de verkeerde hoek, dus ze
+ * krijgen elk hun eigen zin. Alleen aanroepen als er al iets misging: het kost
+ * een extra verzoek.
  */
 export async function weigeringUitleg(orderId: number): Promise<string | null> {
   const order = await getOrder(orderId).catch(() => null);
   const state = String(order?.state ?? "").trim();
-  if (!state || state.toLowerCase() === "draft") return null;
-  return `order #${orderId} staat bij Mediatask op "${state}" en is geen concept meer — daar neemt Mediatask geen bestanden meer bij`;
+  if (!state) return null;
+  if (state.toLowerCase() !== "draft") {
+    return `order #${orderId} staat bij Mediatask op "${state}" en is geen concept meer — daar neemt Mediatask geen bestanden meer bij`;
+  }
+  return `order #${orderId} is nog een concept, dus dit ligt niet aan de toestand maar aan de Mediatask-sleutel: waarmee nu geüpload wordt mag niet aan deze order schrijven (aangemaakt met een andere sleutel, of het concept van een collega hergebruikt)`;
 }
 
 /**
