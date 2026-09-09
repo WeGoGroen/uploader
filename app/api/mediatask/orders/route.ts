@@ -159,7 +159,12 @@ export async function POST(request: Request) {
       // accepteert geen foto-bijlagen (elke schrijfactie op het photos-veld
       // geeft 422 — live vastgesteld), dus deze links zíjn de aanlevering.
       const mappen: { map: string; kop: string }[] = [
-        { map: "Optimized", kop: "Point clouds (Optimized) — also uploaded directly to this order" },
+        // Geen belofte over een directe upload in deze kop: de opmerking wordt
+        // geplaatst vóórdat de puntenwolken verstuurd zijn (daar gaan minuten
+        // overheen, en een opmerking die door een time-out wegvalt is erger dan
+        // een sobere kop). Weigert Mediatask de scan alsnog, dan is deze link
+        // de aanlevering — en dan hoort er niet te staan dat hij er al hangt.
+        { map: "Optimized", kop: "Point clouds (Optimized) — download links" },
         { map: "RAW", kop: "RAW scans" },
         { map: "Additionals", kop: "Additional files" },
         { map: "Photo's", kop: "Photos — please download via these links" },
@@ -200,12 +205,18 @@ export async function POST(request: Request) {
     // meer toe te voegen, dus wat er dan niet aan hangt komt er nooit meer bij.
     let scans: ScanUitkomst[] = [];
     let media: MediaUitkomst[] = [];
+    /** Ging de scanstap in zijn geheel onderuit (en weten we dus niets)? */
+    let scanStapStuk = false;
     if (body.dropboxFolderPath) {
       // Onthouden bij welke map deze order hoort, zodat een scan die hun
       // verwerker later afkeurt opnieuw verstuurd kan worden.
       await bewaarOrderPad(order.id, body.dropboxFolderPath);
       scans = await stuurScansVanuitDropbox(order.id, body.dropboxFolderPath).catch((err) => {
         console.error("Puntenwolken doorsturen mislukt", err);
+        // Een lege lijst betekent hier "we weten het niet", niet "er was niets
+        // te versturen" — en dat is precies het verschil dat hieronder over
+        // indienen beslist.
+        scanStapStuk = true;
         return [];
       });
 
@@ -224,8 +235,24 @@ export async function POST(request: Request) {
     // dus een mislukte submit mag niet als "hele upload mislukt" terugkomen —
     // anders maakt een tweede poging een dubbele order aan. De app toont dan
     // dat de order er staat maar handmatig ingediend moet worden.
+    //
+    // En nooit indienen met een scan die er niet aan hangt. Indienen is
+    // eenrichtingsverkeer: daarna neemt Mediatask geen bestanden meer aan, dus
+    // een order die zonder puntenwolk de deur uit gaat is niet meer te
+    // repareren — elke volgende poging krijgt een 403 en de verwerker krijgt
+    // een NEN-opdracht zonder scan. Blijft hij concept, dan kan dezelfde knop
+    // het morgen gewoon afmaken.
     let submitError: string | null = null;
-    if (body.submitNow) {
+    const misluktenScans = scans.filter((s) => !s.ok);
+    if (body.submitNow && misluktenScans.length > 0) {
+      submitError =
+        `Niet ingediend: ${misluktenScans.length} van de ${scans.length} scans hangen niet aan de order ` +
+        `(${misluktenScans[0].fout ?? "onbekende reden"}). De order blijft als concept staan, zodat het opnieuw kan.`;
+    } else if (body.submitNow && scanStapStuk) {
+      submitError =
+        "Niet ingediend: het doorsturen van de scans liep vast, dus of ze aan de order hangen is niet vast te " +
+        "stellen. De order blijft als concept staan — probeer het versturen opnieuw.";
+    } else if (body.submitNow) {
       try {
         await submitOrder(order.id);
         order.state = "submitted";

@@ -43,7 +43,9 @@ export interface MediataskOrder {
 export class MediataskApiError extends Error {
   constructor(
     public status: number,
-    message: string
+    message: string,
+    /** Het endpoint dat weigerde — zonder dat is een 403 niet na te lopen. */
+    public endpoint = ""
   ) {
     super(message);
     this.name = "MediataskApiError";
@@ -51,11 +53,24 @@ export class MediataskApiError extends Error {
 }
 
 /**
+ * Een weigering waar opnieuw proberen niets aan verandert.
+ *
+ * Het verschil is het hele punt: bij een storing (5xx) of een rem op het
+ * aantal verzoeken (429) is nog een poging precies goed, maar een 403 op een
+ * order die geen concept meer is blijft bij poging tien net zo hard nee. Elke
+ * poging kost daar een complete doorgang van een scan van honderden MB's door
+ * Dropbox, en levert een tweede foutmelding op over dezelfde ene oorzaak.
+ */
+export function isDefinitieveWeigering(err: unknown): err is MediataskApiError {
+  return err instanceof MediataskApiError && err.status >= 400 && err.status < 500 && err.status !== 429;
+}
+
+/**
  * Maakt van een Mediatask-fout een zin die een opnemer op locatie iets zegt.
  * Bij een storing stuurt hun server een complete HTML-foutpagina terug; die
  * ongefilterd tonen levert een scherm vol markup op i.p.v. een boodschap.
  */
-function describeMediataskError(status: number, body: string, path: string): string {
+function describeMediataskError(status: number, body: string, endpoint: string): string {
   const isHtml = /^\s*<(!doctype|html)/i.test(body);
   if (status >= 500 || isHtml) {
     return `Mediatask is op dit moment niet bereikbaar (foutcode ${status}). Dit ligt aan hun kant — probeer het over een paar minuten opnieuw.`;
@@ -66,7 +81,13 @@ function describeMediataskError(status: number, body: string, path: string): str
     const parsed = JSON.parse(body);
     detail = Array.isArray(parsed?.errors) ? parsed.errors.join(", ") : (parsed?.error ?? detail);
   } catch {}
-  return `Mediatask weigerde het verzoek (${status}): ${detail.slice(0, 200)}`;
+  // Een leeg antwoordlichaam ("{}") toevoegen maakt de melding alleen maar
+  // raadselachtiger; dan is het endpoint het enige wat nog informatie draagt.
+  const zinnig = detail && detail !== "{}" && detail !== "[]" ? `: ${detail.slice(0, 200)}` : "";
+  if (status === 403) {
+    return `Mediatask stond ${endpoint} niet toe (403)${zinnig}. Dit is wat een order doet die geen concept meer is: eenmaal ingediend neemt Mediatask er geen bestanden meer bij.`;
+  }
+  return `Mediatask weigerde het verzoek (${status}) op ${endpoint}${zinnig}`;
 }
 
 const MEDIATASK_CREDENTIALS_KEY = "mediatask:credentials";
@@ -120,7 +141,8 @@ export async function mediataskFetch<T>(path: string, init?: RequestInit): Promi
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new MediataskApiError(res.status, describeMediataskError(res.status, body, path));
+    const endpoint = `${init?.method ?? "GET"} ${path}`;
+    throw new MediataskApiError(res.status, describeMediataskError(res.status, body, endpoint), endpoint);
   }
   if (res.status === 204) return {} as T;
   return res.json() as Promise<T>;
@@ -171,6 +193,23 @@ export function createOrder(input: CreateOrderInput): Promise<MediataskOrder> {
 
 export function getOrder(id: number): Promise<MediataskOrder> {
   return mediataskFetch<MediataskOrder>(`/api/orders/${id}`);
+}
+
+/**
+ * Verklaart een weigering uit de toestand van de order, of null als die daar
+ * niet aan ligt.
+ *
+ * De API zegt bij zo'n weigering alleen "403" met een leeg antwoordlichaam;
+ * de verklaring staat in de toestand van de order. Een concept neemt bestanden
+ * aan, een ingediende order niet meer — en dát is het verschil tussen "nog
+ * eens proberen" en "hier komt nooit meer een scan bij". Alleen aanroepen als
+ * er al iets misging: het kost een extra verzoek.
+ */
+export async function weigeringUitleg(orderId: number): Promise<string | null> {
+  const order = await getOrder(orderId).catch(() => null);
+  const state = String(order?.state ?? "").trim();
+  if (!state || state.toLowerCase() === "draft") return null;
+  return `order #${orderId} staat bij Mediatask op "${state}" en is geen concept meer — daar neemt Mediatask geen bestanden meer bij`;
 }
 
 /**
@@ -366,7 +405,12 @@ export async function requestPhotoUploads(
     // vorm voor pointclouds werkt. Foto's aan een order hangen kan alleen in
     // hun eigen UI. Deze vertaling maakt daar de nette linkenterugval van in
     // plaats van een kale fout per bestand.
-    if (err instanceof MediataskApiError && (err.status === 422 || err.status === 404)) {
+    //
+    // Élke definitieve weigering telt mee, niet alleen 422 en 404. Een 403 —
+    // wat een order geeft die geen concept meer is — viel er eerst buiten, en
+    // dan kreeg iedere foto, video en 360-opname apart zijn eigen foutmelding
+    // over precies dezelfde oorzaak. Eén weigering is één mededeling.
+    if (isDefinitieveWeigering(err)) {
       throw new GeenDirecteUpload(`Mediatask accepteert geen foto-bijlagen via de API (${err.status})`);
     }
     throw err;

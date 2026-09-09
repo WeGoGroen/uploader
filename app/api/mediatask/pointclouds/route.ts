@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import {
   attachPointclouds,
+  isDefinitieveWeigering,
   listPointclouds,
   requestPointcloudUploads,
+  weigeringUitleg,
   type PointcloudUploadRequest,
 } from "@/lib/mediatask";
 import { alAanwezigeNamen, stuurScanVanuitDropbox } from "@/lib/mediatask-pointclouds";
@@ -99,6 +101,18 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ error: "unknown_action" }, { status: 400 });
   } catch (err) {
+    // Een weigering van Mediatask zelf is geen storing: 502 zei "hun server
+    // hapert, probeer straks nog eens", terwijl een 403 juist betekent dat
+    // opnieuw proberen nooit gaat helpen. De uitleg haalt de reden uit de
+    // toestand van de order — "al ingediend" is een antwoord waar iemand iets
+    // mee kan, "403 {}" niet.
+    if (isDefinitieveWeigering(err)) {
+      const uitleg =
+        (await weigeringUitleg(body.orderId)) ??
+        (err instanceof Error ? err.message : "Mediatask weigerde de scan");
+      console.error(`Puntenwolk naar Mediatask geweigerd (order #${body.orderId}): ${uitleg}`);
+      return NextResponse.json({ error: uitleg, definitief: true }, { status: 409 });
+    }
     console.error("Puntenwolk naar Mediatask mislukt", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Puntenwolk versturen mislukt" },
