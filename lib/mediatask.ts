@@ -220,14 +220,22 @@ export function getOrder(id: number): Promise<MediataskOrder> {
  * krijgen elk hun eigen zin. Alleen aanroepen als er al iets misging: het kost
  * een extra verzoek.
  */
-export async function weigeringUitleg(orderId: number): Promise<string | null> {
+export async function weigeringUitleg(
+  orderId: number
+): Promise<{ tekst: string; nogConcept: boolean } | null> {
   const order = await getOrder(orderId).catch(() => null);
   const state = String(order?.state ?? "").trim();
   if (!state) return null;
   if (state.toLowerCase() !== "draft") {
-    return `order #${orderId} staat bij Mediatask op "${state}" en is geen concept meer — daar neemt Mediatask geen bestanden meer bij`;
+    return {
+      nogConcept: false,
+      tekst: `order #${orderId} staat bij Mediatask op "${state}" en is geen concept meer — daar neemt Mediatask geen bestanden meer bij`,
+    };
   }
-  return `order #${orderId} is nog een concept, dus dit ligt niet aan de toestand maar aan de Mediatask-sleutel: waarmee nu geüpload wordt mag niet aan deze order schrijven (aangemaakt met een andere sleutel, of het concept van een collega hergebruikt)`;
+  return {
+    nogConcept: true,
+    tekst: `order #${orderId} is nog een concept, dus dit ligt niet aan de toestand maar aan de Mediatask-sleutel: waarmee nu geüpload wordt mag niet aan deze order schrijven (aangemaakt met een andere sleutel, of het concept van een collega hergebruikt)`,
+  };
 }
 
 /**
@@ -246,6 +254,53 @@ export function listOrders(pagina?: number): Promise<MediataskOrder[]> {
 }
 
 /**
+ * Orders waarvan gebleken is dat onze sleutel er niet aan mag schrijven.
+ *
+ * `listOrders` geeft niet alleen onze eigen orders terug, en sinds elke
+ * opnemer een eigen Mediatask-sleutel heeft is "een concept met het juiste
+ * adres" niet meer hetzelfde als "een concept waar wij bij kunnen". Zo'n
+ * order hergebruiken levert een 403 op élke schrijfactie op, en zonder dit
+ * geheugen pakt de volgende paginaopening exact dezelfde order er weer bij.
+ */
+const GEWEIGERD_PREFIX = "mediatask:geweigerd:";
+const GEWEIGERD_TTL = 60 * 60 * 24 * 30;
+
+/**
+ * Orders die deze app zelf heeft aangemaakt.
+ *
+ * Het verschil telt op één plek, maar daar telt het zwaar: weigert een order
+ * onze schrijfacties, dan is een verse order de oplossing als het concept van
+ * iemand anders was — en juist niet als we hem zelf hebben aangemaakt. In dat
+ * tweede geval zit het probleem niet in het eigendom, en levert elke poging
+ * alleen een leeg concept extra op bij Mediatask.
+ */
+const EIGEN_PREFIX = "mediatask:eigen:";
+
+export async function onthoudEigenOrder(orderId: number): Promise<void> {
+  const redis = getOptionalRedis();
+  if (!redis) return;
+  await redis.set(`${EIGEN_PREFIX}${orderId}`, "1", "EX", GEWEIGERD_TTL).catch(() => {});
+}
+
+export async function isEigenOrder(orderId: number): Promise<boolean> {
+  const redis = getOptionalRedis();
+  if (!redis) return false;
+  return Boolean(await redis.get(`${EIGEN_PREFIX}${orderId}`).catch(() => null));
+}
+
+export async function onthoudGeweigerdeOrder(orderId: number): Promise<void> {
+  const redis = getOptionalRedis();
+  if (!redis) return;
+  await redis.set(`${GEWEIGERD_PREFIX}${orderId}`, "1", "EX", GEWEIGERD_TTL).catch(() => {});
+}
+
+export async function isGeweigerdeOrder(orderId: number): Promise<boolean> {
+  const redis = getOptionalRedis();
+  if (!redis) return false;
+  return Boolean(await redis.get(`${GEWEIGERD_PREFIX}${orderId}`).catch(() => null));
+}
+
+/**
  * Bestaat er al een concept-order voor dit adres? Die hergebruiken in plaats
  * van een tweede aanmaken.
  *
@@ -254,6 +309,11 @@ export function listOrders(pagina?: number): Promise<MediataskOrder[]> {
  * of een herlaadbeurt zonder ordernummer bereikt, maakte voorheen stilletjes
  * een duplicaat aan — de achtergebleven draft bleef dan eeuwig bij Mediatask
  * staan (zo zijn er meerdere gevonden).
+ *
+ * Concepten waar onze sleutel aantoonbaar niet aan mag schrijven vallen af.
+ * Die zijn erger dan geen concept: hergebruiken lijkt te lukken (aanmaken en
+ * opmerkingen gaan gewoon door) en pas de puntenwolk loopt tegen een 403 —
+ * op het moment dat de opnemer al klaar denkt te zijn.
  */
 export async function vindBestaandeDraft(
   street: string,
@@ -265,16 +325,19 @@ export async function vindBestaandeDraft(
   if (!doel || !plaats) return null;
 
   const orders = await listOrders().catch(() => [] as MediataskOrder[]);
-  return (
-    orders.find((o) => {
-      if (o.state !== "draft" || !o.address) return false;
-      const [adres, ...rest] = o.address.split(",");
-      return (
-        adres.replace(/\s+/g, " ").trim().toLowerCase() === doel &&
-        rest.join(",").trim().toLowerCase() === plaats
-      );
-    }) ?? null
-  );
+  const kandidaten = orders.filter((o) => {
+    if (o.state !== "draft" || !o.address) return false;
+    const [adres, ...rest] = o.address.split(",");
+    return (
+      adres.replace(/\s+/g, " ").trim().toLowerCase() === doel &&
+      rest.join(",").trim().toLowerCase() === plaats
+    );
+  });
+
+  for (const kandidaat of kandidaten) {
+    if (!(await isGeweigerdeOrder(kandidaat.id))) return kandidaat;
+  }
+  return null;
 }
 
 export function submitOrder(id: number): Promise<void> {

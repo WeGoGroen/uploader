@@ -710,6 +710,10 @@ function DocumentenContent() {
   // Is opnieuw versturen zinloos (de order zelf neemt niets meer aan), dan
   // hoort er een andere weg te staan dan "probeer het nog eens".
   const [mediataskGeenHerstel, setMediataskGeenHerstel] = useState(false);
+  // De server kan de aanlevering onderweg naar een verse order verplaatsen als
+  // het concept dat we hadden onze schrijfacties weigerde. Dan klopt het
+  // ordernummer dat de opnemer tijdens het uploaden zag niet meer.
+  const [mediataskVerplaatstVan, setMediataskVerplaatstVan] = useState<number | null>(null);
   const [mediataskState, setMediataskState] = useState<string | null>(null);
   // Voortgangsbalk in de pop-up. Mediatask geeft geen echte tussenstand
   // terug (één aanroep maakt de hele order), dus de balk kruipt tijdens het
@@ -801,6 +805,7 @@ function DocumentenContent() {
     setMediataskSubmitError(null);
     setMediataskNietIngediend(null);
     setMediataskGeenHerstel(false);
+    setMediataskVerplaatstVan(null);
     setMediataskState(null);
     setMediataskOrderId(null);
     setScanBevestigd({});
@@ -874,6 +879,10 @@ function DocumentenContent() {
       setMediataskSteps(doneSteps);
       setMediataskOrderId(data.order.id);
       setMediataskSubmitError(data.submitError ?? null);
+      setMediataskVerplaatstVan(data.verplaatstVan ?? null);
+      // De achtergrond-uploads van hierna moeten naar de nieuwe order; het
+      // oude nummer neemt niets meer aan.
+      if (data.verplaatstVan) setVasteOrderId(Number(data.order.id));
 
       // De scancontrole aan de order hangen en het oordeel er als comment
       // onder zetten. Lukt dat niet, dan is dat vervelend voor de dataset maar
@@ -1480,6 +1489,13 @@ function DocumentenContent() {
             })()}
             {!mediataskOrderId && !mediataskError && (
               <p className="upload-timer">Bezig: {mediataskElapsed}s</p>
+            )}
+            {mediataskVerplaatstVan && mediataskOrderId && (
+              <p className="upload-timer">
+                Order #{mediataskVerplaatstVan} nam niets van ons aan (hij is van een andere
+                Mediatask-sleutel), dus de aanlevering staat nu op de nieuwe order #{mediataskOrderId}.
+                Die oude blijft ongebruikt als concept staan.
+              </p>
             )}
             {mediataskOrderId && mediataskNietIngediend && (
               <p className="upload-timer" style={{ color: "var(--bad)" }}>

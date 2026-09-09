@@ -247,7 +247,7 @@ export async function stuurScansVanuitDropbox(
       uitkomsten.push({ naam: bestand.name, ok: true });
     } catch (err) {
       if (isDefinitieveWeigering(err)) {
-        weigering = (await weigeringUitleg(orderId)) ?? leesbareFout(err);
+        weigering = (await weigeringUitleg(orderId))?.tekst ?? leesbareFout(err);
       }
       uitkomsten.push({
         naam: bestand.name,

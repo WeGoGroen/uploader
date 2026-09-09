@@ -3,6 +3,7 @@ import {
   attachPointclouds,
   isDefinitieveWeigering,
   listPointclouds,
+  onthoudGeweigerdeOrder,
   requestPointcloudUploads,
   weigeringUitleg,
   type PointcloudUploadRequest,
@@ -107,11 +108,16 @@ export async function POST(request: Request) {
     // toestand van de order — "al ingediend" is een antwoord waar iemand iets
     // mee kan, "403 {}" niet.
     if (isDefinitieveWeigering(err)) {
-      const uitleg =
-        (await weigeringUitleg(body.orderId)) ??
-        (err instanceof Error ? err.message : "Mediatask weigerde de scan");
-      console.error(`Puntenwolk naar Mediatask geweigerd (order #${body.orderId}): ${uitleg}`);
-      return NextResponse.json({ error: uitleg, definitief: true }, { status: 409 });
+      const uitleg = await weigeringUitleg(body.orderId);
+      // Is de order nog concept, dan ligt het aan de sleutel en is deze order
+      // voor ons dood. Meteen vastleggen, zodat de conceptzoeker hem bij de
+      // volgende paginaopening niet weer opvist en de opnemer hetzelfde rondje
+      // nog eens draait.
+      if (uitleg?.nogConcept) await onthoudGeweigerdeOrder(body.orderId);
+      const tekst =
+        uitleg?.tekst ?? (err instanceof Error ? err.message : "Mediatask weigerde de scan");
+      console.error(`Puntenwolk naar Mediatask geweigerd (order #${body.orderId}): ${tekst}`);
+      return NextResponse.json({ error: tekst, definitief: true }, { status: 409 });
     }
     console.error("Puntenwolk naar Mediatask mislukt", err);
     return NextResponse.json(
