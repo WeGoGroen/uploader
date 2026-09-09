@@ -36,6 +36,9 @@ export interface MediataskOrder {
   id: number;
   client_order_id: number | string;
   state: string;
+  /** Welk product er op de order staat (NEN2580, basis, CAD…). Nodig om te
+      kunnen zien of een hergebruikte order nog bij de keuze past. */
+  product_id?: number;
   output_link?: string | null;
   address?: string;
   /**
