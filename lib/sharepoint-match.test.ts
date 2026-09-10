@@ -147,6 +147,25 @@ describe("taskToAddress", () => {
     });
   });
 
+  it("leest ook het adres dat op één regel met een komma staat", () => {
+    /*
+      Een deel van de taken heeft A1 zo ingevuld, en de taaknaam is daar geen
+      betrouwbare terugval: bij Balboastraat 12-3, 12-4 en Marco Polostraat
+      188-1 staat er "Amsterdam1" in de naam. Dan zoekt de overdracht een
+      projectmap die niet bestaat terwijl de map er gewoon staat.
+    */
+    expect(
+      taskToAddress({
+        name: "Balboastraat 12-3 1057VV Amsterdam1",
+        customFields: [{ name: "A1 Adres:", value: "Balboastraat 12-3, 1057VV Amsterdam" }],
+      })
+    ).toEqual({
+      addressLine: "Balboastraat 12-3",
+      woonplaats: "Amsterdam",
+      postcodeRegel: "1057VV Amsterdam",
+    });
+  });
+
   it("valt terug op de taaknaam als het veld ontbreekt", () => {
     expect(taskToAddress({ name: "Kerkstraat 12, 1234 AB Utrecht", customFields: [] })).toEqual({
       addressLine: "Kerkstraat 12",

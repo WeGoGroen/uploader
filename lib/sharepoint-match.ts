@@ -182,12 +182,31 @@ export function parseAdresVeld(
     .filter(Boolean);
   if (regels.length === 0) return null;
 
-  const addressLine = regels[0];
-  if (!parseAddressLine(addressLine)) return null;
+  /*
+    Twee schrijfwijzen komen voor, en de tweede werd stil verkeerd gelezen.
 
-  // Tweede regel is "1055 BW  AMSTERDAM"; zonder tweede regel staat de plaats
-  // soms achter een komma op de eerste.
-  const plaatsRegel = regels[1] ?? "";
+    Meestal staat het adres op twee regels: straat+nummer boven, "1055 BW
+    AMSTERDAM" eronder. Maar een deel van de taken heeft alles op één regel met
+    een komma ertussen: "Balboastraat 12-3, 1057VV Amsterdam". Zonder de splitsing
+    hieronder gaf die vorm géén woonplaats terug, viel taskToAddress terug op de
+    taaknaam — en daar stond bij drie adressen "Amsterdam1". Dan zoekt de
+    overdracht een projectmap die niet bestaat en meldt "niets gevonden", terwijl
+    de map er gewoon staat.
+  */
+  let addressLine = regels[0];
+  let plaatsRegel = regels[1] ?? "";
+
+  if (!plaatsRegel && addressLine.includes(",")) {
+    const komma = addressLine.lastIndexOf(",");
+    const links = addressLine.slice(0, komma).trim();
+    const rechts = addressLine.slice(komma + 1).trim();
+    if (links && rechts && parseAddressLine(links)) {
+      addressLine = links;
+      plaatsRegel = rechts;
+    }
+  }
+
+  if (!parseAddressLine(addressLine)) return null;
   const woonplaats = plaatsRegel.replace(/^\s*\d{4}\s?[A-Za-z]{2}\s*/, "").trim();
   if (!woonplaats) return null;
 
