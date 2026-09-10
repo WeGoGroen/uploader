@@ -618,6 +618,60 @@ export async function getTask(accessToken: string, taskId: string): Promise<Clic
   };
 }
 
+export interface ClickUpTaakVolledig {
+  id: string;
+  name: string;
+  status: string;
+  url: string;
+  dateCreated: number | null;
+  dueDate: number | null;
+  /** De custom fields ongewijzigd, inclusief type en opties. */
+  customFields: {
+    name: string;
+    type?: string;
+    value?: unknown;
+    type_config?: { options?: { id?: string; orderindex?: number; name?: string; label?: string }[] };
+  }[];
+}
+
+/**
+ * Dezelfde taak als `getTask`, maar met alles wat er in de velden zit.
+ *
+ * `getTask` gooit type en opties weg, en dat kan ook: de webhook wil alleen het
+ * adres weten. Voor het opnamedossier is dat te weinig — een dropdown geeft
+ * daar een optie-id terug ("3f2a…"), en zonder de optielijst valt daar geen
+ * "HR++ glas" van te maken.
+ */
+export async function getTaakVolledig(
+  accessToken: string,
+  taskId: string
+): Promise<ClickUpTaakVolledig> {
+  const data = await clickupFetch<{
+    id: string;
+    name: string;
+    status?: { status: string };
+    url: string;
+    date_created?: string;
+    due_date?: string | null;
+    custom_fields?: ClickUpTaakVolledig["customFields"];
+  }>(accessToken, `/task/${taskId}`);
+
+  const getal = (v: string | null | undefined) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  return {
+    id: data.id,
+    name: data.name,
+    status: data.status?.status ?? "",
+    url: data.url,
+    dateCreated: getal(data.date_created),
+    dueDate: getal(data.due_date),
+    customFields: data.custom_fields ?? [],
+  };
+}
+
 /**
  * Zet een opmerking op de taak. De automatische SharePoint-ophaalactie
  * gebeurt buiten beeld; zonder zo'n regel in de taak zou niemand kunnen zien
@@ -632,4 +686,36 @@ export async function createTaskComment(
     method: "POST",
     body: JSON.stringify({ comment_text: text, notify_all: false }),
   });
+}
+
+/**
+ * Alle taken van de lijst, inclusief afgeronde, mét custom fields — voor de
+ * inhaalronde die SharePoint tegen Dropbox legt. ClickUp geeft 100 taken per
+ * pagina; doorbladeren tot een pagina leeg terugkomt.
+ */
+export async function getAllTasks(accessToken: string, listId: string): Promise<ClickUpTask[]> {
+  const out: ClickUpTask[] = [];
+  for (let page = 0; page < 50; page++) {
+    const data = await clickupFetch<{
+      tasks: {
+        id: string;
+        name: string;
+        status?: { status: string };
+        url: string;
+        custom_fields?: { name: string; value?: unknown }[];
+      }[];
+    }>(accessToken, `/list/${listId}/task?page=${page}&include_closed=true&subtasks=false`);
+    if (!data.tasks.length) break;
+    out.push(
+      ...data.tasks.map((t) => ({
+        id: t.id,
+        name: t.name,
+        status: t.status?.status ?? "",
+        url: t.url,
+        customFields: (t.custom_fields ?? []).map((f) => ({ name: f.name, value: f.value })),
+      }))
+    );
+    if (data.tasks.length < 100) break;
+  }
+  return out;
 }
