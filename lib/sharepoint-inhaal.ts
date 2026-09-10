@@ -7,7 +7,13 @@ import {
   requireSharePointConfig,
   resolveSiteId,
 } from "@/lib/microsoft";
-import { matchesPostcodeFolder, postcodeSleutel, taskToAddress } from "@/lib/sharepoint-match";
+import {
+  matchesAddress,
+  matchesPostcodeFolder,
+  parseAddressLine,
+  postcodeSleutel,
+  taskToAddress,
+} from "@/lib/sharepoint-match";
 import { syncSharePointFiles, type SyncResult } from "@/lib/sharepoint-sync";
 
 /**
@@ -87,10 +93,15 @@ export async function draaiInhaalronde(maxPerRonde = 8): Promise<InhaalUitkomst>
   const perTaak = taken
     .map((t) => {
       const adres = taskToAddress(t);
-      const sleutel = adres?.postcodeRegel
+      if (!adres) return null;
+      const sleutel = adres.postcodeRegel
         ? postcodeSleutel(adres.addressLine, adres.postcodeRegel)
         : null;
-      return adres && sleutel ? { adres, sleutel } : null;
+      // Naast de postcodesleutel ook de straat+huisnummer-vorm: een deel van
+      // de Gereed-mappen heet naar het volledige adres in plaats van naar
+      // postcode + nummer, en zonder deze tweede weg viel dat stil af.
+      const straat = parseAddressLine(adres.addressLine);
+      return sleutel || straat ? { adres, sleutel, straat } : null;
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
@@ -101,7 +112,9 @@ export async function draaiInhaalronde(maxPerRonde = 8): Promise<InhaalUitkomst>
   let gedaan = 0;
   for (const map of missend) {
     if (gedaan >= maxPerRonde) break;
-    const match = perTaak.find((t) => matchesPostcodeFolder(map.name, t.sleutel));
+    const match =
+      perTaak.find((t) => t.sleutel && matchesPostcodeFolder(map.name, t.sleutel)) ??
+      perTaak.find((t) => t.straat && matchesAddress(map.name, t.straat));
     if (!match) {
       uitkomst.zonderTaak.push(map.name);
       continue;

@@ -228,3 +228,47 @@ describe("matchesPostcodeFolder", () => {
     expect(postcodeSleutel("Sanderijnstraat 58-3", "AMSTERDAM")).toBeNull();
   });
 });
+
+describe("matchesPostcodeFolder — vormen uit het archief", () => {
+  // Echte mapnamen uit Gereed die eerder allemaal afvielen.
+  const sleutel = (adres: string, pc: string) => postcodeSleutel(adres, pc)!;
+
+  it("herkent de postcode vóór het huisnummer", () => {
+    expect(matchesPostcodeFolder("1053 BT 1-3 WGG", sleutel("Kerkstraat 1-3", "1053 BT AMSTERDAM"))).toBe(true);
+    expect(matchesPostcodeFolder("1077 AW 191-2 WGG", sleutel("Straat 191-2", "1077 AW AMSTERDAM"))).toBe(true);
+  });
+
+  it("herkent een mapnaam met de straatnaam erin", () => {
+    expect(
+      matchesPostcodeFolder(
+        "Anna van den Vondelstraat 5-1 1054GX Amsterdam",
+        sleutel("Anna van den Vondelstraat 5-1", "1054 GX AMSTERDAM")
+      )
+    ).toBe(true);
+    expect(
+      matchesPostcodeFolder(
+        "Ceintuurbaan 206-3 1072GC Amsterdam",
+        sleutel("Ceintuurbaan 206-3", "1072 GC AMSTERDAM")
+      )
+    ).toBe(true);
+  });
+
+  it("herkent een huisletter aan weerskanten", () => {
+    expect(matchesPostcodeFolder("27H 1055PB Amsterdam", sleutel("Straat 27 H", "1055 PB AMSTERDAM"))).toBe(true);
+    expect(matchesPostcodeFolder("18 F 3532 GG  UTRECHT", sleutel("Straat 18 F", "3532 GG UTRECHT"))).toBe(true);
+  });
+
+  it("houdt buren nog steeds uit elkaar", () => {
+    const s = sleutel("Ceintuurbaan 206-3", "1072 GC AMSTERDAM");
+    expect(matchesPostcodeFolder("Ceintuurbaan 206-2 1072GC Amsterdam", s)).toBe(false);
+    expect(matchesPostcodeFolder("Ceintuurbaan 206 1072GC Amsterdam", s)).toBe(false);
+    // Zelfde nummers, andere postcode.
+    expect(matchesPostcodeFolder("Ceintuurbaan 206-3 1072GD Amsterdam", s)).toBe(false);
+  });
+
+  it("matcht niet als de straat wel klopt maar het nummer niet meekomt", () => {
+    expect(
+      matchesPostcodeFolder("Anna van den Vondelstraat 1054GX Amsterdam", sleutel("Anna van den Vondelstraat 5-1", "1054 GX AMSTERDAM"))
+    ).toBe(false);
+  });
+});
