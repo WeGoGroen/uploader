@@ -87,21 +87,28 @@ export async function draaiInhaalronde(maxPerRonde = 8): Promise<InhaalUitkomst>
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
-  const teDoen = missend.slice(0, maxPerRonde);
-  uitkomst.nogTeDoen = missend.length - teDoen.length;
-
-  for (const map of teDoen) {
+  // Over álle missende mappen lopen en stoppen na maxPerRonde echte
+  // overdrachten. De eerste opzet nam telkens de eerste acht van de lijst —
+  // faalden die, dan bleef elke volgende ronde op precies dezelfde acht
+  // hangen en kwam de rest nooit aan de beurt.
+  let gedaan = 0;
+  for (const map of missend) {
+    if (gedaan >= maxPerRonde) break;
     const match = perTaak.find((t) => matchesPostcodeFolder(map.name, t.sleutel));
     if (!match) {
       uitkomst.zonderTaak.push(map.name);
       continue;
     }
+    gedaan++;
     try {
       const result = await syncSharePointFiles({
         kind: "energielabel",
         addressLine: match.adres.addressLine,
         woonplaats: match.adres.woonplaats,
         postcodeRegel: match.adres.postcodeRegel,
+        // Archief van vóór de app: de projectmap bestond nooit, dus die mag
+        // de inhaalronde — en alleen de inhaalronde — zelf aanmaken.
+        maakProjectmapAan: true,
       });
       uitkomst.opgehaald.push({
         map: map.name,
@@ -121,6 +128,9 @@ export async function draaiInhaalronde(maxPerRonde = 8): Promise<InhaalUitkomst>
       });
     }
   }
+
+  uitkomst.nogTeDoen =
+    missend.length - uitkomst.opgehaald.length - uitkomst.mislukt.length - uitkomst.zonderTaak.length;
 
   return uitkomst;
 }
