@@ -1,4 +1,5 @@
 import { getOptionalRedis, requireRedis } from "@/lib/redis";
+import { eigenOrders } from "@/lib/mediatask-format";
 
 // Cliënt voor de Apitome/Mediatask-API — gebruikt om NEN2580-opnames
 // (foto's + plattegronden) automatisch als order aan te leveren. Zelfde
@@ -467,10 +468,23 @@ export async function isGeweigerdeOrder(orderId: number): Promise<boolean> {
  * een duplicaat aan — de achtergebleven draft bleef dan eeuwig bij Mediatask
  * staan (zo zijn er meerdere gevonden).
  *
- * Concepten waar onze sleutel aantoonbaar niet aan mag schrijven vallen af.
- * Die zijn erger dan geen concept: hergebruiken lijkt te lukken (aanmaken en
- * opmerkingen gaan gewoon door) en pas de puntenwolk loopt tegen een 403 —
- * op het moment dat de opnemer al klaar denkt te zijn.
+ * Alleen een concept dat bij Mediatask op onze eigen naam staat komt in
+ * aanmerking, en dat is de kern van deze functie.
+ *
+ * De orderlijst die Mediatask teruggeeft is die van het hele bureau, ook als
+ * je hem met je eigen sleutel opvraagt (zie eigenOrders). Sinds elke opnemer
+ * een eigen sleutel heeft, bepaalt de sleutel waarmee een order is aangemaakt
+ * wie de eigenaar is — en aan de order van een ander mag je niets toevoegen.
+ * Zo'n concept hergebruiken is erger dan er geen vinden: aanmaken lukt,
+ * ophalen lukt, een opmerking plaatsen lukt, en pas het aanhangen van de
+ * puntenwolk loopt tegen een 403. Dat is precies op het moment dat de opnemer
+ * denkt klaar te zijn, met een scan die nergens meer heen kan. Bij
+ * Balboastraat 12-3, 12-4 en Kea Boumanstraat 74 ging het zo mis.
+ *
+ * Weten we niet wie we zijn (geen eigen sleutel, of Mediatask antwoordt niet),
+ * dan valt hergebruik helemaal af en maakt de aanroeper een verse order aan.
+ * Een order te veel is een leeg concept; een order van een ander is een opname
+ * die niet aankomt.
  */
 export async function vindBestaandeDraft(
   street: string,
@@ -481,8 +495,11 @@ export async function vindBestaandeDraft(
   const plaats = city.trim().toLowerCase();
   if (!doel || !plaats) return null;
 
+  const ik = await huidigeMediataskGebruiker().catch(() => null);
+  if (!ik) return null;
+
   const orders = await listOrders().catch(() => [] as MediataskOrder[]);
-  const kandidaten = orders.filter((o) => {
+  const kandidaten = eigenOrders(orders, ik.id).filter((o) => {
     if (o.state !== "draft" || !o.address) return false;
     const [adres, ...rest] = o.address.split(",");
     return (

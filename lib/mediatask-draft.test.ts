@@ -48,15 +48,27 @@ const {
 
 const BASIS = "https://mediatask.test";
 
-function nepOrders(orders: unknown[]) {
+/**
+ * Mediatask nagebootst: /api/me zegt wie we zijn, /api/orders geeft de lijst
+ * van het hele bureau terug — inclusief orders van collega's, precies zoals
+ * hun API dat doet.
+ */
+function nepOrders(orders: unknown[], ikId: number | null = 5) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify(orders),
-      json: async () => orders,
-    }))
+    vi.fn(async (url: string) => {
+      const body = String(url).includes("/api/me")
+        ? ikId === null
+          ? null
+          : { user: { id: ikId } }
+        : orders;
+      return {
+        ok: body !== null,
+        status: body === null ? 401 : 200,
+        text: async () => JSON.stringify(body),
+        json: async () => body,
+      };
+    })
   );
 }
 
@@ -85,8 +97,8 @@ afterEach(() => {
 describe("vindBestaandeDraft", () => {
   it("hergebruikt een concept voor hetzelfde adres", async () => {
     nepOrders([
-      { id: 1, state: "draft", address: "Balboastraat 12-3, Amsterdam" },
-      { id: 2, state: "draft", address: "Balboastraat 12-4, Amsterdam" },
+      { id: 1, state: "draft", address: "Balboastraat 12-3, Amsterdam", owner: { id: 5 } },
+      { id: 2, state: "draft", address: "Balboastraat 12-4, Amsterdam", owner: { id: 5 } },
     ]);
 
     const gevonden = await vindBestaandeDraft("Balboastraat", "12-4", "Amsterdam");
@@ -96,7 +108,7 @@ describe("vindBestaandeDraft", () => {
 
   it("laat een order liggen waarvan bekend is dat hij ons weigert", async () => {
     await onthoudGeweigerdeOrder(2);
-    nepOrders([{ id: 2, state: "draft", address: "Balboastraat 12-4, Amsterdam" }]);
+    nepOrders([{ id: 2, state: "draft", address: "Balboastraat 12-4, Amsterdam", owner: { id: 5 } }]);
 
     // Liever geen concept dan een concept waar de scan straks niet in kan: de
     // aanroeper maakt er dan zelf een aan, en die is wél van onze sleutel.
@@ -108,8 +120,8 @@ describe("vindBestaandeDraft", () => {
   it("pakt het volgende bruikbare concept als het eerste ons weigert", async () => {
     await onthoudGeweigerdeOrder(2);
     nepOrders([
-      { id: 2, state: "draft", address: "Balboastraat 12-4, Amsterdam" },
-      { id: 5, state: "draft", address: "Balboastraat 12-4, Amsterdam" },
+      { id: 2, state: "draft", address: "Balboastraat 12-4, Amsterdam", owner: { id: 5 } },
+      { id: 5, state: "draft", address: "Balboastraat 12-4, Amsterdam", owner: { id: 5 } },
     ]);
 
     const gevonden = await vindBestaandeDraft("Balboastraat", "12-4", "Amsterdam");
@@ -119,9 +131,9 @@ describe("vindBestaandeDraft", () => {
 
   it("kijkt niet naar orders die geen concept meer zijn of een ander adres hebben", async () => {
     nepOrders([
-      { id: 7, state: "submitted", address: "Balboastraat 12-4, Amsterdam" },
-      { id: 8, state: "draft", address: "Balboastraat 12-40, Amsterdam" },
-      { id: 9, state: "draft", address: "Balboastraat 12-4, Utrecht" },
+      { id: 7, state: "submitted", address: "Balboastraat 12-4, Amsterdam", owner: { id: 5 } },
+      { id: 8, state: "draft", address: "Balboastraat 12-40, Amsterdam", owner: { id: 5 } },
+      { id: 9, state: "draft", address: "Balboastraat 12-4, Utrecht", owner: { id: 5 } },
     ]);
 
     expect(await vindBestaandeDraft("Balboastraat", "12-4", "Amsterdam")).toBeNull();
@@ -182,5 +194,38 @@ describe("sleutelweigering", () => {
     // aan: die zou net zo hard geweigerd worden en alleen een leeg concept
     // achterlaten bij Mediatask.
     expect(await isSleutelGeweigerd()).toBe(true);
+  });
+});
+
+describe("vindBestaandeDraft en eigendom", () => {
+  it("hergebruikt het concept van een collega niet", async () => {
+    // Dit is wat er bij Balboastraat 12-3, 12-4 en Kea Boumanstraat 74 misging.
+    // Aanmaken, ophalen en een opmerking plaatsen lukken op zo'n order gewoon;
+    // pas het aanhangen van de puntenwolk geeft 403 — als de opnemer al denkt
+    // klaar te zijn. Liever een order te veel dan een opname die niet aankomt.
+    nepOrders([{ id: 99, state: "draft", address: "Kea Boumanstraat 74, Amsterdam", owner: { id: 8 } }], 5);
+
+    expect(await vindBestaandeDraft("Kea Boumanstraat", "74", "Amsterdam")).toBeNull();
+  });
+
+  it("hergebruikt het eigen concept wél", async () => {
+    nepOrders([{ id: 99, state: "draft", address: "Kea Boumanstraat 74, Amsterdam", owner: { id: 5 } }], 5);
+
+    expect((await vindBestaandeDraft("Kea Boumanstraat", "74", "Amsterdam"))?.id).toBe(99);
+  });
+
+  it("hergebruikt niets als niet vast te stellen is wie we zijn", async () => {
+    // Zonder eigen sleutel is een order bij Mediatask niet van die van de
+    // eigenaar van de gedeelde sleutel te onderscheiden. Dan is een verse order
+    // het eerlijke antwoord.
+    nepOrders([{ id: 99, state: "draft", address: "Kea Boumanstraat 74, Amsterdam", owner: { id: 5 } }], null);
+
+    expect(await vindBestaandeDraft("Kea Boumanstraat", "74", "Amsterdam")).toBeNull();
+  });
+
+  it("slaat een order zonder eigenaar over", async () => {
+    nepOrders([{ id: 99, state: "draft", address: "Kea Boumanstraat 74, Amsterdam" }], 5);
+
+    expect(await vindBestaandeDraft("Kea Boumanstraat", "74", "Amsterdam")).toBeNull();
   });
 });
