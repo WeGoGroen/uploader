@@ -3,6 +3,7 @@ import {
   addOrderComment,
   createOrder,
   getOrder,
+  getProducts,
   isEigenOrder,
   isSleutelGeweigerd,
   listOrders,
@@ -24,10 +25,21 @@ export const maxDuration = 300;
  * Geeft de (meest recente) Mediatask-orders terug — gebruikt om per adres
  * real-time te checken of er al een NEN2580-order bestaat, i.p.v. te
  * vertrouwen op onze eigen concept-administratie.
+ *
+ * Bewust niet gefilterd op eigenaar, en bewust wél uitgekleed. Niet gefilterd,
+ * omdat de vraag "staat dit adres er al?" over het hele bureau gaat: een order
+ * die een collega gisteren aanmaakte moet je vinden, anders maak je er een
+ * tweede. Uitgekleed, omdat het antwoord daarvoor niet meer nodig heeft dan
+ * het adres — wie wat gedaan heeft, met welk bureau en welke deadline, hoort
+ * niet in de browser van iedereen terecht te komen.
  */
 export async function GET() {
   try {
-    const orders = await listOrders();
+    const orders = (await listOrders()).map((o) => ({
+      id: o.id,
+      address: o.address,
+      state: o.state,
+    }));
     return NextResponse.json({ orders });
   } catch (err) {
     return NextResponse.json(
@@ -144,6 +156,41 @@ export async function POST(request: Request) {
     // sleutel en heeft er nóg een aanmaken geen zin — dat zou alleen concepten
     // achterlaten. Een hergebruikte of meegegeven order kan van een ander zijn.
     const zelfAangemaakt = !body.orderId && !bestaande;
+
+    /*
+      Hergebruiken mag, maar niet met een ander product.
+
+      De order wordt aan het begin van de opname aangemaakt, zodat elke scan
+      die binnenkomt er meteen aan gehangen kan worden. Het gevolg is dat een
+      productwissel dáárna nergens meer aankomt: er bestaat bij Mediatask geen
+      manier om het product van een bestaande order te wijzigen (zie
+      lib/mediatask.ts — alleen aanmaken, ophalen, indienen en bestanden), en
+      deze route schreef product en configuratie bij een bestaande order ook
+      nooit weg. De opnemer koos dus "basis", en er werd een NEN2580 getekend.
+
+      Stil doorgaan is hier de duurste uitkomst: de tekening komt terug op het
+      verkeerde product en dat merk je pas bij de factuur. Daarom stopt het
+      hier met een uitleg die zegt wat er moet gebeuren.
+    */
+    const gevraagdProduct = body.productId ? Number(body.productId) : null;
+    if (gevraagdProduct && order.product_id && Number(order.product_id) !== gevraagdProduct) {
+      const namen = await getProducts()
+        .then((ps) => new Map(ps.map((p) => [p.id, p.full_name])))
+        .catch(() => new Map<number, string>());
+      const opDeOrder = namen.get(Number(order.product_id)) ?? `product ${order.product_id}`;
+      const gekozen = namen.get(gevraagdProduct) ?? `product ${gevraagdProduct}`;
+      return NextResponse.json(
+        {
+          error:
+            `Voor dit adres staat al order #${order.id} bij Mediatask, met "${opDeOrder}". ` +
+            `Jij koos "${gekozen}". Een order die er al staat kan hier niet van product wisselen: ` +
+            `pas order #${order.id} aan in Mediatask, of annuleer hem daar en verstuur deze opname opnieuw.`,
+          orderId: order.id,
+          productOpOrder: Number(order.product_id),
+        },
+        { status: 409 }
+      );
+    }
 
     // Bij draftOnly stopt het hier: de opmerking (verdiepingen, links) en de
     // scans komen pas bij het afronden — de bestanden bestaan nu nog niet.

@@ -1,4 +1,5 @@
 import type { UploadTask } from "@/lib/upload-queue";
+import { opnameLink } from "@/lib/opname-link";
 import { normalizeForMatch, sameAddress, splitAddress } from "@/lib/address-format";
 import type { DraftSamenvatting } from "@/lib/drafts";
 
@@ -13,6 +14,7 @@ export type OverzichtDraft = Pick<
   | "accountName"
   | "incompleteDocs"
   | "updatedAt"
+  | "soort"
   | "heeftMediatask"
   | "adviseur"
   | "ontbrekendeVelden"
@@ -208,9 +210,29 @@ export function bouwOpenstaand(
     const bestaand = [...perAdres.values()].find((r) => sameAddress(r.adres, d.straatnaam));
     const regel = bestaand ?? regelVoor(adres);
 
-    // Een concept met een Mediatask-order hoort bij de NEN-kant.
-    const soort: Soort = d.heeftMediatask ? "nen" : "energielabel";
-    const href = `/energielabel?draft=${d.id}`;
+    /*
+      Wat je gestart hebt, blijft wat het is.
+
+      Dit werd afgeleid uit "heeft deze opname een Mediatask-order?" - en zo
+      lang die er nog niet was (upload nog bezig, of het aanmaken mislukt),
+      gold een NEN-opname als energielabel. Terwijl de app allang weet waar je
+      begonnen bent: wie via het menu op NEN2580 klikt, legt bij het opslaan
+      soort "nen" vast. Die herkomst is het antwoord, niet wat er later
+      toevallig wel of niet is aangemaakt. De Mediatask-order blijft de
+      terugval voor opnames van vóór dat veld.
+    */
+    const soort: Soort = d.soort === "nen" || d.heeftMediatask ? "nen" : "energielabel";
+    /*
+      En dan hoort de link daar ook heen te wijzen.
+
+      Dit stond vast op /energielabel, ook voor NEN-opnames. Klikte je op zo'n
+      regel, dan kwam je op het energielabelformulier terecht - en wie dat
+      recht niet heeft (Jelle doet alleen NEN2580 en media) werd meteen
+      teruggestuurd naar het dashboard. Zo kon je niet meer terug naar je eigen
+      onafgemaakte NEN-upload: de enige weg erheen liep langs een deur die voor
+      jou dicht zat.
+    */
+    const href = opnameLink({ ...d, soort, straatnaam: d.straatnaam || d.titel || adres });
     voegProductToe(regel, soort, href);
     // De adviseur op de opname wint van de ingelogde gebruiker. Bij opslaan
     // vastgelegd, dus hier geen veldenlijst en geen rekenwerk meer nodig.

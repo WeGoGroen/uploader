@@ -6,6 +6,7 @@ import { adresSleutel, calendarLocationToBagQuery, sameAddress, splitAddress } f
 import { checkBagAddress, type BagCheckResult } from "@/lib/bag-check";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 import UploadPanel from "@/components/UploadPanel";
+import { useRechten } from "@/components/RechtenProvider";
 import ScanStatusKaart from "@/components/ScanStatus";
 
 interface MediataskOrderSummary {
@@ -43,32 +44,62 @@ function formatTime(iso: string | null): string {
   return d.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" });
 }
 
-function StatusPill({ label, tone }: { label: string; tone: "ok" | "busy" | "off" }) {
-  if (tone === "ok") {
-    return <span className="pill is-ok">{label}</span>;
-  }
+/**
+ * Een statuspil, met een weg terug als die er is.
+ *
+ * "Geüpload" was hiervóór een doodlopend eind: zodra er een order bestond
+ * verdween de knop en stond er alleen nog een mededeling. Wie halverwege
+ * wegklikte kwam daardoor niet meer bij zijn eigen upload - en dat is precies
+ * het moment waarop je er terug wilt. Klaar betekent niet dat je er nooit meer
+ * heen hoeft, dus de pil is nu zelf de link.
+ */
+function StatusPill({
+  label,
+  tone,
+  href,
+}: {
+  label: string;
+  tone: "ok" | "busy" | "off";
+  href?: string;
+}) {
   const cls = tone === "busy" ? "is-busy" : "is-off";
+  const inhoud =
+    tone === "ok" ? (
+      label
+    ) : (
+      <>
+        <span className={`dot ${cls}`} />
+        {label}
+      </>
+    );
+  const klasse = tone === "ok" ? "pill is-ok" : "pill";
+  const stijl = tone === "ok" ? undefined : { display: "inline-flex", alignItems: "center", gap: 6 };
+
+  if (!href) {
+    return (
+      <span className={klasse} style={stijl}>
+        {inhoud}
+      </span>
+    );
+  }
   return (
-    <span className="pill" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-      <span className={`dot ${cls}`} />
-      {label}
-    </span>
+    <a
+      href={href}
+      className={klasse}
+      style={{ ...(stijl ?? {}), textDecoration: "none" }}
+      title="Openen — bijvoorbeeld om nog iets toe te voegen of na te kijken"
+    >
+      {inhoud}
+    </a>
   );
 }
 
 export default function Dashboard() {
   // Alles toestaan tot het antwoord binnen is: anders knipperen de knoppen
   // weg en weer terug bij elke paginaopening.
-  const [rechten, setRechten] = useState({ energielabel: true, nen: true, media: true });
-
-  useEffect(() => {
-    fetch("/api/rechten", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d: { rechten?: { energielabel: boolean; nen: boolean; media: boolean } }) => {
-        if (d.rechten) setRechten(d.rechten);
-      })
-      .catch(() => {});
-  }, []);
+  // Komt server-side mee (zie de layout): er is dus geen moment waarop het
+  // scherm nog niet weet wat je mag en voor de zekerheid alles toont.
+  const rechten = useRechten();
 
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
@@ -82,7 +113,6 @@ export default function Dashboard() {
   const [meldBezig, setMeldBezig] = useState<string | null>(null);
   // Wie er op dit apparaat actief is: het af-te-maken-paneel toont alleen
   // diens werk. De rest van het dashboard blijft over iedereen gaan.
-  const [actieveGebruiker, setActieveGebruiker] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   // Per opgeschoonde adrestekst: de BAG-uitslag, inclusief gelijkende
@@ -96,7 +126,7 @@ export default function Dashboard() {
 
   const load = useCallback(async () => {
     setCalendarError(null);
-    const [evts, drafts, orders, taskNames, actief, klaarGemeld] = await Promise.all([
+    const [evts, drafts, orders, taskNames, klaarGemeld] = await Promise.all([
       fetch("/api/calendar/today", { cache: "no-store" })
         .then(async (res) => {
           if (!res.ok) {
@@ -123,10 +153,6 @@ export default function Dashboard() {
         .then((res) => (res.ok ? res.json() : { names: [] }))
         .then((data) => (data.names ?? []) as string[])
         .catch(() => [] as string[]),
-      fetch("/api/clickup/accounts", { cache: "no-store" })
-        .then((res) => (res.ok ? res.json() : { active: null }))
-        .then((data) => (data.active ?? null) as string | null)
-        .catch(() => null),
       fetch("/api/klaar-melden", { cache: "no-store" })
         .then((res) => (res.ok ? res.json() : { straten: [] }))
         .then((data) => new Set((data.straten ?? []) as string[]))
@@ -136,7 +162,6 @@ export default function Dashboard() {
     setDrafts(drafts);
     setMediataskOrders(orders);
     setClickupTaskNames(taskNames);
-    setActieveGebruiker(actief);
     setKlaarMeldingen(klaarGemeld);
   }, []);
 
@@ -230,7 +255,7 @@ export default function Dashboard() {
 
       <div className="dash-grid">
         <div>
-          <UploadPanel drafts={drafts} actieveGebruiker={actieveGebruiker} />
+          <UploadPanel drafts={drafts} />
           {/* Verwerking bij Mediatask hoort naast het openstaande werk: het is
               werk dat loopt, alleen niet bij ons. */}
           <ScanStatusKaart />
@@ -398,7 +423,15 @@ export default function Dashboard() {
                     <div className="draft-actions" style={{ gap: 10, flexWrap: "wrap" }}>
                       {services.energielabel &&
                         (energielabelDone ? (
-                          <StatusPill label="Energielabel geüpload" tone="ok" />
+                          <StatusPill
+                            label="Energielabel geüpload"
+                            tone="ok"
+                            href={
+                              draft
+                                ? `/energielabel?draft=${draft.id}`
+                                : `/energielabel?addr=${encodeURIComponent(bagQuery)}`
+                            }
+                          />
                         ) : incompleteDocs.length > 0 ? (
                           <a
                             href={`/energielabel?draft=${draft!.id}`}
@@ -426,16 +459,16 @@ export default function Dashboard() {
                           </>
                         ))}
                       {services.nen &&
-                        (nenDone ? (
-                          <StatusPill label="NEN2580 geüpload" tone="ok" />
-                        ) : (
-                          <a
-                            href={`/nen?addr=${encodeURIComponent(bagQuery)}${klant ? `&klant=${encodeURIComponent(klant)}` : ""}${grossFloorArea ? `&m2=${grossFloorArea}` : ""}`}
-                            className="btn btn-quiet"
-                          >
-                            NEN2580 uploaden
-                          </a>
-                        ))}
+                        (() => {
+                          const nenUrl = `/nen?addr=${encodeURIComponent(bagQuery)}${klant ? `&klant=${encodeURIComponent(klant)}` : ""}${grossFloorArea ? `&m2=${grossFloorArea}` : ""}`;
+                          return nenDone ? (
+                            <StatusPill label="NEN2580 geüpload" tone="ok" href={nenUrl} />
+                          ) : (
+                            <a href={nenUrl} className="btn btn-quiet">
+                              NEN2580 uploaden
+                            </a>
+                          );
+                        })()}
                     </div>
                   </div>
                 );

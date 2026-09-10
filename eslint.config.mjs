@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Het bouwresultaat van `vercel build`. Staat er alleen na een lokale
+    // uitrol, maar dan wel met duizenden meldingen over gebundelde code die
+    // niemand schrijft - en daaronder verdwijnen de twintig die over onze
+    // eigen bestanden gaan.
+    ".vercel/**",
   ]),
 ]);
 

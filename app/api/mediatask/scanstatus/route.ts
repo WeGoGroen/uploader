@@ -1,22 +1,32 @@
 import { NextResponse } from "next/server";
-import { listOrders, listPointclouds } from "@/lib/mediatask";
+import { huidigeMediataskGebruiker, listOrders, listPointclouds } from "@/lib/mediatask";
+import { getActiveAccountName } from "@/lib/active-account";
+import { eigenOrders } from "@/lib/mediatask-format";
 import { getOptionalRedis } from "@/lib/redis";
 import { leesOrderTijd } from "@/lib/mediatask-pointclouds";
 
 /**
- * Per recente order: hoeveel scans er verwerkt zijn bij Mediatask.
+ * Per recente order van jóu: hoeveel scans er verwerkt zijn bij Mediatask.
  *
  * Bestaat omdat je dit anders alleen tijdens de upload-pop-up kon zien. Sluit
  * de opnemer die af — en dat mag, verwerking duurt een kwartier — dan was er
  * geen enkele plek meer waar je kon zien of het goed is gekomen. Dan moest je
  * in Mediatask zelf gaan kijken.
  *
+ * "Van jou" is hier het hele punt. De orderlijst van Mediatask is die van het
+ * hele bureau, en deze kaart hing bovendien aan één cachesleutel voor de hele
+ * app: wie als eerste zijn dashboard opende vulde hem, en daarna keek iedereen
+ * naar diezelfde scans. Zo stond de scan van Yannick op het dashboard van
+ * Nicette. Sinds iedereen zijn eigen Mediatask-sleutel heeft, zegt Mediatask
+ * zelf bij elke order wie de eigenaar is — dat is het antwoord, en de cache
+ * staat per persoon.
+ *
  * Elke order kost een aparte aanroep bij Mediatask, dus het antwoord gaat een
  * paar minuten in de cache: dit is een overzicht, geen live meter.
  */
 export const maxDuration = 60;
 
-const CACHE_KEY = "mediatask:scanstatus";
+const CACHE_PREFIX = "mediatask:scanstatus:";
 const CACHE_SECONDEN = 180;
 
 export interface ScanStatus {
@@ -34,8 +44,14 @@ export async function GET(request: Request) {
   const ververs = new URL(request.url).searchParams.get("ververs") === "1";
   const redis = getOptionalRedis();
 
+  // Zonder sessie is er geen "jouw werk" om te tonen. De cachesleutel hangt aan
+  // de naam uit die sessie, zodat niemand het antwoord van een ander leest.
+  const ikBen = await getActiveAccountName();
+  if (!ikBen) return NextResponse.json({ statussen: [] });
+  const cacheKey = `${CACHE_PREFIX}${ikBen}`;
+
   if (!ververs && redis) {
-    const bewaard = await redis.get(CACHE_KEY).catch(() => null);
+    const bewaard = await redis.get(cacheKey).catch(() => null);
     if (bewaard) {
       try {
         return NextResponse.json({ ...JSON.parse(bewaard), uitCache: true });
@@ -46,7 +62,21 @@ export async function GET(request: Request) {
   }
 
   try {
-    const orders = (await listOrders()).slice(0, 8);
+    /*
+      Alleen de orders die bij Mediatask op jouw naam staan.
+
+      Wie nog geen eigen sleutel heeft, werkt op de gedeelde: zijn orders komen
+      daar dan onder de eigenaar van díe sleutel te staan, en zijn dus niet van
+      die van de eigenaar te onderscheiden. Dan liever een lege kaart dan het
+      werk van iemand anders — de werknemerspagina in het Business Control
+      Center vraagt intussen om zijn sleutel.
+    */
+    const ik = await huidigeMediataskGebruiker();
+    if (!ik?.eigen) return NextResponse.json({ statussen: [] });
+
+    // Eerst filteren, dan pas afkappen: anders duwt een drukke collega jouw
+    // eigen scans uit de lijst van acht.
+    const orders = eigenOrders(await listOrders(), ik.id).slice(0, 8);
     const statussen: ScanStatus[] = [];
 
     for (const o of orders) {
@@ -81,7 +111,7 @@ export async function GET(request: Request) {
     }
 
     const antwoord = { statussen, opgehaald: new Date().toISOString() };
-    if (redis) await redis.set(CACHE_KEY, JSON.stringify(antwoord), "EX", CACHE_SECONDEN).catch(() => {});
+    if (redis) await redis.set(cacheKey, JSON.stringify(antwoord), "EX", CACHE_SECONDEN).catch(() => {});
     return NextResponse.json(antwoord);
   } catch (err) {
     return NextResponse.json(

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRechten } from "@/components/RechtenProvider";
+import { opnameLink } from "@/lib/opname-link";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 
 type DraftRecord = Pick<
@@ -16,6 +18,7 @@ type DraftRecord = Pick<
   | "incompleteDocs"
   | "updatedAt"
   | "createdAt"
+  | "soort"
 >;
 
 function formatDate(ts: number): string {
@@ -42,6 +45,8 @@ export default function Opnames() {
     bijlagesOntbreken: number;
     langOpenstaand: number;
   } | null>(null);
+
+  const rechten = useRechten();
 
   const load = useCallback(async () => {
     setError(null);
@@ -82,10 +87,23 @@ export default function Opnames() {
     setDrafts((prev) => prev?.filter((d) => d.id !== id) ?? null);
   }
 
-  const unfinished = drafts?.filter((d) => d.status === "concept") ?? [];
+  /*
+    Alleen werk dat deze persoon ook kan afmaken.
+
+    Deze pagina toont je eigen concepten, maar "eigen" gaat verder terug dan de
+    persoonlijke inlogs: uit de tijd van de gedeelde code staat er werk op
+    namen dat niet bij hun huidige rechten past. Een knop "verder afmaken" naar
+    een formulier waar je niet mag komen eindigt op de omleiding terug naar het
+    dashboard - en dan lijkt het alsof de app niet werkt.
+  */
+  const magDitAfmaken = (d: DraftRecord) =>
+    d.soort === "nen" ? rechten.nen : d.soort === "media" ? rechten.media : rechten.energielabel;
+  const zichtbaar = drafts?.filter(magDitAfmaken) ?? null;
+
+  const unfinished = zichtbaar?.filter((d) => d.status === "concept") ?? [];
   // Een opname met ontbrekende bijlages is óók nog af te maken werk: de
   // ClickUp-taak bestaat, maar de documenten zijn er niet in gekomen.
-  const incomplete = drafts?.filter((d) => d.status === "uploaded" && !!d.incompleteDocs?.length) ?? [];
+  const incomplete = zichtbaar?.filter((d) => d.status === "uploaded" && !!d.incompleteDocs?.length) ?? [];
   const nietsTeDoen = drafts !== null && unfinished.length === 0 && incomplete.length === 0;
 
   return (
@@ -165,7 +183,7 @@ export default function Opnames() {
                     </div>
                   </div>
                   <div className="draft-actions">
-                    <a className="btn btn-primary" href={`/energielabel?draft=${d.id}`}>
+                    <a className="btn btn-primary" href={opnameLink(d)}>
                       Verder afmaken
                     </a>
                     <button className="btn-text" onClick={() => removeDraft(d.id)}>
@@ -201,7 +219,7 @@ export default function Opnames() {
                     </div>
                   </div>
                   <div className="draft-actions">
-                    <a className="btn btn-primary" href={`/energielabel?draft=${d.id}`}>
+                    <a className="btn btn-primary" href={opnameLink(d)}>
                       Bijlages opnieuw uploaden
                     </a>
                     {d.clickupTaskUrl && (

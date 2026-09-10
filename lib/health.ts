@@ -15,12 +15,13 @@ import {
 } from "@/lib/microsoft";
 import { listDrafts } from "@/lib/drafts";
 import { getTeams, requireClickUpConfig, getListCustomFields, getClickUpAccounts } from "@/lib/clickup";
+import { staatUit } from "@/lib/koppelingen";
+import { haalPersoneel } from "@/lib/personeel";
 import { getAgencies, listOrders, listPointclouds } from "@/lib/mediatask";
 import { suggestAddresses } from "@/lib/pdok";
 import { calendarLocationToBagQuery } from "@/lib/address-format";
 import { getAccessTokenForAccount, getTodayEvents } from "@/lib/google-calendar";
 import { resolveActiveAccountName } from "@/lib/active-account";
-import { authConfig } from "@/lib/auth";
 import { getOptionalRedis } from "@/lib/redis";
 import { checkStreetView } from "@/lib/streetview";
 
@@ -372,9 +373,16 @@ export async function draaiControles(): Promise<Gezondheidsrapport> {
         : samen;
     }),
     meet("Inlog actief", async () => {
-      const { password } = authConfig();
-      if (!password) throw new Error("APP_PASSWORD ontbreekt — de app staat open voor iedereen");
-      return "toegangscode ingesteld";
+      // Sinds iedereen zijn eigen code heeft, is de vraag niet meer of er een
+      // gedeeld wachtwoord staat maar of er iemand kán inloggen: zonder
+      // accounts komt niemand binnen.
+      const mensen = await haalPersoneel();
+      if (mensen.length === 0) throw new Error("geen accounts — niemand kan inloggen");
+      const startcode = mensen.filter((p) => !p.codeGewijzigd);
+      if (startcode.length > 0) {
+        return `${LET_OP} ${mensen.length} account(s), waarvan ${startcode.length} nog op de startcode 0000`;
+      }
+      return `${mensen.length} account(s), allemaal met een eigen code`;
     }),
 
     meet("BAG (adressen)", async () => {
@@ -384,6 +392,10 @@ export async function draaiControles(): Promise<Gezondheidsrapport> {
     }),
 
     meet("ClickUp", async () => {
+      // Uitgezet is geen storing: wie geen energielabels doet heeft hier geen
+      // token voor, en een lijst die daar elke ronde rood over kleurt leert
+      // iedereen om niet meer te kijken.
+      if (await staatUit("clickup")) return "staat uit";
       const { token, listId } = await requireClickUpConfig(null);
       const [teams, velden] = await Promise.all([getTeams(token), getListCustomFields(token, listId)]);
       if (!teams[0]) throw new Error("geen workspace gevonden");

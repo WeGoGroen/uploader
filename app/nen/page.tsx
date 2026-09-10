@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useIkBen } from "@/components/RechtenProvider";
 import { useRouter } from "next/navigation";
 import type { AddressDetails, AddressSuggestion, NearbyAddress } from "@/lib/pdok";
 import TodayAppointments from "@/components/TodayAppointments";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 import { normalizeForMatch } from "@/lib/address-format";
-import { matchGrossFloorAreaBracket } from "@/lib/mediatask-format";
+import { configVoorProduct } from "@/lib/mediatask-format";
 import { meldGestart, startHartslag, type OpnameMelding } from "@/lib/opname-melden";
 
 // Zelfde submap-structuur als het NEN2580-sjabloon in Dropbox ("Voorbeeld
@@ -25,6 +26,17 @@ const MEDIATASK_FIELD_LABELS: Record<string, string> = {
   property_type: "Pandtype",
   house_type: "Woningtype",
 };
+
+/**
+ * Vandaag als jjjj-mm-dd, in Amsterdamse tijd.
+ *
+ * Niet via toISOString(): dat is UTC, en dan krijgt een opname die 's avonds
+ * na tienen wordt weggeschreven de dag ervóór als meetdatum. Op een NEN2580-
+ * rapport is dat een datum die niet klopt.
+ */
+function vandaagIso(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Amsterdam" }).format(new Date());
+}
 
 function mediataskFieldLabel(name: string): string {
   return MEDIATASK_FIELD_LABELS[name] ?? name;
@@ -192,13 +204,11 @@ export default function UploadNen() {
   // gecommit binnen dezelfde afhandeling).
   // Wie er ingelogd is; hoort bij de melding dat deze opname loopt, zodat een
   // herinnering bij de juiste persoon terechtkomt.
-  const [account, setAccount] = useState<string | null>(null);
-  useEffect(() => {
-    fetch("/api/clickup/list-meta", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setAccount(d?.account?.username ?? null))
-      .catch(() => {});
-  }, []);
+  // Uit de sessie, niet uit ClickUp: wie geen persoonlijk ClickUp-token heeft
+  // (iedereen die geen energielabels doet) kreeg hier null, en dan werd zijn
+  // opname zonder naam opgeslagen — werk van niemand, dat bij iedereen in de
+  // lijst kwam te staan.
+  const account = useIkBen();
 
   const [klantHint, setKlantHint] = useState<string | null>(null);
   const [grossFloorAreaHint, setGrossFloorAreaHint] = useState<number | null>(null);
@@ -260,23 +270,7 @@ export default function UploadNen() {
   // Een losse NEN-opname schreef niets naar de server, dus niemand kon zien
   // dát hij liep. Nu wel — inclusief een hartslag, want de tijd tussen twee
   // formulierwijzigingen zegt niets over of iemand nog bezig is.
-  const nenMelding: OpnameMelding | null = address
-    ? {
-        id: `nen-${address.straatnaam} ${houseNumber(address)}, ${address.woonplaatsnaam}`,
-        soort: "nen",
-        straatnaam: `${address.straatnaam} ${houseNumber(address)}`,
-        postcode: address.postcode,
-        woonplaats: address.woonplaatsnaam,
-        accountName: account,
-      }
-    : null;
 
-  useEffect(() => {
-    if (!nenMelding) return;
-    meldGestart(nenMelding);
-    return startHartslag(nenMelding);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nenMelding?.id, nenMelding?.accountName]);
 
   function startEditingAddress() {
     if (!address) return;
@@ -358,6 +352,65 @@ export default function UploadNen() {
     { key: "style", value: "" },
     { key: "option", value: "" },
   ]);
+
+  /*
+    De keuzes meebewaren, zodat een halve opname er nog staat als je terugkomt.
+
+    Alleen het adres werd vastgelegd. Wie halverwege wegklikte en later
+    terugkwam, kreeg de makelaar weer op leeg - en dan blokkeert het scherm bij
+    "documenten uploaden" op een veld dat je al ingevuld had. Dit zijn de
+    keuzes die je zelf maakt; wat uit Mediatask of de agenda komt, wordt toch
+    opnieuw opgehaald.
+  */
+  /*
+    Pas opslaan als de bewaarde keuzes zijn teruggezet.
+
+    Zonder deze rem schreef het effect hieronder bij het openen van de pagina
+    meteen de lege beginwaarden weg - en wiste daarmee precies de makelaar die
+    het moest onthouden. Het laden van config en concept duurt langer dan de
+    debounce, dus dat ging altijd mis.
+  */
+  const [keuzesGeladen, setKeuzesGeladen] = useState(false);
+
+  const nenKeuzes = {
+    agencyId,
+    manualAgencyId,
+    productId,
+    manualProductId,
+    priorityId,
+    manualPriorityId,
+    productConfig,
+  };
+  const nenMelding: OpnameMelding | null = address
+    ? {
+        id: `nen-${address.straatnaam} ${houseNumber(address)}, ${address.woonplaatsnaam}`,
+        soort: "nen",
+        straatnaam: `${address.straatnaam} ${houseNumber(address)}`,
+        postcode: address.postcode,
+        woonplaats: address.woonplaatsnaam,
+        accountName: account,
+        state: { keuzes: nenKeuzes },
+      }
+    : null;
+
+  useEffect(() => {
+    // Ook dit meldeffect wacht op het herstel. Deed het dat niet, dan schreef
+    // het bij het openen de nog lege keuzes weg — en /api/drafts vervangt de
+    // hele state, dus daarmee was de bewaarde makelaar meteen verdwenen.
+    if (!nenMelding || !keuzesGeladen) return;
+    meldGestart(nenMelding);
+    return startHartslag(nenMelding);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nenMelding?.id, nenMelding?.accountName, keuzesGeladen]);
+
+  // Ook opslaan zodra je iets kiest; het effect hierboven kijkt alleen naar het
+  // adres, en dan zou de makelaar pas bij de volgende hartslag vastliggen.
+  useEffect(() => {
+    if (!nenMelding || !keuzesGeladen) return;
+    const t = setTimeout(() => meldGestart(nenMelding), 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agencyId, manualAgencyId, productId, manualProductId, priorityId, manualPriorityId, productConfig, keuzesGeladen]);
   const [extraPhotoUrls, setExtraPhotoUrls] = useState("");
   const [extraDrawingUrls, setExtraDrawingUrls] = useState("");
 
@@ -394,6 +447,15 @@ export default function UploadNen() {
   // "fout" blokkeert niets: dan valt de flow terug op aanmaken bij het
   // afronden, zoals voorheen.
   const [orderSetup, setOrderSetup] = useState<"idle" | "bezig" | "fout">("idle");
+  /*
+    Waaróm het aanmaken misging.
+
+    De stand "fout" bestond al, maar werd nergens getoond: het scherm liet
+    alleen "bezig" zien. Mislukte het aanmaken, dan sloot de pop-up zonder een
+    woord en liep de opnemer door met een opname zonder order — waarna hij pas
+    aan het einde, met een klant in huis, de foutmelding kreeg.
+  */
+  const [orderSetupFout, setOrderSetupFout] = useState<string | null>(null);
 
   function resetMediataskState() {
     setDropboxFolder(null);
@@ -462,6 +524,8 @@ export default function UploadNen() {
     setMtPostcode(a.postcode);
 
     const straatEnNummer = `${a.straatnaam} ${houseNumber(a)}`;
+    // Ander adres: weer op slot tot de keuzes van dát adres binnen zijn.
+    setKeuzesGeladen(false);
 
     // De Dropbox-map wordt hier bewust NIET aangemaakt. Het adres mag op dit
     // punt nog gecorrigeerd worden ("Aanpassen"), en de mapnaam bevat het
@@ -510,24 +574,13 @@ export default function UploadNen() {
       );
       if (defaultProduct) {
         setProductId(defaultProduct.id);
-
-        // Standaardwaarden voor de productconfiguratie: 3D-uitvoering,
-        // standaardstijl, meting type A, meetdatum = vandaag (dag van
-        // uploaden), en bruto vloeroppervlak indien uit de agenda-notitie te
-        // herleiden. Blijft leeg als een veld niet in dit product voorkomt.
-        const todayIso = new Date().toISOString().slice(0, 10);
-        const initialConfig: Record<string, string> = {};
-        for (const c of defaultProduct.configuration) {
-          if (c.name === "option") initialConfig.option = "3D";
-          else if (c.name === "style") initialConfig.style = "STD";
-          else if (c.name === "measurement_type") initialConfig.measurement_type = "A";
-          else if (c.name === "measurement_date") initialConfig.measurement_date = todayIso;
-          else if (c.name === "gross_floor_area" && grossFloorArea) {
-            const bracket = matchGrossFloorAreaBracket(grossFloorArea, c.values);
-            if (bracket) initialConfig.gross_floor_area = bracket;
-          }
-        }
-        setProductConfig(initialConfig);
+        // Standaardwaarden: 3D-uitvoering, standaardstijl, meting type A,
+        // meetdatum = vandaag (de dag van uploaden), en het bruto
+        // vloeroppervlak als dat uit de agenda-notitie te herleiden viel.
+        // Dezelfde regels als bij een productwissel — zie configVoorProduct.
+        setProductConfig(
+          configVoorProduct(defaultProduct, { m2: grossFloorArea, vandaag: vandaagIso() })
+        );
       }
 
       // Bureau automatisch filteren op de klantnaam uit de agenda-afspraak
@@ -557,7 +610,42 @@ export default function UploadNen() {
       if (mediatask) {
         setResult({ orderId: mediatask.orderId, state: mediatask.state });
       }
+
+      /*
+        De keuzes van de vorige keer terugzetten.
+
+        Bewust ná de matching hierboven: wat jij zelf gekozen hebt weegt
+        zwaarder dan wat er uit de agendanaam te raden viel. Alleen invullen
+        wat er ook echt staat - een leeg bewaard veld mag een geslaagde match
+        niet wegdrukken.
+      */
+      const keuzes = draft.state?.keuzes as
+        | {
+            agencyId?: string;
+            manualAgencyId?: string;
+            productId?: number | "";
+            manualProductId?: string;
+            priorityId?: string;
+            manualPriorityId?: string;
+            productConfig?: Record<string, string>;
+          }
+        | undefined;
+      if (keuzes) {
+        if (keuzes.agencyId) setAgencyId(keuzes.agencyId);
+        if (keuzes.manualAgencyId) setManualAgencyId(keuzes.manualAgencyId);
+        if (keuzes.productId) setProductId(keuzes.productId);
+        if (keuzes.manualProductId) setManualProductId(keuzes.manualProductId);
+        if (keuzes.priorityId) setPriorityId(keuzes.priorityId);
+        if (keuzes.manualPriorityId) setManualPriorityId(keuzes.manualPriorityId);
+        if (keuzes.productConfig && Object.keys(keuzes.productConfig).length > 0) {
+          setProductConfig(keuzes.productConfig);
+        }
+      }
     }
+
+    // Vanaf nu telt wat er op het scherm staat als jouw keuze en mag het
+    // opgeslagen worden.
+    setKeuzesGeladen(true);
   }
 
   const selectedProduct = config?.products.find((p) => p.id === productId) ?? null;
@@ -858,7 +946,7 @@ export default function UploadNen() {
    * niet, dan gaat de flow gewoon door zonder ordernummer en ontstaat de
    * order alsnog bij het afronden, zoals voorheen.
    */
-  async function bevestigEnDoor() {
+  async function bevestigEnDoor(negeerFout = false) {
     // Normaal staat de map er al (aangemaakt bij "Documenten uploaden"); is
     // dat toen mislukt, dan hier nog één poging i.p.v. stil niets doen.
     const folder = await ensureNenFolder();
@@ -891,12 +979,22 @@ export default function UploadNen() {
           orderId = data.order.id as number;
           setResult({ orderId, state: data.order.state });
           setOrderSetup("idle");
+          setOrderSetupFout(null);
           if (existingDraft) koppelOrderAanConcept(existingDraft, orderId, data.order.state);
         } else {
           setOrderSetup("fout");
+          setOrderSetupFout(data.error ?? `Mediatask gaf foutcode ${res.status}.`);
+          // Hier stoppen in plaats van doorlopen. Zonder order gaan de scans
+          // tijdens de opname niet mee, en loopt het afronden straks op
+          // dezelfde fout vast — maar dan sta je bij de klant in huis.
+          if (!negeerFout) return;
         }
-      } catch {
+      } catch (err) {
         setOrderSetup("fout");
+        setOrderSetupFout(
+          err instanceof Error ? err.message : "Mediatask was niet bereikbaar."
+        );
+        if (!negeerFout) return;
       }
     }
 
@@ -1172,8 +1270,30 @@ export default function UploadNen() {
                         className={`control${productId ? " is-filled" : ""}`}
                         value={productId}
                         onChange={(e) => {
-                          setProductId(Number(e.target.value));
-                          setProductConfig({});
+                          const nieuwId = Number(e.target.value);
+                          setProductId(nieuwId);
+                          /*
+                            Niet legen maar opnieuw vullen.
+
+                            Legen leek logisch — de velden van "basis" zijn niet
+                            die van NEN2580 — maar niets vulde ze daarna nog:
+                            de standaarden werden alleen bij het laden gezet, en
+                            alleen voor het NEN-product. Wie op basis overstapte
+                            hield een lege configuratie over, en daar liep het
+                            aanmaken van de order op stuk.
+                          */
+                          setProductConfig((huidig) =>
+                            configVoorProduct(
+                              config?.products.find((p) => p.id === nieuwId) ?? null,
+                              {
+                                // Zelfde bron als bij het openen: de BAG wint,
+                                // de agenda-notitie is de terugval.
+                                m2: address?.oppervlakte ?? grossFloorAreaHint,
+                                vandaag: vandaagIso(),
+                                huidig,
+                              }
+                            )
+                          );
                         }}
                       >
                         <option value="">Kies…</option>
@@ -1490,12 +1610,30 @@ export default function UploadNen() {
                         uploaden direct naartoe.
                       </p>
                     )}
+                    {orderSetup === "fout" && (
+                      <div className="banner is-bad" style={{ marginBottom: 12, alignItems: "flex-start" }}>
+                        <span>
+                          <b>De order kon niet aangemaakt worden.</b>
+                          <br />
+                          {orderSetupFout}
+                          <br />
+                          Ga terug met “Aanpassen” en vul de ontbrekende velden aan. Ga je toch door,
+                          dan gaan de scans tijdens de opname niet vast naar Mediatask en moet de
+                          order aan het einde alsnog aangemaakt worden.
+                        </span>
+                      </div>
+                    )}
                     <div style={{ display: "flex", gap: 10 }}>
                       <button type="button" className="btn btn-quiet" style={{ flex: 1 }} onClick={() => setAgencyEditMode(true)}>
                         Aanpassen
                       </button>
-                      <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={bevestigEnDoor}>
-                        Ja, klopt
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ flex: 1 }}
+                        onClick={() => void bevestigEnDoor(orderSetup === "fout")}
+                      >
+                        {orderSetup === "fout" ? "Toch doorgaan" : "Ja, klopt"}
                       </button>
                     </div>
                   </>

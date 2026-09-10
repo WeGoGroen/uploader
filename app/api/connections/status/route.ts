@@ -3,7 +3,7 @@ import { suggestAddresses } from "@/lib/pdok";
 import { getAuthorizedUser, requireClickUpConfig } from "@/lib/clickup";
 import { getActiveAccountName, resolveActiveAccountName } from "@/lib/active-account";
 import { getCurrentAccount, getSharedAccessToken, requireDropboxConfig } from "@/lib/dropbox";
-import { getAgencies, requireMediataskConfig } from "@/lib/mediatask";
+import { getAgencies, huidigeMediataskGebruiker, requireMediataskConfig } from "@/lib/mediatask";
 import { getAccessTokenForAccount, getCurrentAccount as getGoogleAccount, requireGoogleConfig } from "@/lib/google-calendar";
 import {
   getDefaultDriveId,
@@ -14,24 +14,41 @@ import {
   resolveSiteId,
 } from "@/lib/microsoft";
 import { checkStreetView } from "@/lib/streetview";
+import { haalUitgezet } from "@/lib/koppelingen";
 
 interface ConnectionStatus {
   connected: boolean;
   ok: boolean;
   label: string | null;
   error: string | null;
+  /** Bewust uitgezet: niet gemeten, en dus ook geen storing. */
+  uit?: boolean;
 }
 
 function notConnected(): ConnectionStatus {
   return { connected: false, ok: false, label: null, error: null };
 }
 
+/** Een uitgezette koppeling: geen meting, geen foutmelding. */
+function uitgezet(): ConnectionStatus {
+  return { connected: false, ok: false, label: null, error: null, uit: true };
+}
+
+/** Springt uit een meetblok zonder er een fout van te maken. */
+class SlaOver extends Error {}
+
 export async function GET() {
+  const uit = await haalUitgezet();
+
   // ClickUp en Dropbox gebruiken allebei hetzelfde patroon: één gedeeld
   // token in .env.local op de server, geen per-gebruiker sessie. "Verbonden"
   // betekent hier: het token staat er, en de dienst accepteert het nu.
-  const clickup = notConnected();
+  //
+  // Staat een koppeling uit, dan wordt er niet gemeten: wie geen energielabels
+  // doet heeft geen ClickUp-token, en dat is geen storing.
+  const clickup = uit.includes("clickup") ? uitgezet() : notConnected();
   try {
+    if (clickup.uit) throw new SlaOver();
     const activeAccount = await getActiveAccountName();
     const { token } = await requireClickUpConfig(activeAccount);
     clickup.connected = true;
@@ -39,11 +56,13 @@ export async function GET() {
     clickup.ok = true;
     clickup.label = user.username;
   } catch (err) {
-    clickup.error = clickup.connected
-      ? "Token wordt geweigerd door ClickUp. Vernieuw het token."
-      : err instanceof Error
-        ? err.message
-        : "Niet geconfigureerd.";
+    if (!(err instanceof SlaOver)) {
+      clickup.error = clickup.connected
+        ? "Token wordt geweigerd door ClickUp. Vernieuw het token."
+        : err instanceof Error
+          ? err.message
+          : "Niet geconfigureerd.";
+    }
   }
 
   // BAG heeft geen account — "verbonden" betekent hier dat de publieke PDOK-
@@ -86,7 +105,13 @@ export async function GET() {
     mediatask.connected = true;
     const agencies = await getAgencies();
     mediatask.ok = true;
-    mediatask.label = `${agencies.length} bureau${agencies.length === 1 ? "" : "s"}`;
+    // Op wiens naam je orders komen te staan is belangrijker dan het aantal
+    // bureaus: met de gedeelde sleutel staat al het werk op één persoon.
+    const wie = await huidigeMediataskGebruiker();
+    const bureaus = `${agencies.length} bureau${agencies.length === 1 ? "" : "s"}`;
+    mediatask.label = wie
+      ? `${wie.eigen ? "eigen sleutel" : "gedeelde sleutel"} · gebruiker ${wie.id} · ${bureaus}`
+      : bureaus;
   } catch (err) {
     mediatask.error = mediatask.connected
       ? "Token wordt geweigerd door Mediatask."

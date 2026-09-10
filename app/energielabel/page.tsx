@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useIkBen } from "@/components/RechtenProvider";
 import type { AddressDetails, AddressSuggestion, NearbyAddress } from "@/lib/pdok";
 import { DOCUMENT_FOLDER_MAP } from "@/lib/documents";
 import { enqueue, getServerSnapshot, getSnapshot, removeTask, subscribe } from "@/lib/upload-queue";
@@ -638,6 +639,8 @@ export default function Home() {
   const pendingDraftIdRef = useRef<string | null>(null);
   const resumedRef = useRef(false);
 
+  const ikBen = useIkBen();
+
   useEffect(() => {
     fetch("/api/clickup/list-meta", { cache: "no-store" })
       .then(async (res) => {
@@ -711,7 +714,9 @@ export default function Home() {
       straatnaam,
       postcode: address.postcode,
       woonplaats: address.woonplaatsnaam,
-      accountName: meta.account.username,
+      // Wie het werk doet, uit de sessie; het ClickUp-account is een
+      // koppeling en niet per se dezelfde bron.
+      accountName: ikBen ?? meta.account.username,
       // Eén keer hier afleiden i.p.v. bij elke dashboardweergave opnieuw: de
       // lijsten dragen de formulierstaat bewust niet meer mee.
       adviseur: huidigeAdviseur(),
@@ -1230,7 +1235,7 @@ export default function Home() {
             straatnaam: `${address.straatnaam} ${houseNumber(address)}`,
             postcode: address.postcode,
             woonplaats: address.woonplaatsnaam,
-            accountName: meta?.account.username ?? null,
+            accountName: ikBen ?? meta?.account.username ?? null,
             clickupTaskUrl: data.task.url,
             // Mislukte bijlages meeschrijven: de taak staat er dan wel, maar
             // de opname is niet compleet. Zonder dit werd zo'n opname als

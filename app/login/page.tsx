@@ -3,37 +3,64 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-/** Lengte van de toegangscode; bij dit aantal cijfers logt de app vanzelf in. */
+/** Lengte van de inlogcode; bij dit aantal cijfers logt de app vanzelf in. */
 const CODE_LENGTH = 4;
 
+interface Account {
+  naam: string;
+  avatar: string | null;
+  codeGewijzigd: boolean;
+}
+
+/** De initialen als er geen avatar is — zelfde idee als in het dashboard. */
+function initialen(naam: string): string {
+  return naam
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((d) => d[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+/**
+ * Inloggen in twee stappen: eerst wie je bent, dan je eigen code.
+ *
+ * Hiervóór was er één code voor iedereen en koos je daarna zelf een naam op de
+ * gebruikerspagina — met één klik, zonder iets in te vullen. Daardoor wist de
+ * app niet wie er werkte, en kon een opname op de naam van een collega belanden
+ * zonder dat iemand dat merkte. Dezelfde opzet als het Business Control Center
+ * dus: je naam is de inlog, niet een keuze achteraf.
+ */
 function LoginForm() {
   const params = useSearchParams();
   const next = params.get("next") || "/";
+
+  const [accounts, setAccounts] = useState<Account[] | null>(null);
+  const [gekozen, setGekozen] = useState<Account | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Terugval voor een wachtwoord dat niet uit cijfers bestaat, mocht de code
-  // later veranderen.
-  const [manual, setManual] = useState(false);
-  const [manualValue, setManualValue] = useState("");
+
+  useEffect(() => {
+    fetch("/api/auth/accounts", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { accounts?: Account[] }) => setAccounts(d.accounts ?? []))
+      .catch(() => setAccounts([]));
+  }, []);
 
   const login = useCallback(
-    async (password: string) => {
+    async (naam: string, ingevoerd: string) => {
       setBusy(true);
       setError(null);
       try {
         const res = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({ naam, code: ingevoerd }),
         });
-        const data = await res.json().catch(() => null);
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
         if (!res.ok) {
-          setError(
-            data?.error === "geen_wachtwoord_ingesteld"
-              ? "Er is nog geen code ingesteld (APP_PASSWORD ontbreekt) — de app is nu onbeveiligd."
-              : data?.error ?? "Inloggen mislukt."
-          );
+          setError(data?.error ?? "Inloggen mislukt.");
           setCode("");
           return;
         }
@@ -52,9 +79,9 @@ function LoginForm() {
 
   // Zodra de code compleet is meteen inloggen: scheelt een extra tik.
   useEffect(() => {
-    if (code.length === CODE_LENGTH && !busy) void login(code);
+    if (gekozen && code.length === CODE_LENGTH && !busy) void login(gekozen.naam, code);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code]);
+  }, [code, gekozen]);
 
   function press(digit: string) {
     if (busy) return;
@@ -69,7 +96,7 @@ function LoginForm() {
 
   // Ook gewoon met een fysiek toetsenbord te bedienen.
   useEffect(() => {
-    if (manual) return;
+    if (!gekozen) return;
     function onKey(e: KeyboardEvent) {
       if (/^[0-9]$/.test(e.key)) press(e.key);
       else if (e.key === "Backspace") backspace();
@@ -77,7 +104,7 @@ function LoginForm() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manual, busy]);
+  }, [gekozen, busy]);
 
   return (
     <div className="login-card">
@@ -86,37 +113,59 @@ function LoginForm() {
         <span>Upload portaal</span>
       </div>
 
-      {manual ? (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void login(manualValue);
-          }}
-          style={{ display: "flex", flexDirection: "column", gap: 12 }}
-        >
-          <div className="field is-wide">
-            <label htmlFor="pw">Wachtwoord</label>
-            <input
-              id="pw"
-              className="control"
-              type="password"
-              autoComplete="current-password"
-              value={manualValue}
-              onChange={(e) => setManualValue(e.target.value)}
-              autoFocus
-            />
-          </div>
-          {error && <p className="conn-err">{error}</p>}
-          <button className="btn btn-primary btn-block" disabled={busy || !manualValue}>
-            {busy ? "Bezig…" : "Inloggen"}
-          </button>
-          <button type="button" className="btn-text" onClick={() => setManual(false)}>
-            Toegangscode gebruiken
-          </button>
-        </form>
+      {!gekozen ? (
+        <>
+          <p className="login-prompt">Wie ben je?</p>
+          {accounts === null ? (
+            <p className="login-msg">Even kijken…</p>
+          ) : accounts.length === 0 ? (
+            <p className="login-msg is-error">
+              Er zijn nog geen accounts. Voeg ze toe vanuit het Business Control Center, bij
+              Werknemers.
+            </p>
+          ) : (
+            <div className="login-accounts">
+              {accounts.map((a) => (
+                <button
+                  key={a.naam}
+                  type="button"
+                  className="login-account"
+                  onClick={() => {
+                    setGekozen(a);
+                    setCode("");
+                    setError(null);
+                  }}
+                >
+                  <span className="login-avatar" aria-hidden="true">
+                    {a.avatar ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={a.avatar} alt="" />
+                    ) : (
+                      initialen(a.naam)
+                    )}
+                  </span>
+                  <span className="login-naam">{a.naam}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       ) : (
         <>
-          <p className="login-prompt">Voer de toegangscode in</p>
+          <button type="button" className="login-gekozen" onClick={() => setGekozen(null)}>
+            <span className="login-avatar" aria-hidden="true">
+              {gekozen.avatar ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={gekozen.avatar} alt="" />
+              ) : (
+                initialen(gekozen.naam)
+              )}
+            </span>
+            <span className="login-naam">{gekozen.naam}</span>
+            <span className="login-wissel">wisselen</span>
+          </button>
+
+          <p className="login-prompt">Vul je code van vier cijfers in</p>
 
           <div className="pin-dots" aria-label={`${code.length} van ${CODE_LENGTH} cijfers ingevoerd`}>
             {Array.from({ length: CODE_LENGTH }, (_, i) => (
@@ -125,7 +174,9 @@ function LoginForm() {
           </div>
 
           <p className={`login-msg${error ? " is-error" : ""}`}>
-            {busy ? "Bezig met inloggen…" : error ?? ""}
+            {busy
+              ? "Bezig met inloggen…"
+              : error ?? (gekozen.codeGewijzigd ? "" : "Nog niet gewijzigd? De startcode is 0000.")}
           </p>
 
           <div className="keypad">
@@ -134,9 +185,7 @@ function LoginForm() {
                 {d}
               </button>
             ))}
-            <button type="button" className="keypad-key is-quiet" onClick={() => setManual(true)}>
-              abc
-            </button>
+            <span />
             <button type="button" className="keypad-key" onClick={() => press("0")} disabled={busy}>
               0
             </button>

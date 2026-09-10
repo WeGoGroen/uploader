@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useIkBen } from "@/components/RechtenProvider";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import ScanCheck from "@/components/ScanCheck";
@@ -96,13 +97,11 @@ function DocumentenContent() {
   const [loading, setLoading] = useState(true);
   // Wie er ingelogd is, zodat op het dashboard te zien is van wie een lopende
   // upload is. Best-effort: lukt het ophalen niet, dan blijft de tag gewoon weg.
-  const [account, setAccount] = useState<string | null>(null);
-  useEffect(() => {
-    fetch("/api/clickup/list-meta", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setAccount(d?.account?.username ?? null))
-      .catch(() => {});
-  }, []);
+  // Uit de sessie, niet uit ClickUp: wie geen persoonlijk ClickUp-token heeft
+  // (iedereen die geen energielabels doet) kreeg hier null, en dan werd zijn
+  // opname zonder naam opgeslagen — werk van niemand, dat bij iedereen in de
+  // lijst kwam te staan.
+  const account = useIkBen();
   // Lopende/afgeronde uploads komen uit de wachtrij buiten React, zodat ze
   // doorlopen als je tussendoor wegnavigeert.
   const allTasks = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);

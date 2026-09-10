@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useSyncExternalStore } from "react";
+import { useIkBen, useRechten } from "@/components/RechtenProvider";
 import { getServerSnapshot, getSnapshot, probeerOpnieuw, subscribe } from "@/lib/upload-queue";
 import {
   PRODUCT_LABEL,
@@ -31,22 +32,26 @@ const STATUS_LABEL: Record<Status, string> = {
   open: "Openstaand",
 };
 
-export default function UploadPanel({
-  drafts,
-  actieveGebruiker,
-}: {
-  drafts: OverzichtDraft[] | null;
-  actieveGebruiker: string | null;
-}) {
+export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | null }) {
+  const rechten = useRechten();
+  const ikBen = useIkBen();
   const alleTaken = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const [herstart, setHerstart] = useState<string[]>([]);
   const [kwijt, setKwijt] = useState<string[]>([]);
 
+  /*
+    Wie je bent komt uit de sessie, niet uit een aanroep die nog onderweg kan
+    zijn. Dat scheelde niet alleen een ronde: zolang die naam er niet was viel
+    dit filter terug op "alles tonen", en dan stond het werk van collega's toch
+    weer in jouw lijst - bij een mislukte aanroep zelfs blijvend. Geen naam is
+    nu geen lijst; te weinig tonen is te repareren, te veel tonen niet.
+  */
   const eigen = useMemo(() => {
-    if (!drafts || !actieveGebruiker) return drafts;
-    const naam = actieveGebruiker.toLowerCase();
+    if (!drafts) return drafts;
+    if (!ikBen) return [];
+    const naam = ikBen.toLowerCase();
     return drafts.filter((d) => !d.accountName || d.accountName.toLowerCase() === naam);
-  }, [drafts, actieveGebruiker]);
+  }, [drafts, ikBen]);
 
   const items = useMemo(() => bouwOpenstaand(alleTaken, eigen), [alleTaken, eigen]);
 
@@ -160,11 +165,23 @@ export default function UploadPanel({
 
                 <div className="up-voet">
                   <div className="up-tags">
-                    {r.producten.map((p) => (
-                      <a key={p.soort} className={`up-kind is-${p.soort}`} href={p.href}>
-                        {PRODUCT_LABEL[p.soort]}
-                      </a>
-                    ))}
+                    {/*
+                      Alleen de producten die deze persoon ook mag doen.
+
+                      Zonder deze filter stond hier voor Jelle een link
+                      "Energielabel" bij een adres - een knop die op de
+                      omleiding uitloopt omdat hij dat recht niet heeft. Het
+                      adres zelf mag hij wel zien: hij heeft er NEN2580 op
+                      gedaan, en dat werk hoort niet te verdwijnen omdat er
+                      toevallig ook een energielabel bij hoort.
+                    */}
+                    {r.producten
+                      .filter((p) => rechten[p.soort] ?? true)
+                      .map((p) => (
+                        <a key={p.soort} className={`up-kind is-${p.soort}`} href={p.href}>
+                          {PRODUCT_LABEL[p.soort]}
+                        </a>
+                      ))}
                     {r.gebruiker && <span className="up-user">{r.gebruiker}</span>}
                   </div>
 

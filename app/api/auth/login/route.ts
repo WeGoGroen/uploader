@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
-import { SESSION_COOKIE, SESSION_MAX_AGE_SECONDS, authConfig, createSessionValue } from "@/lib/auth";
+import { SESSION_COOKIE, SESSION_MAX_AGE_SECONDS, authConfig, maakSessie } from "@/lib/auth";
+import { controleerCode } from "@/lib/personeel";
 import { getOptionalRedis } from "@/lib/redis";
 
 /**
- * Pogingslimiet per IP. Met een korte cijfercode zijn er weinig
- * mogelijkheden, dus zonder deze rem is de code in een paar minuten door te
- * proberen; met deze rem duurt de hele reeks van 10.000 codes ruim een week.
+ * Inloggen met je eigen naam en code.
  *
- * Bewust ruim genomen: op kantoor delen alle iPads één IP-adres, dus een paar
- * collega's die zich vertypen mogen samen niet het hele team buitensluiten.
+ * Hiervóór was er één gedeelde code voor iedereen; wie je was koos je daarna
+ * zelf op de gebruikerspagina. Handig in het veld, maar het betekende dat de
+ * app niet wist wie er werkte — en dat elke opnemer met één klik onder de naam
+ * van een collega kon uploaden. Nu hoort de naam bij de inlog.
+ *
+ * De pogingslimiet blijft per IP en niet per account: op kantoor delen alle
+ * iPads één IP, en een limiet per account zou juist een gerichte plaagactie
+ * mogelijk maken (twintig foute pogingen op een collega en die staat buiten).
  */
 const MAX_ATTEMPTS = 20;
 const WINDOW_SECONDS = 15 * 60;
@@ -19,10 +24,14 @@ function clientIp(request: Request): string {
 }
 
 export async function POST(request: Request) {
-  const { password: given } = (await request.json().catch(() => ({}))) as { password?: string };
-  const { password, secret } = authConfig();
+  const body = (await request.json().catch(() => ({}))) as { naam?: string; code?: string };
+  const naam = body.naam?.trim() ?? "";
+  const code = body.code ?? "";
+  const { secret } = authConfig();
 
-  if (!password) return NextResponse.json({ error: "geen_wachtwoord_ingesteld" }, { status: 500 });
+  if (!naam || !/^[0-9]{4}$/.test(code)) {
+    return NextResponse.json({ error: "Kies je naam en vul vier cijfers in." }, { status: 400 });
+  }
 
   const redis = getOptionalRedis();
   const key = `login:fail:${clientIp(request)}`;
@@ -37,10 +46,9 @@ export async function POST(request: Request) {
     }
   }
 
-  if (!given || given !== password) {
+  const { ok, persoon } = await controleerCode(naam, code);
+  if (!ok || !persoon) {
     if (redis) {
-      // Teller ophogen en meteen een vervaltijd zetten, zodat de blokkade
-      // vanzelf weer verloopt.
       await redis
         .multi()
         .incr(key)
@@ -48,19 +56,31 @@ export async function POST(request: Request) {
         .exec()
         .catch(() => {});
     }
-    return NextResponse.json({ error: "Wachtwoord klopt niet." }, { status: 401 });
+    return NextResponse.json({ error: "Code klopt niet." }, { status: 401 });
   }
 
   if (redis) await redis.del(key).catch(() => {});
 
-  const expiresAt = Date.now() + SESSION_MAX_AGE_SECONDS * 1000;
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set(SESSION_COOKIE, await createSessionValue(secret, expiresAt), {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_MAX_AGE_SECONDS,
+  const res = NextResponse.json({
+    ok: true,
+    naam: persoon.naam,
+    rol: persoon.rol,
+    codeGewijzigd: persoon.codeGewijzigd,
   });
+  res.cookies.set(
+    SESSION_COOKIE,
+    await maakSessie(secret, {
+      naam: persoon.naam,
+      rol: persoon.rol,
+      codeGewijzigd: persoon.codeGewijzigd,
+    }),
+    {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: SESSION_MAX_AGE_SECONDS,
+    }
+  );
   return res;
 }
