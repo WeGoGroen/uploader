@@ -11,6 +11,7 @@ import { enqueue, getServerSnapshot, getSnapshot, removeTask, subscribe } from "
 import { isPointCloudFile } from "@/lib/pointcloud-read";
 import { meldAfgerond } from "@/lib/opname-melden";
 import { berekenMd5, type Md5Uitkomst } from "@/lib/md5-client";
+import { bundelFoutmeldingen } from "@/lib/mediatask-format";
 
 // Zelfde 4 mappen als op de NEN-pagina. Optimized en RAW staan allebei
 // pagina-breed (dat zijn de scan-/verwerkingsmappen), Additionals en Photo's
@@ -269,6 +270,9 @@ function DocumentenContent() {
   // order slaat de server alles over wat er dan al aan hangt.
   const [pcStatus, setPcStatus] = useState<Record<string, "bezig" | "klaar" | "fout">>({});
   const [pcFout, setPcFout] = useState<Record<string, string>>({});
+  // Weigert Mediatask de scan definitief (409), dan is "gaat bij het afronden
+  // opnieuw mee" een loze belofte: bij het afronden gebeurt precies hetzelfde.
+  const [pcDefinitief, setPcDefinitief] = useState<Record<string, boolean>>({});
   // Welke bestanden al doorgestuurd (of bezig) zijn — buiten de state, zodat
   // een re-render nooit een tweede verzending van hetzelfde bestand start.
   const pcGestart = useRef<Set<string>>(new Set());
@@ -285,6 +289,7 @@ function DocumentenContent() {
       const naam = t.name;
       setPcStatus((s) => ({ ...s, [naam]: "bezig" }));
       pcQueue.current = pcQueue.current.then(async () => {
+        let definitief = false;
         try {
           // De hash die bij het kiezen alvast berekend is; scheelt de server
           // een complete hash-doorgang door Dropbox. Ontbreekt hij (bv. een
@@ -301,7 +306,10 @@ function DocumentenContent() {
             }),
           });
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.error ?? "doorsturen mislukt");
+          if (!res.ok) {
+            definitief = res.status === 409 || Boolean(data.definitief);
+            throw new Error(data.error ?? "doorsturen mislukt");
+          }
           setPcStatus((s) => ({ ...s, [naam]: "klaar" }));
         } catch (err) {
           // Geen ramp: bij het afronden gaat alles wat nog niet aan de order
@@ -312,6 +320,7 @@ function DocumentenContent() {
             ...f,
             [naam]: err instanceof Error ? err.message : "doorsturen mislukt",
           }));
+          setPcDefinitief((d) => ({ ...d, [naam]: definitief }));
         }
       });
     }
@@ -338,7 +347,10 @@ function DocumentenContent() {
     }
     return (
       <span className="note" style={{ padding: 0, color: "var(--bad)" }}>
-        ⚠ Doorsturen naar Mediatask mislukte ({pcFout[naam]}) — gaat bij het afronden opnieuw mee.
+        ⚠ Doorsturen naar Mediatask mislukte ({pcFout[naam]}){" "}
+        {pcDefinitief[naam]
+          ? "— aan déze order komt hij niet meer; nog eens proberen verandert daar niets aan. Ga terug naar de order en start opnieuw, dan komt er een vers concept."
+          : "— gaat bij het afronden opnieuw mee."}
       </span>
     );
   }
@@ -688,6 +700,19 @@ function DocumentenContent() {
   // mediataskError, want de order bestaat dan wél en mag niet opnieuw
   // aangemaakt worden.
   const [mediataskSubmitError, setMediataskSubmitError] = useState<string | null>(null);
+  // Iets anders dan een mislukt indienen: hier hield de app het indienen zélf
+  // tegen omdat er een scan ontbreekt. Het advies verschilt dan volledig — bij
+  // een mislukte submit moet je 'm bij Mediatask afmaken, hier juist niet: dan
+  // gaat de order zonder puntenwolk de deur uit en is dat niet meer terug te
+  // draaien.
+  const [mediataskNietIngediend, setMediataskNietIngediend] = useState<string | null>(null);
+  // Is opnieuw versturen zinloos (de order zelf neemt niets meer aan), dan
+  // hoort er een andere weg te staan dan "probeer het nog eens".
+  const [mediataskGeenHerstel, setMediataskGeenHerstel] = useState(false);
+  // De server kan de aanlevering onderweg naar een verse order verplaatsen als
+  // het concept dat we hadden onze schrijfacties weigerde. Dan klopt het
+  // ordernummer dat de opnemer tijdens het uploaden zag niet meer.
+  const [mediataskVerplaatstVan, setMediataskVerplaatstVan] = useState<number | null>(null);
   const [mediataskState, setMediataskState] = useState<string | null>(null);
   // Voortgangsbalk in de pop-up. Mediatask geeft geen echte tussenstand
   // terug (één aanroep maakt de hele order), dus de balk kruipt tijdens het
@@ -777,6 +802,9 @@ function DocumentenContent() {
     setShowMediataskModal(true);
     setMediataskError(null);
     setMediataskSubmitError(null);
+    setMediataskNietIngediend(null);
+    setMediataskGeenHerstel(false);
+    setMediataskVerplaatstVan(null);
     setMediataskState(null);
     setMediataskOrderId(null);
     setScanBevestigd({});
@@ -850,6 +878,10 @@ function DocumentenContent() {
       setMediataskSteps(doneSteps);
       setMediataskOrderId(data.order.id);
       setMediataskSubmitError(data.submitError ?? null);
+      setMediataskVerplaatstVan(data.verplaatstVan ?? null);
+      // De achtergrond-uploads van hierna moeten naar de nieuwe order; het
+      // oude nummer neemt niets meer aan.
+      if (data.verplaatstVan) setVasteOrderId(Number(data.order.id));
 
       // De scancontrole aan de order hangen en het oordeel er als comment
       // onder zetten. Lukt dat niet, dan is dat vervelend voor de dataset maar
@@ -869,16 +901,20 @@ function DocumentenContent() {
       // de order — daar hoort het ook, want dat is de enige plek die het altijd
       // doet, ongeacht via welke pagina de order ontstaat. Hier alleen nog
       // tonen hoe het afliep.
-      const scanFouten: string[] = [];
-      for (const uitkomst of (data.scans ?? []) as {
+      // Alle mislukte bestanden bij elkaar; het scherm krijgt er straks één
+      // regel per oorzaak van in plaats van één per bestand.
+      const mislukt: { naam: string; fout?: string }[] = [];
+      const scans = (data.scans ?? []) as {
         naam: string;
         ok: boolean;
         fout?: string;
         alAanwezig?: boolean;
-      }[]) {
+        definitief?: boolean;
+      }[];
+      for (const uitkomst of scans) {
         setMediataskSteps((s2) => ({ ...s2, [`scan:${uitkomst.naam}`]: uitkomst.ok ? "done" : "error" }));
         if (uitkomst.ok) setScanBevestigd((b) => ({ ...b, [uitkomst.naam]: 1 }));
-        else scanFouten.push(`${uitkomst.naam}: ${uitkomst.fout ?? "versturen mislukt"}`);
+        else mislukt.push({ naam: uitkomst.naam, fout: uitkomst.fout });
         if (uitkomst.alAanwezig) setScanAlAanwezig((a) => ({ ...a, [uitkomst.naam]: true }));
       }
       // Foto's, video's en 360-opnames: die stuurt de server tijdens het
@@ -898,25 +934,62 @@ function DocumentenContent() {
           ...s2,
           [`media:${uitkomst.map}/${uitkomst.naam}`]: uitkomst.ok ? "done" : "error",
         }));
-        if (!uitkomst.ok) scanFouten.push(`${uitkomst.naam}: ${uitkomst.fout ?? "versturen mislukt"}`);
+        if (!uitkomst.ok) mislukt.push({ naam: uitkomst.naam, fout: uitkomst.fout });
       }
       setMediaAlsLink(media.some((m) => m.alsLink));
 
-      if (scanFouten.length > 0) setMediataskError(scanFouten.join(" · "));
+      if (mislukt.length > 0) setMediataskError(bundelFoutmeldingen(mislukt));
 
       // Indienen gebeurt op de server bij submitNow; alleen als er scans waren
       // is dat uitgesteld tot ze eraan hingen.
-      if (teVersturenScans.length > 0) {
-        const ingediend = await fetch(`/api/mediatask/orders/${data.order.id}`, { method: "POST" });
+      //
+      // En dan alleen als ze er ook écht aan hangen. Indienen is bij Mediatask
+      // eenrichtingsverkeer: daarna komt er geen scan meer bij, dus een order
+      // die nu zonder puntenwolk de deur uit gaat is niet meer te repareren.
+      // Blijft hij concept, dan maakt dezelfde knop hem straks alsnog af.
+      const scansMislukt = scans.filter((x) => !x.ok);
+      // Blijft de order concept, dan is de opname niet af — en dan mag de
+      // administratie hieronder hem ook niet afsluiten.
+      let tegengehouden = false;
+      if (teVersturenScans.length > 0 && scansMislukt.length > 0) {
+        tegengehouden = true;
+        setMediataskSteps((s2) => ({ ...s2, submit: "error" }));
+        setMediataskNietIngediend(
+          `${scansMislukt.length} van de ${scans.length} scans hangen niet aan de order.`
+        );
+        // Weigert Mediatask deze order definitief, dan is "nog een keer
+        // versturen" een doodlopende weg: dan moet er een nieuwe order komen.
+        setMediataskGeenHerstel(scansMislukt.some((x) => x.definitief));
+      } else if (teVersturenScans.length > 0) {
+        const ingediend = await fetch(`/api/mediatask/orders/${data.order.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // De server telt zelf na of de scans er hangen: deze pagina is niet
+          // de enige weg naar het indienen, en een achtergrondverzending die
+          // nog liep kan het antwoord hierboven ingehaald hebben.
+          body: JSON.stringify({ verwachteScans: teVersturenScans.length }),
+        });
         const uitkomst = await ingediend.json().catch(() => ({}));
         setMediataskSteps((s2) => ({ ...s2, submit: ingediend.ok ? "done" : "error" }));
-        if (!ingediend.ok) setMediataskSubmitError(uitkomst.error ?? "Indienen mislukt");
+        // 409 = de server hield het indienen tegen omdat er een scan ontbreekt;
+        // alles daarbuiten is een echt mislukt indienen.
+        if (ingediend.status === 409) {
+          tegengehouden = true;
+          setMediataskNietIngediend(uitkomst.error ?? "er ontbreekt een scan aan de order");
+        } else if (!ingediend.ok) {
+          setMediataskSubmitError(uitkomst.error ?? "Indienen mislukt");
+        }
       }
 
       // Ook het NEN-record afsluiten dat de opnamepagina aanmaakte. Zonder dit
       // blijft de opname als "niet afgemaakt" gelden en krijgt de opnemer er
       // een herinnering over terwijl de order allang bij Mediatask ligt.
-      if (addr && city) {
+      //
+      // Maar niet als de order bewust concept is gebleven: dan is de opname
+      // juist níét af, en is die herinnering — en het adres dat op het
+      // dashboard blijft staan — precies wat ervoor zorgt dat iemand
+      // terugkomt om hem af te maken.
+      if (addr && city && !tegengehouden) {
         meldAfgerond({
           id: `nen-${addr}, ${city}`,
           soort: "nen",
@@ -931,7 +1004,7 @@ function DocumentenContent() {
       // opname in de zijbalk en op het dashboard staan, terwijl de order allang
       // bij Mediatask ligt. Best-effort — een mislukte administratie mag nooit
       // een geslaagde order als fout laten overkomen.
-      if (draftId) {
+      if (draftId && !tegengehouden) {
         void (async () => {
           try {
             const lijst = await fetch("/api/drafts", { cache: "no-store" }).then((r) => r.json());
@@ -1247,7 +1320,8 @@ function DocumentenContent() {
         <div className="upload-overlay">
           <div className="upload-modal" role="dialog" aria-label="Bezig met uploaden naar Mediatask">
             {(() => {
-              const klaar = !!mediataskOrderId && !mediataskError && !mediataskSubmitError;
+              const klaar =
+                !!mediataskOrderId && !mediataskError && !mediataskSubmitError && !mediataskNietIngediend;
               const scanSleutels = Object.keys(mediataskSteps).filter((k) => k.startsWith("scan:"));
               const mediaSleutels = Object.keys(mediataskSteps).filter((k) => k.startsWith("media:"));
               const gevuld = LINK_FOLDERS.filter((f) => (existing[f]?.length ?? 0) > 0 && f !== "Optimized");
@@ -1415,7 +1489,23 @@ function DocumentenContent() {
             {!mediataskOrderId && !mediataskError && (
               <p className="upload-timer">Bezig: {mediataskElapsed}s</p>
             )}
-            {mediataskOrderId && !mediataskSubmitError && (
+            {mediataskVerplaatstVan && mediataskOrderId && (
+              <p className="upload-timer">
+                Order #{mediataskVerplaatstVan} nam niets van ons aan (hij is van een andere
+                Mediatask-sleutel), dus de aanlevering staat nu op de nieuwe order #{mediataskOrderId}.
+                Die oude blijft ongebruikt als concept staan.
+              </p>
+            )}
+            {mediataskOrderId && mediataskNietIngediend && (
+              <p className="upload-timer" style={{ color: "var(--bad)" }}>
+                ⚠ Order #{mediataskOrderId} staat klaar bij Mediatask maar is bewust nog niet ingediend:{" "}
+                {mediataskNietIngediend} Een ingediende order neemt geen scan meer aan, dus hij blijft concept.{" "}
+                {mediataskGeenHerstel
+                  ? "Aan déze order komt niets meer bij; nog eens versturen verandert daar niets aan. Ga terug naar de order en start opnieuw, dan komt er een vers concept. Blijft het misgaan, dan zit het in de Mediatask-sleutel en niet in de scan — zie de melding hierboven."
+                  : "Verhelp de fout hierboven en druk opnieuw op versturen — dezelfde order wordt dan afgemaakt, er komt geen tweede bij."}
+              </p>
+            )}
+            {mediataskOrderId && !mediataskSubmitError && !mediataskNietIngediend && (
               <p className="upload-timer">
                 ✓ Order #{mediataskOrderId} ingediend bij Mediatask{mediataskState ? ` — status: ${mediataskState}` : ""}
                 {/* Het aantal komt uit Mediatask zelf, ná het koppelen: dit is
@@ -1424,7 +1514,7 @@ function DocumentenContent() {
                   ` · ${Math.max(...Object.values(scanBevestigd))} puntenwolk(en) aan deze order`}
               </p>
             )}
-            {mediataskOrderId && mediataskSubmitError && (
+            {mediataskOrderId && mediataskSubmitError && !mediataskNietIngediend && (
               <p className="upload-timer" style={{ color: "var(--bad)" }}>
                 ⚠ Order #{mediataskOrderId} is aangemaakt, maar het indienen mislukte ({mediataskSubmitError}). Dien
                 &apos;m handmatig in bij Mediatask — niet opnieuw uploaden, dan ontstaat er een dubbele order.

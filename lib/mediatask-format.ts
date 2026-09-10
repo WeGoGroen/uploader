@@ -35,6 +35,43 @@ export function matchGrossFloorAreaBracket(size: number, values: string[] | unde
 }
 
 /**
+ * Vat de mislukte bestanden samen tot één leesbare regel per oorzaak.
+ *
+ * Eén weigering van Mediatask raakt alle bestanden tegelijk: de reden zit in
+ * de order, niet in het bestand. De pagina plakte daar een foutregel per
+ * bestand van aan elkaar, en bij een opname met dertig foto's en een paar
+ * video's werd dat een scherm vol identieke zinnen waarin de ene echte
+ * oorzaak niet meer te vinden was.
+ *
+ * Daarom: groeperen op de melding zelf, met de bestandsnamen erachter. Boven
+ * de vier namen wordt het een telling — wie wíl weten welke dertig bestanden
+ * het zijn, kijkt naar de lijst met stappen erboven, waar ze stuk voor stuk
+ * staan.
+ */
+export function bundelFoutmeldingen(
+  fouten: { naam: string; fout?: string }[],
+  maxNamen = 4
+): string {
+  const perMelding = new Map<string, string[]>();
+  for (const f of fouten) {
+    const melding = f.fout?.trim() || "versturen mislukt";
+    const namen = perMelding.get(melding) ?? [];
+    namen.push(f.naam);
+    perMelding.set(melding, namen);
+  }
+
+  return [...perMelding.entries()]
+    .map(([melding, namen]) => {
+      if (namen.length === 1) return `${namen[0]}: ${melding}`;
+      const getoond = namen.slice(0, maxNamen).join(", ");
+      const rest = namen.length - maxNamen;
+      const lijst = rest > 0 ? `${getoond} en nog ${rest}` : getoond;
+      return `${namen.length} bestanden (${lijst}): ${melding}`;
+    })
+    .join(" · ");
+}
+
+/**
  * Alleen de orders die bij Mediatask op naam van deze gebruiker staan.
  *
  * De orderlijst die Mediatask teruggeeft is die van het hele bureau, ook als

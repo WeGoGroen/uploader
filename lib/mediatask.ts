@@ -1,4 +1,5 @@
 import { getOptionalRedis, requireRedis } from "@/lib/redis";
+import { eigenOrders } from "@/lib/mediatask-format";
 
 // Cliënt voor de Apitome/Mediatask-API — gebruikt om NEN2580-opnames
 // (foto's + plattegronden) automatisch als order aan te leveren. Zelfde
@@ -54,7 +55,9 @@ export interface MediataskOrder {
 export class MediataskApiError extends Error {
   constructor(
     public status: number,
-    message: string
+    message: string,
+    /** Het endpoint dat weigerde — zonder dat is een 403 niet na te lopen. */
+    public endpoint = ""
   ) {
     super(message);
     this.name = "MediataskApiError";
@@ -62,11 +65,24 @@ export class MediataskApiError extends Error {
 }
 
 /**
+ * Een weigering waar opnieuw proberen niets aan verandert.
+ *
+ * Het verschil is het hele punt: bij een storing (5xx) of een rem op het
+ * aantal verzoeken (429) is nog een poging precies goed, maar een 403 op een
+ * order die geen concept meer is blijft bij poging tien net zo hard nee. Elke
+ * poging kost daar een complete doorgang van een scan van honderden MB's door
+ * Dropbox, en levert een tweede foutmelding op over dezelfde ene oorzaak.
+ */
+export function isDefinitieveWeigering(err: unknown): err is MediataskApiError {
+  return err instanceof MediataskApiError && err.status >= 400 && err.status < 500 && err.status !== 429;
+}
+
+/**
  * Maakt van een Mediatask-fout een zin die een opnemer op locatie iets zegt.
  * Bij een storing stuurt hun server een complete HTML-foutpagina terug; die
  * ongefilterd tonen levert een scherm vol markup op i.p.v. een boodschap.
  */
-function describeMediataskError(status: number, body: string, path: string): string {
+function describeMediataskError(status: number, body: string, endpoint: string): string {
   const isHtml = /^\s*<(!doctype|html)/i.test(body);
   if (status >= 500 || isHtml) {
     return `Mediatask is op dit moment niet bereikbaar (foutcode ${status}). Dit ligt aan hun kant — probeer het over een paar minuten opnieuw.`;
@@ -77,7 +93,18 @@ function describeMediataskError(status: number, body: string, path: string): str
     const parsed = JSON.parse(body);
     detail = Array.isArray(parsed?.errors) ? parsed.errors.join(", ") : (parsed?.error ?? detail);
   } catch {}
-  return `Mediatask weigerde het verzoek (${status}): ${detail.slice(0, 200)}`;
+  // Een leeg antwoordlichaam ("{}") toevoegen maakt de melding alleen maar
+  // raadselachtiger; dan is het endpoint het enige wat nog informatie draagt.
+  const zinnig = detail && detail !== "{}" && detail !== "[]" ? `: ${detail.slice(0, 200)}` : "";
+  if (status === 403) {
+    // Bewust géén oorzaak aanwijzen: een 403 op een order betekent óf "hij is
+    // niet van deze sleutel" óf "hij is geen concept meer", en welke van de
+    // twee het is staat in de toestand van de order — niet in dit antwoord.
+    // Eén van de twee gokken stuurt de helft van de keren de verkeerde kant op;
+    // zie weigeringUitleg, die de order erbij haalt.
+    return `Mediatask stond ${endpoint} niet toe (403)${zinnig}`;
+  }
+  return `Mediatask weigerde het verzoek (${status}) op ${endpoint}${zinnig}`;
 }
 
 const MEDIATASK_CREDENTIALS_KEY = "mediatask:credentials";
@@ -237,7 +264,8 @@ export async function mediataskFetch<T>(path: string, init?: RequestInit): Promi
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new MediataskApiError(res.status, describeMediataskError(res.status, body, path));
+    const endpoint = `${init?.method ?? "GET"} ${path}`;
+    throw new MediataskApiError(res.status, describeMediataskError(res.status, body, endpoint), endpoint);
   }
   if (res.status === 204) return {} as T;
   return res.json() as Promise<T>;
@@ -291,6 +319,55 @@ export function getOrder(id: number): Promise<MediataskOrder> {
 }
 
 /**
+ * Verklaart een weigering uit de toestand van de order, of null als de order
+ * niet op te halen is.
+ *
+ * De API zegt bij een weigering alleen "403" met een leeg antwoordlichaam. De
+ * verklaring staat in de order, en het zijn er twee die er totaal anders
+ * uitzien:
+ *
+ *  - De order is geen concept meer. Dan is hij ingediend en neemt Mediatask er
+ *    niets meer bij; opnieuw proberen heeft geen zin en er moet een nieuwe
+ *    order komen.
+ *  - De order is nog wél een concept. Dan ligt het niet aan de toestand maar
+ *    aan de sleutel: deze Mediatask-sleutel mag niet aan déze order schrijven.
+ *    Dat overkomt een order die met een ándere sleutel is aangemaakt — of die
+ *    van een collega is en via de conceptzoeker is hergebruikt.
+ *
+ * Die twee door elkaar halen kost een dag zoeken in de verkeerde hoek, dus ze
+ * krijgen elk hun eigen zin. Alleen aanroepen als er al iets misging: het kost
+ * een extra verzoek.
+ */
+export async function weigeringUitleg(
+  orderId: number
+): Promise<{ tekst: string; nogConcept: boolean; vanOns?: boolean } | null> {
+  const order = await getOrder(orderId).catch(() => null);
+  const state = String(order?.state ?? "").trim();
+  if (!state) return null;
+  if (state.toLowerCase() !== "draft") {
+    return {
+      nogConcept: false,
+      tekst: `order #${orderId} staat bij Mediatask op "${state}" en is geen concept meer — daar neemt Mediatask geen bestanden meer bij`,
+    };
+  }
+  // Nog een concept, en door onszelf aangemaakt: dan is er niets mis met déze
+  // order en gaat het over wat de sleutel mag. Een nieuwe order aanmaken lost
+  // dat niet op — dat moet bij Mediatask rechtgezet worden.
+  if (await isEigenOrder(orderId)) {
+    return {
+      nogConcept: true,
+      vanOns: true,
+      tekst: `order #${orderId} is een concept dat we zelf hebben aangemaakt en Mediatask weigert er tóch een puntenwolk aan te hangen — dan mag deze Mediatask-sleutel dat niet (meer). Een nieuwe order lost dit niet op; dit hoort bij Mediatask rechtgezet te worden`,
+    };
+  }
+  return {
+    nogConcept: true,
+    vanOns: false,
+    tekst: `order #${orderId} is nog een concept, dus dit ligt niet aan de toestand maar aan de Mediatask-sleutel: waarmee nu geüpload wordt mag niet aan deze order schrijven (aangemaakt met een andere sleutel, of het concept van een collega hergebruikt)`,
+  };
+}
+
+/**
  * Haalt de (meest recente) orders op — gebruikt om per adres in real time te
  * controleren of er al een NEN2580-order bestaat, i.p.v. te vertrouwen op
  * onze eigen concept-administratie (die kan achterlopen, bv. als iemand het
@@ -306,6 +383,82 @@ export function listOrders(pagina?: number): Promise<MediataskOrder[]> {
 }
 
 /**
+ * Orders waarvan gebleken is dat onze sleutel er niet aan mag schrijven.
+ *
+ * `listOrders` geeft niet alleen onze eigen orders terug, en sinds elke
+ * opnemer een eigen Mediatask-sleutel heeft is "een concept met het juiste
+ * adres" niet meer hetzelfde als "een concept waar wij bij kunnen". Zo'n
+ * order hergebruiken levert een 403 op élke schrijfactie op, en zonder dit
+ * geheugen pakt de volgende paginaopening exact dezelfde order er weer bij.
+ */
+const GEWEIGERD_PREFIX = "mediatask:geweigerd:";
+const GEWEIGERD_TTL = 60 * 60 * 24 * 30;
+
+/**
+ * Orders die deze app zelf heeft aangemaakt.
+ *
+ * Het verschil telt op één plek, maar daar telt het zwaar: weigert een order
+ * onze schrijfacties, dan is een verse order de oplossing als het concept van
+ * iemand anders was — en juist niet als we hem zelf hebben aangemaakt. In dat
+ * tweede geval zit het probleem niet in het eigendom, en levert elke poging
+ * alleen een leeg concept extra op bij Mediatask.
+ */
+const EIGEN_PREFIX = "mediatask:eigen:";
+
+export async function onthoudEigenOrder(orderId: number): Promise<void> {
+  const redis = getOptionalRedis();
+  if (!redis) return;
+  await redis.set(`${EIGEN_PREFIX}${orderId}`, "1", "EX", GEWEIGERD_TTL).catch(() => {});
+}
+
+export async function isEigenOrder(orderId: number): Promise<boolean> {
+  const redis = getOptionalRedis();
+  if (!redis) return false;
+  return Boolean(await redis.get(`${EIGEN_PREFIX}${orderId}`).catch(() => null));
+}
+
+/**
+ * Weigert Mediatask ook onze eigen, verse orders?
+ *
+ * Dan ligt het niet aan één order maar aan de sleutel: die mag bij Mediatask
+ * geen puntenwolken meer aan een order hangen. Dat is hier gebeurd — drie
+ * adressen op rij, waaronder een gloednieuw adres met een order die we net
+ * zelf hadden aangemaakt.
+ *
+ * Dit onthouden heeft één doel: dan heeft het geen zin om bij een geweigerde
+ * order een verse aan te maken, want die wordt net zo hard geweigerd. Zonder
+ * deze rem blijft er bij élke poging een leeg concept achter bij Mediatask.
+ * Kort houdbaar, zodat de app het vanzelf weer probeert zodra de rechten
+ * hersteld zijn.
+ */
+const SLEUTELWEIGERING_KEY = "mediatask:sleutelweigering";
+const SLEUTELWEIGERING_TTL = 60 * 60 * 6;
+
+export async function onthoudSleutelWeigering(): Promise<void> {
+  const redis = getOptionalRedis();
+  if (!redis) return;
+  await redis.set(SLEUTELWEIGERING_KEY, String(Date.now()), "EX", SLEUTELWEIGERING_TTL).catch(() => {});
+}
+
+export async function isSleutelGeweigerd(): Promise<boolean> {
+  const redis = getOptionalRedis();
+  if (!redis) return false;
+  return Boolean(await redis.get(SLEUTELWEIGERING_KEY).catch(() => null));
+}
+
+export async function onthoudGeweigerdeOrder(orderId: number): Promise<void> {
+  const redis = getOptionalRedis();
+  if (!redis) return;
+  await redis.set(`${GEWEIGERD_PREFIX}${orderId}`, "1", "EX", GEWEIGERD_TTL).catch(() => {});
+}
+
+export async function isGeweigerdeOrder(orderId: number): Promise<boolean> {
+  const redis = getOptionalRedis();
+  if (!redis) return false;
+  return Boolean(await redis.get(`${GEWEIGERD_PREFIX}${orderId}`).catch(() => null));
+}
+
+/**
  * Bestaat er al een concept-order voor dit adres? Die hergebruiken in plaats
  * van een tweede aanmaken.
  *
@@ -314,6 +467,24 @@ export function listOrders(pagina?: number): Promise<MediataskOrder[]> {
  * of een herlaadbeurt zonder ordernummer bereikt, maakte voorheen stilletjes
  * een duplicaat aan — de achtergebleven draft bleef dan eeuwig bij Mediatask
  * staan (zo zijn er meerdere gevonden).
+ *
+ * Alleen een concept dat bij Mediatask op onze eigen naam staat komt in
+ * aanmerking, en dat is de kern van deze functie.
+ *
+ * De orderlijst die Mediatask teruggeeft is die van het hele bureau, ook als
+ * je hem met je eigen sleutel opvraagt (zie eigenOrders). Sinds elke opnemer
+ * een eigen sleutel heeft, bepaalt de sleutel waarmee een order is aangemaakt
+ * wie de eigenaar is — en aan de order van een ander mag je niets toevoegen.
+ * Zo'n concept hergebruiken is erger dan er geen vinden: aanmaken lukt,
+ * ophalen lukt, een opmerking plaatsen lukt, en pas het aanhangen van de
+ * puntenwolk loopt tegen een 403. Dat is precies op het moment dat de opnemer
+ * denkt klaar te zijn, met een scan die nergens meer heen kan. Bij
+ * Balboastraat 12-3, 12-4 en Kea Boumanstraat 74 ging het zo mis.
+ *
+ * Weten we niet wie we zijn (geen eigen sleutel, of Mediatask antwoordt niet),
+ * dan valt hergebruik helemaal af en maakt de aanroeper een verse order aan.
+ * Een order te veel is een leeg concept; een order van een ander is een opname
+ * die niet aankomt.
  */
 export async function vindBestaandeDraft(
   street: string,
@@ -324,17 +495,23 @@ export async function vindBestaandeDraft(
   const plaats = city.trim().toLowerCase();
   if (!doel || !plaats) return null;
 
+  const ik = await huidigeMediataskGebruiker().catch(() => null);
+  if (!ik) return null;
+
   const orders = await listOrders().catch(() => [] as MediataskOrder[]);
-  return (
-    orders.find((o) => {
-      if (o.state !== "draft" || !o.address) return false;
-      const [adres, ...rest] = o.address.split(",");
-      return (
-        adres.replace(/\s+/g, " ").trim().toLowerCase() === doel &&
-        rest.join(",").trim().toLowerCase() === plaats
-      );
-    }) ?? null
-  );
+  const kandidaten = eigenOrders(orders, ik.id).filter((o) => {
+    if (o.state !== "draft" || !o.address) return false;
+    const [adres, ...rest] = o.address.split(",");
+    return (
+      adres.replace(/\s+/g, " ").trim().toLowerCase() === doel &&
+      rest.join(",").trim().toLowerCase() === plaats
+    );
+  });
+
+  for (const kandidaat of kandidaten) {
+    if (!(await isGeweigerdeOrder(kandidaat.id))) return kandidaat;
+  }
+  return null;
 }
 
 export function submitOrder(id: number): Promise<void> {
@@ -483,7 +660,12 @@ export async function requestPhotoUploads(
     // vorm voor pointclouds werkt. Foto's aan een order hangen kan alleen in
     // hun eigen UI. Deze vertaling maakt daar de nette linkenterugval van in
     // plaats van een kale fout per bestand.
-    if (err instanceof MediataskApiError && (err.status === 422 || err.status === 404)) {
+    //
+    // Élke definitieve weigering telt mee, niet alleen 422 en 404. Een 403 —
+    // wat een order geeft die geen concept meer is — viel er eerst buiten, en
+    // dan kreeg iedere foto, video en 360-opname apart zijn eigen foutmelding
+    // over precies dezelfde oorzaak. Eén weigering is één mededeling.
+    if (isDefinitieveWeigering(err)) {
       throw new GeenDirecteUpload(`Mediatask accepteert geen foto-bijlagen via de API (${err.status})`);
     }
     throw err;
