@@ -222,7 +222,7 @@ export function getOrder(id: number): Promise<MediataskOrder> {
  */
 export async function weigeringUitleg(
   orderId: number
-): Promise<{ tekst: string; nogConcept: boolean } | null> {
+): Promise<{ tekst: string; nogConcept: boolean; vanOns?: boolean } | null> {
   const order = await getOrder(orderId).catch(() => null);
   const state = String(order?.state ?? "").trim();
   if (!state) return null;
@@ -232,8 +232,19 @@ export async function weigeringUitleg(
       tekst: `order #${orderId} staat bij Mediatask op "${state}" en is geen concept meer — daar neemt Mediatask geen bestanden meer bij`,
     };
   }
+  // Nog een concept, en door onszelf aangemaakt: dan is er niets mis met déze
+  // order en gaat het over wat de sleutel mag. Een nieuwe order aanmaken lost
+  // dat niet op — dat moet bij Mediatask rechtgezet worden.
+  if (await isEigenOrder(orderId)) {
+    return {
+      nogConcept: true,
+      vanOns: true,
+      tekst: `order #${orderId} is een concept dat we zelf hebben aangemaakt en Mediatask weigert er tóch een puntenwolk aan te hangen — dan mag deze Mediatask-sleutel dat niet (meer). Een nieuwe order lost dit niet op; dit hoort bij Mediatask rechtgezet te worden`,
+    };
+  }
   return {
     nogConcept: true,
+    vanOns: false,
     tekst: `order #${orderId} is nog een concept, dus dit ligt niet aan de toestand maar aan de Mediatask-sleutel: waarmee nu geüpload wordt mag niet aan deze order schrijven (aangemaakt met een andere sleutel, of het concept van een collega hergebruikt)`,
   };
 }
@@ -286,6 +297,35 @@ export async function isEigenOrder(orderId: number): Promise<boolean> {
   const redis = getOptionalRedis();
   if (!redis) return false;
   return Boolean(await redis.get(`${EIGEN_PREFIX}${orderId}`).catch(() => null));
+}
+
+/**
+ * Weigert Mediatask ook onze eigen, verse orders?
+ *
+ * Dan ligt het niet aan één order maar aan de sleutel: die mag bij Mediatask
+ * geen puntenwolken meer aan een order hangen. Dat is hier gebeurd — drie
+ * adressen op rij, waaronder een gloednieuw adres met een order die we net
+ * zelf hadden aangemaakt.
+ *
+ * Dit onthouden heeft één doel: dan heeft het geen zin om bij een geweigerde
+ * order een verse aan te maken, want die wordt net zo hard geweigerd. Zonder
+ * deze rem blijft er bij élke poging een leeg concept achter bij Mediatask.
+ * Kort houdbaar, zodat de app het vanzelf weer probeert zodra de rechten
+ * hersteld zijn.
+ */
+const SLEUTELWEIGERING_KEY = "mediatask:sleutelweigering";
+const SLEUTELWEIGERING_TTL = 60 * 60 * 6;
+
+export async function onthoudSleutelWeigering(): Promise<void> {
+  const redis = getOptionalRedis();
+  if (!redis) return;
+  await redis.set(SLEUTELWEIGERING_KEY, String(Date.now()), "EX", SLEUTELWEIGERING_TTL).catch(() => {});
+}
+
+export async function isSleutelGeweigerd(): Promise<boolean> {
+  const redis = getOptionalRedis();
+  if (!redis) return false;
+  return Boolean(await redis.get(SLEUTELWEIGERING_KEY).catch(() => null));
 }
 
 export async function onthoudGeweigerdeOrder(orderId: number): Promise<void> {

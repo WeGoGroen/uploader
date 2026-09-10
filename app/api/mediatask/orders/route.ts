@@ -4,9 +4,11 @@ import {
   createOrder,
   getOrder,
   isEigenOrder,
+  isSleutelGeweigerd,
   listOrders,
   onthoudEigenOrder,
   onthoudGeweigerdeOrder,
+  onthoudSleutelWeigering,
   submitOrder,
   vindBestaandeDraft,
   type MediataskOrder,
@@ -302,7 +304,12 @@ export async function POST(request: Request) {
     // de onze: die is met dezelfde weg aangemaakt, dus weigert hij ons, dan
     // ligt het niet aan het eigendom.
     const vanOns = zelfAangemaakt || (await isEigenOrder(order.id));
-    if (definitiefGeweigerd && !vanOns && kanNieuweOrderMaken) {
+    // Is eerder al gebleken dat Mediatask ook onze eigen verse orders weigert,
+    // dan is de oorzaak de sleutel en niet de order. Een verse order aanmaken
+    // helpt dan niet en laat alleen een leeg concept achter — bij elke poging
+    // opnieuw. Dus overslaan zolang die rem staat.
+    const sleutelGeweigerd = await isSleutelGeweigerd();
+    if (definitiefGeweigerd && !vanOns && !sleutelGeweigerd && kanNieuweOrderMaken) {
       const huidige = await getOrder(order.id).catch(() => null);
       if (String(huidige?.state ?? "").toLowerCase() === "draft") {
         // Nooit meer oppakken: anders vist vindBestaandeDraft dezelfde order
@@ -320,6 +327,21 @@ export async function POST(request: Request) {
         } catch (err) {
           console.error("Verse order aanmaken na een geweigerd concept mislukt", err);
         }
+      }
+    }
+
+    // Weigert Mediatask óók een order die we zojuist zelf hebben aangemaakt,
+    // dan gaat het niet over deze order maar over wat de sleutel mag. Dat
+    // vastleggen zet de rem hierboven aan, zodat een volgende poging geen leeg
+    // concept meer achterlaat voor een probleem dat daar niet zit.
+    if (levering.scansUit.some((x) => !x.ok && x.definitief) && (vanOns || verplaatstVan)) {
+      const nu = await getOrder(order.id).catch(() => null);
+      if (String(nu?.state ?? "").toLowerCase() === "draft") {
+        console.error(
+          `Mediatask weigert een puntenwolk op onze eigen verse order #${order.id}; ` +
+            `dit is een rechtenkwestie op de Mediatask-sleutel, niet iets in de order`
+        );
+        await onthoudSleutelWeigering();
       }
     }
 

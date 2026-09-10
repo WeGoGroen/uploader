@@ -35,8 +35,16 @@ vi.mock("@/lib/redis", () => ({
   requireRedis: () => redis.api,
 }));
 
-const { vindBestaandeDraft, onthoudGeweigerdeOrder, isGeweigerdeOrder, onthoudEigenOrder, isEigenOrder } =
-  await import("@/lib/mediatask");
+const {
+  vindBestaandeDraft,
+  onthoudGeweigerdeOrder,
+  isGeweigerdeOrder,
+  onthoudEigenOrder,
+  isEigenOrder,
+  weigeringUitleg,
+  onthoudSleutelWeigering,
+  isSleutelGeweigerd,
+} = await import("@/lib/mediatask");
 
 const BASIS = "https://mediatask.test";
 
@@ -48,6 +56,18 @@ function nepOrders(orders: unknown[]) {
       status: 200,
       text: async () => JSON.stringify(orders),
       json: async () => orders,
+    }))
+  );
+}
+
+function nepOrder(order: unknown) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(order),
+      json: async () => order,
     }))
   );
 }
@@ -117,5 +137,50 @@ describe("eigen orders", () => {
     // vervangen als hij ons weigert (dat zou alleen lege concepten opleveren),
     // eentje die we hergebruikten wél.
     expect(await isEigenOrder(378560)).toBe(false);
+  });
+});
+
+describe("weigeringUitleg", () => {
+  it("wijst bij een eigen, verse order naar de sleutel en niet naar de order", async () => {
+    // Dit is Kea Boumanstraat 74 (10 sep): een gloednieuw adres, dus geen
+    // concept van een ander om te hergebruiken — en tóch een 403. Dan gaat het
+    // over wat de sleutel mag, en is een nieuwe order aanmaken zinloos.
+    await onthoudEigenOrder(11);
+    nepOrder({ id: 11, state: "draft" });
+
+    const uitleg = await weigeringUitleg(11);
+
+    expect(uitleg?.vanOns).toBe(true);
+    expect(uitleg?.tekst).toContain("zelf hebben aangemaakt");
+    expect(uitleg?.tekst).toContain("Een nieuwe order lost dit niet op");
+  });
+
+  it("wijst bij een hergebruikt concept juist wél naar het eigendom", async () => {
+    nepOrder({ id: 12, state: "draft" });
+
+    const uitleg = await weigeringUitleg(12);
+
+    expect(uitleg?.vanOns).toBe(false);
+    expect(uitleg?.tekst).toContain("hergebruikt");
+  });
+
+  it("noemt de toestand als de order geen concept meer is", async () => {
+    nepOrder({ id: 13, state: "submitted" });
+
+    const uitleg = await weigeringUitleg(13);
+
+    expect(uitleg?.nogConcept).toBe(false);
+    expect(uitleg?.tekst).toContain('"submitted"');
+  });
+});
+
+describe("sleutelweigering", () => {
+  it("onthoudt dat de sleutel zelf geweigerd wordt", async () => {
+    expect(await isSleutelGeweigerd()).toBe(false);
+    await onthoudSleutelWeigering();
+    // Zolang deze rem staat maakt de orderroute geen vervangende order meer
+    // aan: die zou net zo hard geweigerd worden en alleen een leeg concept
+    // achterlaten bij Mediatask.
+    expect(await isSleutelGeweigerd()).toBe(true);
   });
 });
