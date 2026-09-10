@@ -864,7 +864,12 @@ export async function summarizeProjectFolders(
   accessToken: string,
   root: string
 ): Promise<{ folders: ProjectFolderSummary[]; volledig: boolean }> {
-  const MAX_PAGINAS = 20;
+  // 20 pagina's was genoeg toen de hoofdmap tientallen projecten telde; met
+  // het volledige archief erin (450+ projectmappen, elk met vaste indeling)
+  // werd de listing halverwege afgekapt — en een afgekapte scan zegt dan
+  // "deze map is leeg" over mappen die vol staan. De grens blijft bestaan als
+  // noodrem, maar ruim boven wat er werkelijk staat.
+  const MAX_PAGINAS = 200;
   const prefix = `${root.toLowerCase()}/`;
   // Sleutel is de map in kleine letters (paden komen zo terug), waarde de
   // weergavenaam plus de bestandsteller.
@@ -1228,7 +1233,12 @@ export async function detailProjectFolders(
   accessToken: string,
   root: string
 ): Promise<{ folders: ProjectMapDetail[]; volledig: boolean }> {
-  const MAX_PAGINAS = 20;
+  // 20 pagina's was genoeg toen de hoofdmap tientallen projecten telde; met
+  // het volledige archief erin (450+ projectmappen, elk met vaste indeling)
+  // werd de listing halverwege afgekapt — en een afgekapte scan zegt dan
+  // "deze map is leeg" over mappen die vol staan. De grens blijft bestaan als
+  // noodrem, maar ruim boven wat er werkelijk staat.
+  const MAX_PAGINAS = 200;
   const prefix = `${root.toLowerCase()}/`;
   const perMap = new Map<string, ProjectMapDetail>();
   let cursor: string | null = null;

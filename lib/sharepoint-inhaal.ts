@@ -51,7 +51,14 @@ export async function draaiInhaalronde(maxPerRonde = 8): Promise<InhaalUitkomst>
   // Alle eerste-niveau-submapnamen die al ergens in een projectmap staan.
   // detailProjectFolders geeft ze in kleine letters (path_lower).
   const dropboxToken = await getDropboxToken();
-  const { folders } = await detailProjectFolders(dropboxToken, "/Automatie Energielabels");
+  const { folders, volledig } = await detailProjectFolders(dropboxToken, "/Automatie Energielabels");
+  if (!volledig) {
+    // Een afgekapte scan zou hier "mist nog" zeggen over mappen die er
+    // allang staan, en die opnieuw gaan ophalen. Dan liever hard stoppen.
+    throw new Error(
+      "De Dropbox-listing van /Automatie Energielabels is niet compleet; de vergelijking zou onbetrouwbaar zijn."
+    );
+  }
   const aanwezig = new Set<string>();
   for (const p of folders) {
     for (const sub of Object.keys(p.perSubmap)) {
