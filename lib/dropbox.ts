@@ -180,6 +180,30 @@ export function projectFolderPath(
 
 // Vaste onderverdeling per opname — zelfde structuur als het sjabloon dat
 // WeGoGroen al gebruikte ("LEEG kopie"), nu automatisch per adres aangemaakt.
+/**
+ * De archiefmap binnen een hoofdmap: daar gaat afgerond werk heen, zodat
+ * "Automatie Energielabels" laat zien waar nog aan gewerkt wordt in plaats van
+ * een lijst van alles wat er ooit was.
+ *
+ * Voor de rest van de app mag dat geen verschil maken. Een projectmap die in
+ * het archief staat, moet nog steeds gevonden worden — anders maakt de uploader
+ * bij het volgende werk een tweede, lege map naast de bestaande en staan de
+ * foto's in de ene en het label in de andere.
+ */
+export const ARCHIEF_MAP = "Afgerond";
+const ARCHIEF_LOWER = ARCHIEF_MAP.toLowerCase();
+
+/**
+ * Splitst het pad ná de hoofdmap in "welke projectmap" en "wat daarbinnen".
+ * Een gearchiveerd project staat één niveau dieper; deze functie maakt dat
+ * verschil onzichtbaar voor de tellers hieronder.
+ */
+function projectDelen(delen: string[]): { sleutel: string; binnen: string[] } | null {
+  const zonderArchief = delen[0] === ARCHIEF_LOWER ? delen.slice(1) : delen;
+  if (!zonderArchief[0]) return null;
+  return { sleutel: zonderArchief[0], binnen: zonderArchief.slice(1) };
+}
+
 export const PROJECT_SUBFOLDERS = [
   "BAG",
   "DOT3D",
@@ -904,22 +928,24 @@ export async function summarizeProjectFolders(
     for (const entry of data.entries) {
       const p = entry.path_lower;
       if (!p || !p.startsWith(prefix)) continue;
-      const rest = p.slice(prefix.length);
-      const eerste = rest.split("/")[0];
-      if (!eerste) continue;
+      const project = projectDelen(p.slice(prefix.length).split("/"));
+      // De archiefmap zelf is geen project; die valt hier weg.
+      if (!project) continue;
 
       if (entry[".tag"] === "folder") {
-        // Alleen de mappen direct onder de hoofdmap zijn projectmappen; de
-        // submappen daarbinnen (BAG, LAZ, …) horen bij hun projectmap.
-        if (rest === eerste && !perMap.has(eerste)) {
-          perMap.set(eerste, { name: entry.name, files: 0 });
+        // Alleen de projectmap zelf telt; de submappen daarbinnen (BAG, LAZ, …)
+        // horen bij hun projectmap.
+        if (project.binnen.length === 0 && !perMap.has(project.sleutel)) {
+          perMap.set(project.sleutel, { name: entry.name, files: 0 });
         }
       } else if (entry[".tag"] === "file") {
-        const bestaand = perMap.get(eerste);
+        const bestaand = perMap.get(project.sleutel);
         if (bestaand) bestaand.files++;
         // Losse bestanden rechtstreeks in de hoofdmap horen bij geen enkele
         // projectmap; die slaan we over.
-        else if (rest !== eerste) perMap.set(eerste, { name: eerste, files: 1 });
+        else if (project.binnen.length > 0) {
+          perMap.set(project.sleutel, { name: project.sleutel, files: 1 });
+        }
       }
     }
 
@@ -1036,8 +1062,24 @@ export async function findProjectFolder(
 ): Promise<{ path: string; name: string } | null> {
   const canonical = projectFolderPath(kind, woonplaats, straatEnNummer);
   const root = canonical.slice(0, canonical.lastIndexOf("/"));
-  const gezocht = canonical.slice(canonical.lastIndexOf("/") + 1).toLowerCase();
-  const gezochtAdres = parseProjectFolderName(canonical.slice(canonical.lastIndexOf("/") + 1));
+  const naam = canonical.slice(canonical.lastIndexOf("/") + 1);
+
+  // Eerst waar het werk staat, dan het archief. In die volgorde, want een
+  // lopende opname hoort zwaarder te wegen dan een afgeronde met dezelfde naam.
+  return (
+    (await zoekInEenMap(accessToken, root, naam)) ??
+    (await zoekInEenMap(accessToken, `${root}/${ARCHIEF_MAP}`, naam))
+  );
+}
+
+/** Eén map afzoeken op een projectmap die bij dit adres hoort. */
+async function zoekInEenMap(
+  accessToken: string,
+  map: string,
+  naam: string
+): Promise<{ path: string; name: string } | null> {
+  const gezocht = naam.toLowerCase();
+  const gezochtAdres = parseProjectFolderName(naam);
 
   let cursor: string | null = null;
   for (;;) {
@@ -1049,11 +1091,12 @@ export async function findProjectFolder(
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(cursor ? { cursor } : { path: root, recursive: false }),
+        body: JSON.stringify(cursor ? { cursor } : { path: map, recursive: false }),
       }
     );
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+      // Geen archiefmap is de normale toestand zolang er niets gearchiveerd is.
       if (res.status === 409 && body.includes("path/not_found")) return null;
       throw new DropboxApiError(res.status, `Dropbox list_folder failed: ${res.status} ${body}`);
     }
@@ -1072,10 +1115,10 @@ export async function findProjectFolder(
       // die tweede kans ontstaat er een tweede map voor hetzelfde huis, met de
       // foto's in de ene en het label in de andere.
       if (kaleNaam.toLowerCase() === gezocht) {
-        return { path: entry.path_display ?? `${root}/${entry.name}`, name: entry.name };
+        return { path: entry.path_display ?? `${map}/${entry.name}`, name: entry.name };
       }
       if (gezochtAdres && mapnaamPastBijAdres(kaleNaam, gezochtAdres)) {
-        return { path: entry.path_display ?? `${root}/${entry.name}`, name: entry.name };
+        return { path: entry.path_display ?? `${map}/${entry.name}`, name: entry.name };
       }
     }
     if (!data.has_more) return null;
@@ -1271,14 +1314,14 @@ export async function detailProjectFolders(
     for (const entry of data.entries) {
       const lower = entry.path_lower ?? "";
       if (!lower.startsWith(prefix)) continue;
-      const rest = lower.slice(prefix.length).split("/");
-      const projectSleutel = rest[0];
-      if (!projectSleutel) continue;
+      const delen = projectDelen(lower.slice(prefix.length).split("/"));
+      if (!delen) continue;
+      const projectSleutel = delen.sleutel;
 
       if (!perMap.has(projectSleutel)) {
         const weergave = (entry.path_display ?? entry.name).split("/").filter(Boolean);
         perMap.set(projectSleutel, {
-          name: weergave[weergave.length - rest.length] ?? projectSleutel,
+          name: weergave[weergave.length - delen.binnen.length - 1] ?? projectSleutel,
           files: 0,
           perSubmap: {},
         });
@@ -1287,8 +1330,8 @@ export async function detailProjectFolders(
 
       if (entry[".tag"] !== "file") continue;
       project.files++;
-      // rest = [project, ...submappen, bestandsnaam]; de eerste submap telt.
-      const submap = rest.length > 2 ? rest[1] : "";
+      // binnen = [...submappen, bestandsnaam]; de eerste submap telt.
+      const submap = delen.binnen.length > 1 ? delen.binnen[0] : "";
       project.perSubmap[submap] = (project.perSubmap[submap] ?? 0) + 1;
     }
 
@@ -1317,4 +1360,140 @@ export async function verplaats(accessToken: string, van: string, naar: string):
   if (res.ok) return;
   const body = await res.text().catch(() => "");
   throw new DropboxApiError(res.status, `Dropbox files/move_v2 failed: ${res.status} ${body}`);
+}
+
+export interface ArchiveerUitkomst {
+  archief: string;
+  verplaatst: string[];
+  overgeslagen: { pad: string; reden: string }[];
+  mislukt: { pad: string; reden: string }[];
+}
+
+/**
+ * Zet afgeronde projectmappen in de archiefmap onder dezelfde hoofdmap.
+ *
+ * Waarom dit bestaat: "Automatie Energielabels" hoort te laten zien waar nog
+ * aan gewerkt wordt. Met een paar honderd afgeronde adressen ertussen is dat
+ * niet meer te lezen, en dan gaat iemand handmatig slepen — precies de rommel
+ * die de automatisering moest voorkomen.
+ *
+ * Verplaatsen is veilig voor de deel-links in ClickUp: Dropbox hangt zo'n link
+ * aan de map zelf en niet aan het pad. En de app blijft de map vinden, want
+ * findProjectFolder kijkt ook in het archief.
+ *
+ * Alleen mappen die er echt staan, direct onder de hoofdmap. Een pad uit een
+ * verouderde kopie van de mappenlijst wordt overgeslagen en niet gegokt.
+ */
+export async function archiveerProjectmappen(
+  accessToken: string,
+  root: string,
+  paden: string[],
+  opties: { droog?: boolean } = {}
+): Promise<ArchiveerUitkomst> {
+  const archief = `${root}/${ARCHIEF_MAP}`;
+  const overgeslagen: { pad: string; reden: string }[] = [];
+  const mislukt: { pad: string; reden: string }[] = [];
+
+  // De echte mappen ophalen: de naam in Dropbox is leidend, niet het pad dat de
+  // aanroeper meestuurt. Scheelt gedoe met hoofdletters en oude statusbolletjes.
+  const bestaand = new Map<string, string>();
+  let cursor: string | null = null;
+  for (;;) {
+    const res: Response = await fetch(
+      `${DROPBOX_API_BASE}/files/list_folder${cursor ? "/continue" : ""}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify(cursor ? { cursor } : { path: root, recursive: false }),
+      }
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new DropboxApiError(res.status, `Dropbox list_folder failed: ${res.status} ${body}`);
+    }
+    const data = (await res.json()) as {
+      entries: { ".tag": string; name: string; path_display?: string; path_lower?: string }[];
+      cursor: string;
+      has_more: boolean;
+    };
+    for (const entry of data.entries) {
+      if (entry[".tag"] !== "folder") continue;
+      if (entry.name.toLowerCase() === ARCHIEF_MAP.toLowerCase()) continue;
+      bestaand.set(
+        (entry.path_lower ?? `${root}/${entry.name}`.toLowerCase()),
+        entry.path_display ?? `${root}/${entry.name}`
+      );
+    }
+    if (!data.has_more) break;
+    cursor = data.cursor;
+  }
+
+  const teVerplaatsen: { van: string; naar: string }[] = [];
+  for (const pad of paden) {
+    const echt = bestaand.get(pad.toLowerCase());
+    if (!echt) {
+      overgeslagen.push({ pad, reden: "staat niet (meer) direct onder de hoofdmap" });
+      continue;
+    }
+    const naam = echt.slice(echt.lastIndexOf("/") + 1);
+    teVerplaatsen.push({ van: echt, naar: `${archief}/${naam}` });
+  }
+
+  if (opties.droog || teVerplaatsen.length === 0) {
+    return { archief, verplaatst: teVerplaatsen.map((t) => t.van), overgeslagen, mislukt };
+  }
+
+  await createFolder(accessToken, archief);
+
+  /* In batches naar Dropbox: honderd losse move-aanroepen lopen tegen
+     "too_many_write_operations" aan, en dan is de helft verplaatst. */
+  const verplaatst: string[] = [];
+  const GROOTTE = 100;
+  for (let i = 0; i < teVerplaatsen.length; i += GROOTTE) {
+    const groep = teVerplaatsen.slice(i, i + GROOTTE);
+    const start = await fetch(`${DROPBOX_API_BASE}/files/move_batch_v2`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entries: groep.map((t) => ({ from_path: t.van, to_path: t.naar })),
+        autorename: false,
+      }),
+    });
+    if (!start.ok) {
+      const body = await start.text().catch(() => "");
+      throw new DropboxApiError(start.status, `Dropbox move_batch_v2 failed: ${start.status} ${body}`);
+    }
+
+    let uitkomst = (await start.json()) as {
+      ".tag": string;
+      async_job_id?: string;
+      entries?: { ".tag": string; failure?: unknown }[];
+    };
+
+    // Dropbox doet dit asynchroon zodra het er meer dan een handvol zijn.
+    for (let poging = 0; uitkomst[".tag"] === "async_job_id" && poging < 120; poging++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const check = await fetch(`${DROPBOX_API_BASE}/files/move_batch/check_v2`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ async_job_id: uitkomst.async_job_id }),
+      });
+      if (!check.ok) {
+        const body = await check.text().catch(() => "");
+        throw new DropboxApiError(check.status, `Dropbox move_batch/check_v2 failed: ${check.status} ${body}`);
+      }
+      uitkomst = (await check.json()) as typeof uitkomst;
+    }
+
+    if (uitkomst[".tag"] !== "complete" || !uitkomst.entries) {
+      throw new DropboxApiError(0, `Dropbox verplaatste de mappen niet af (${uitkomst[".tag"]})`);
+    }
+
+    uitkomst.entries.forEach((regel, k) => {
+      if (regel[".tag"] === "success") verplaatst.push(groep[k].van);
+      else mislukt.push({ pad: groep[k].van, reden: JSON.stringify(regel.failure ?? regel).slice(0, 200) });
+    });
+  }
+
+  return { archief, verplaatst, overgeslagen, mislukt };
 }
