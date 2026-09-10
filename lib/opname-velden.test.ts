@@ -78,7 +78,7 @@ describe("bouwGroepen", () => {
 });
 
 describe("bijlagenUitVelden", () => {
-  it("pakt de middelste miniatuur en onthoudt onder welk veld de foto hing", () => {
+  it("pakt de grote miniatuur en onthoudt onder welk veld de foto hing", () => {
     const bijlagen = bijlagenUitVelden([
       {
         name: "D2 Foto's Buitengevels",
@@ -95,12 +95,14 @@ describe("bijlagenUitVelden", () => {
       },
     ]);
 
+    // De grote is 900x1200 en de middelste 225x300: alleen op de grote is een
+    // typeplaatje te lezen als je in de PDF inzoomt.
     expect(bijlagen).toHaveLength(1);
     expect(bijlagen[0]).toMatchObject({
       code: "D2",
       label: "Foto's Buitengevels",
       naam: "gevel-01.jpg",
-      miniatuurUrl: "https://voorbeeld/gevel-01_medium.jpg",
+      miniatuurUrl: "https://voorbeeld/gevel-01_large.jpg",
     });
   });
 
