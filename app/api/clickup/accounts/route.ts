@@ -76,11 +76,17 @@ export async function POST(request: Request) {
     }
     try {
       const existing = (await getClickUpAccounts()).find((a) => a.name === name);
+      // De rechten moeten hier expliciet mee: addClickUpAccount schrijft het
+      // hele account weg, dus wat je niet meegeeft is weg. En een account
+      // zónder rechten-sleutel mag volgens rechtenVan() álles — een token
+      // bijwerken gaf iemand zo stilzwijgend elke uploadsoort terug die de
+      // beheerder net had uitgezet.
       await addClickUpAccount({
         name,
         token,
         avatar: existing?.avatar,
         email: body.email?.trim() || existing?.email,
+        rechten: existing?.rechten,
       });
     } catch (err) {
       return NextResponse.json(
