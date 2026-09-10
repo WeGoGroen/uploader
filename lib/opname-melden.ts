@@ -18,6 +18,14 @@ export interface OpnameMelding {
   postcode: string;
   woonplaats: string;
   accountName: string | null;
+  /**
+   * Wat er in het formulier gekozen is, zodat je het terugvindt.
+   *
+   * Een NEN-opname bewaarde alleen het adres. Kwam je terug op een opname die
+   * je halverwege had laten liggen, dan stond de makelaar weer op leeg en moest
+   * je alles opnieuw kiezen - terwijl de app hem allang had.
+   */
+  state?: Record<string, unknown>;
 }
 
 async function schrijf(melding: OpnameMelding, status: "concept" | "uploaded"): Promise<void> {

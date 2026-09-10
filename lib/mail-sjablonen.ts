@@ -154,7 +154,8 @@ export function bccUitnodiging(input: { naam: string; code: string; beheerder?: 
 /** De welkomstmail voor iemand die toegang krijgt tot de opname-app. */
 export function uploaderUitnodiging(input: {
   naam: string;
-  appWachtwoord: string;
+  /** De startcode waarmee dit account begint; die vervangt hij daarna zelf. */
+  startcode: string;
   rechten: { energielabel: boolean; nen: boolean; media: boolean };
 }): { onderwerp: string; html: string } {
   const soorten = [
@@ -173,15 +174,16 @@ export function uploaderUitnodiging(input: {
     inhoud: `
       <p style="margin:0 0 14px;">
         Je kunt nu in de WeGoGroen-opnameapp terecht voor <strong>${soortenTekst}</strong>.
-        Iedereen gebruikt dezelfde toegangscode voor de app zelf; wat je
-        onder je eigen naam uploadt, komt automatisch op de juiste opdracht.
+        Je logt in met je eigen naam en de code hieronder &mdash; kies je naam in
+        het lijstje en vul de vier cijfers in. Wijzig die code daarna zelf onder
+        <strong>Gebruikers</strong>: dit is de startcode die iedereen krijgt.
       </p>
       <p style="margin:0;">
         Voor energielabels heb je daarnaast eenmalig je eigen ClickUp-token
-        nodig &mdash; die plak je zelf onder <strong>Gebruikers</strong> in de app,
-        zodat taken op jouw naam komen te staan.
+        nodig &mdash; die plak je op diezelfde plek, zodat taken op jouw naam
+        komen te staan.
       </p>`,
-    vak: codeVak("Toegangscode voor de app", input.appWachtwoord),
+    vak: codeVak("Je startcode", input.startcode),
     knop: knop("Openen in de opnameapp", `${UPLOADER_URL}/gebruikers`),
     voettekst: "Vragen over je toegang? Neem contact op met wie je uitgenodigd heeft.",
   });

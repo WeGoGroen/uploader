@@ -11,6 +11,8 @@ interface Account {
 interface AccountsResponse {
   accounts: Account[];
   active: string | null;
+  /** Alleen een beheerder krijgt de hele lijst; een medewerker alleen zichzelf. */
+  beheerder?: boolean;
 }
 
 function initials(name: string): string {
@@ -32,9 +34,128 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+/**
+ * Je eigen inlogcode wijzigen.
+ *
+ * Iedereen begint op 0000 — die staat in de uitnodigingsmail en is dus geen
+ * geheim. Zolang je hem niet vervangt, kan iedereen die de mail gezien heeft
+ * onder jouw naam inloggen; vandaar dat de app erop blijft wijzen tot het
+ * gebeurd is.
+ */
+function MijnCode() {
+  const [wie, setWie] = useState<{ naam: string; codeGewijzigd: boolean } | null>(null);
+  const [huidig, setHuidig] = useState("");
+  const [nieuw, setNieuw] = useState("");
+  const [nogmaals, setNogmaals] = useState("");
+  const [bezig, setBezig] = useState(false);
+  const [melding, setMelding] = useState<{ ok: boolean; tekst: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/wie", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { ingelogd?: boolean; naam?: string; codeGewijzigd?: boolean }) => {
+        if (d.ingelogd && d.naam) setWie({ naam: d.naam, codeGewijzigd: Boolean(d.codeGewijzigd) });
+      })
+      .catch(() => {});
+  }, []);
+
+  async function opslaan(e: React.FormEvent) {
+    e.preventDefault();
+    setMelding(null);
+    if (nieuw !== nogmaals) {
+      setMelding({ ok: false, tekst: "De twee nieuwe codes zijn niet gelijk." });
+      return;
+    }
+    setBezig(true);
+    try {
+      const res = await fetch("/api/auth/code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ huidig, nieuw }),
+      });
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (!res.ok) throw new Error(body?.error ?? "Wijzigen mislukt.");
+      setMelding({ ok: true, tekst: "Je code is gewijzigd." });
+      setHuidig("");
+      setNieuw("");
+      setNogmaals("");
+      setWie((w) => (w ? { ...w, codeGewijzigd: true } : w));
+    } catch (err) {
+      setMelding({ ok: false, tekst: err instanceof Error ? err.message : "Wijzigen mislukt." });
+    } finally {
+      setBezig(false);
+    }
+  }
+
+  if (!wie) return null;
+
+  return (
+    <div className="section">
+      <div className="section-head">
+        <h2>Mijn inlogcode</h2>
+      </div>
+      <p className="note" style={{ padding: 0, marginBottom: 12 }}>
+        Je logt in als <strong>{wie.naam}</strong> met vier cijfers.
+      </p>
+      {!wie.codeGewijzigd && (
+        <p className="conn-err" style={{ marginBottom: 12 }}>
+          Je gebruikt nog de startcode 0000. Die staat in je uitnodigingsmail en kent iedereen —
+          kies nu je eigen code.
+        </p>
+      )}
+      <form onSubmit={opslaan} style={{ display: "grid", gap: 12, maxWidth: 520 }}>
+        <div className="field is-wide">
+          <label htmlFor="huidig">Huidige code</label>
+          <input
+            id="huidig"
+            className="control"
+            inputMode="numeric"
+            maxLength={4}
+            value={huidig}
+            onChange={(e) => setHuidig(e.target.value.replace(/\D/g, ""))}
+          />
+        </div>
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}>
+          <div className="field is-wide">
+            <label htmlFor="nieuw">Nieuwe code</label>
+            <input
+              id="nieuw"
+              className="control"
+              inputMode="numeric"
+              maxLength={4}
+              value={nieuw}
+              onChange={(e) => setNieuw(e.target.value.replace(/\D/g, ""))}
+            />
+          </div>
+          <div className="field is-wide">
+            <label htmlFor="nogmaals">Nogmaals</label>
+            <input
+              id="nogmaals"
+              className="control"
+              inputMode="numeric"
+              maxLength={4}
+              value={nogmaals}
+              onChange={(e) => setNogmaals(e.target.value.replace(/\D/g, ""))}
+            />
+          </div>
+        </div>
+        <div>
+          <button className="btn btn-primary" disabled={bezig || huidig.length !== 4 || nieuw.length !== 4}>
+            {bezig ? "Bezig…" : "Code wijzigen"}
+          </button>
+        </div>
+        {melding && (
+          <p className={melding.ok ? "note" : "conn-err"} style={{ padding: 0 }}>
+            {melding.tekst}
+          </p>
+        )}
+      </form>
+    </div>
+  );
+}
+
 export default function Gebruikers() {
   const [accounts, setAccounts] = useState<AccountsResponse | null>(null);
-  const [switching, setSwitching] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   // Mailadres per gebruiker: hier bijgehouden en niet uit ClickUp gehaald,
@@ -49,12 +170,6 @@ export default function Gebruikers() {
   const [tokenBusy, setTokenBusy] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
 
-  const [name, setName] = useState("");
-  const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
   const load = useCallback(() => {
     fetch("/api/clickup/accounts", { cache: "no-store" })
       .then((res) => res.json())
@@ -63,21 +178,6 @@ export default function Gebruikers() {
   }, []);
 
   useEffect(load, [load]);
-
-  async function switchAccount(accountName: string) {
-    if (switching || accountName === accounts?.active) return;
-    setSwitching(accountName);
-    try {
-      await fetch("/api/clickup/accounts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: accountName }),
-      });
-      load();
-    } finally {
-      setSwitching(null);
-    }
-  }
 
   async function uploadAvatar(accountName: string, file: File) {
     setAvatarError(null);
@@ -160,35 +260,6 @@ export default function Gebruikers() {
     }
   }
 
-  async function submit() {
-    if (!name.trim() || !token.trim()) return;
-    setBusy(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const res = await fetch("/api/clickup/accounts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), token: token.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(
-          data?.error === "invalid_token"
-            ? "Dit token wordt geweigerd door ClickUp. Controleer of je 'm goed hebt gekopieerd."
-            : "Toevoegen is mislukt. Probeer het opnieuw."
-        );
-        return;
-      }
-      setSuccess(`${name.trim()} is toegevoegd en is nu het actieve account op dit apparaat.`);
-      setName("");
-      setToken("");
-      load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <>
       <header className="topline">
@@ -207,6 +278,11 @@ export default function Gebruikers() {
           .
         </p>
 
+        <MijnCode />
+
+        {/* Het team inzien is beheerderswerk. Een opnemer heeft hier alleen
+            zijn eigen code en token te zoeken. */}
+        {accounts?.beheerder && (
         <div className="section">
           <div className="section-head">
             <h2>Bestaande gebruikers</h2>
@@ -268,15 +344,6 @@ export default function Gebruikers() {
                     </div>
 
                     <div className="user-card-actions">
-                        {!isActive && (
-                          <button
-                            className="btn btn-quiet"
-                            disabled={switching === a.name}
-                            onClick={() => switchAccount(a.name)}
-                          >
-                            {switching === a.name ? "Bezig…" : "Wissel naar dit account"}
-                          </button>
-                        )}
                         <button
                           className="btn btn-quiet"
                           onClick={() => (editingToken === a.name ? setEditingToken(null) : startEditingToken(a.name))}
@@ -342,64 +409,8 @@ export default function Gebruikers() {
             </div>
           )}
         </div>
+        )}
 
-        <div className="conn user-add-card">
-          <div className="conn-top">
-            <div className="conn-heading">
-              <span className="conn-icon" style={{ background: "rgba(74, 222, 128, 0.14)", color: "#1c7a41" }}>
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle cx="9" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.8" />
-                  <path d="M3 19c1-3.4 3.4-5.2 6-5.2s5 1.8 6 5.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                  <path d="M18 8v5M15.5 10.5h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                </svg>
-              </span>
-              <div>
-                <div className="conn-name">Nieuwe gebruiker toevoegen</div>
-                <p className="conn-role" style={{ margin: "2px 0 0" }}>
-                  Elk teamlid krijgt een eigen ClickUp-token, zodat taken op de juiste naam komen te staan.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="section-body is-single-wide" style={{ padding: 0, marginTop: 4 }}>
-            <div className="addr-edit-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div className="field">
-                <label htmlFor="g-name">Naam</label>
-                <input
-                  id="g-name"
-                  className="control"
-                  placeholder="Bijv. Yannick"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="g-token">ClickUp API-token</label>
-                <input
-                  id="g-token"
-                  className="control"
-                  placeholder="pk_..."
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                />
-              </div>
-            </div>
-            <p className="conn-hint">
-              Aanmaken via ClickUp → avatar rechtsboven → Settings → Apps → API Token.
-              Het token wordt bij het opslaan direct gecontroleerd bij ClickUp.
-            </p>
-            {error && <p className="conn-err">{error}</p>}
-            {success && <p className="note" style={{ color: "var(--accent-text)", padding: 0 }}>{success}</p>}
-            <button
-              className="btn btn-primary"
-              disabled={busy || !name.trim() || !token.trim()}
-              onClick={submit}
-            >
-              {busy ? "Bezig met controleren…" : "Gebruiker toevoegen"}
-            </button>
-          </div>
-        </div>
       </div>
     </>
   );

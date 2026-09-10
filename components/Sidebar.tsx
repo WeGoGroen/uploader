@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { getServerSnapshot, getSnapshot, subscribe } from "@/lib/upload-queue";
 
@@ -9,6 +9,8 @@ interface ConnectionStatus {
   ok: boolean;
   label: string | null;
   error: string | null;
+  /** Bewust uitgezet in de instellingen; geen storing. */
+  uit?: boolean;
 }
 
 interface StatusResponse {
@@ -50,6 +52,19 @@ const INLOG_ROUTE: Record<string, string> = {
 
 function SvcRow({ name, status }: { name: string; status: ConnectionStatus }) {
   const isOk = status.connected && status.ok;
+
+  /*
+    Uitgezet ziet er anders uit dan kapot.
+
+    Een koppeling die je bewust niet gebruikt hoort geen rode driehoek met
+    "HERSTELLEN" te krijgen — dan staat de statuslijst permanent te roepen om
+    iets dat niemand gaat repareren, en kijkt niemand er meer naar. Een gedoofd
+    streepje zegt genoeg: hij doet niets, en dat klopt zo.
+  */
+  // Uitgezet betekent: hoort hier niet meer te staan. Een gedoofde regel is
+  // nog steeds een regel die je elke keer leest en wegdenkt.
+  if (status.uit) return null;
+
   // Een verbroken koppeling is geen detail maar werk dat stilligt, dus krijgt
   // hij een tag die je niet kunt missen — en die meteen naar de juiste plek
   // gaat in plaats van naar een instellingenpagina waar je zelf moet zoeken.
@@ -127,9 +142,14 @@ function NavUpload({
   );
 }
 
-export default function Sidebar() {
+export default function Sidebar({
+  rechten,
+}: {
+  /** Wat deze persoon mag uploaden. Komt server-side mee uit de layout, zodat
+      een knop die je niet mag er nooit staat - ook niet even. */
+  rechten: { energielabel: boolean; nen: boolean; media: boolean };
+}) {
   const pathname = usePathname();
-  const router = useRouter();
   const [accountName, setAccountName] = useState<string | null>(null);
   const [svc, setSvc] = useState<StatusResponse | null>(null);
   const [accounts, setAccounts] = useState<AccountsResponse | null>(null);
@@ -151,9 +171,17 @@ export default function Sidebar() {
     accounts?.accounts?.find((a) => a.name === (accountName ?? accounts.active))?.avatar ?? null;
 
   function loadAll() {
-    fetch("/api/clickup/list-meta", { cache: "no-store" })
+    /*
+      Wie er onderaan staat, komt uit de sessie en niet uit ClickUp.
+
+      Het stond hier op de ClickUp-gebruikersnaam, en die is er alleen als
+      iemand een persoonlijk token heeft geplakt. Jelle doet geen energielabels
+      en heeft dus geen token — bij hem bleef er daardoor "Laden…" staan, voor
+      altijd. De naam waaronder je werkt weet de app nu gewoon zelf.
+    */
+    fetch("/api/auth/wie", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setAccountName(data?.account?.username ?? null))
+      .then((data) => setAccountName(data?.naam ?? null))
       .catch(() => {});
 
     // res.ok checken is hier geen franje: bij een 401 (uitgelogd) komt er
@@ -179,6 +207,21 @@ export default function Sidebar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onLoginPage]);
 
+  /*
+    Meteen bijwerken als er in de instellingen een koppeling omgaat.
+
+    Deze lijst werd alleen bij het openen van een pagina geladen. Zette je
+    ClickUp uit, dan bleef hier "ClickUp LIVE" staan tot je toevallig ergens
+    heen navigeerde - en dan lijkt de schakelaar in de instellingen kapot,
+    terwijl hij zijn werk allang gedaan had.
+  */
+  useEffect(() => {
+    const bij = () => loadAll();
+    window.addEventListener("koppelingen-gewijzigd", bij);
+    return () => window.removeEventListener("koppelingen-gewijzigd", bij);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!menuOpen) return;
     const close = (e: MouseEvent) => {
@@ -189,21 +232,21 @@ export default function Sidebar() {
     return () => document.removeEventListener("click", close);
   }, [menuOpen]);
 
-  async function switchAccount(name: string) {
-    if (switching || name === accounts?.active) {
-      setMenuOpen(false);
-      return;
-    }
+  /**
+   * Uitloggen in plaats van wisselen.
+   *
+   * Van gebruiker wisselen was één klik in dit menu — geen code, geen
+   * bevestiging. Nu hoort de naam bij de inlog, dus wisselen betekent: sessie
+   * weg, en op het inlogscherm je eigen code invullen.
+   */
+  async function uitloggen() {
+    if (switching) return;
     setSwitching(true);
     try {
-      await fetch("/api/clickup/accounts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      setMenuOpen(false);
-      loadAll();
-      router.refresh();
+      await fetch("/api/auth/uitloggen", { method: "POST" });
+      // Harde navigatie: de middleware moet de lege cookie meteen zien,
+      // anders komt de volgende pagina nog uit de cache van de oude sessie.
+      window.location.href = "/login";
     } finally {
       setSwitching(false);
     }
@@ -234,26 +277,31 @@ export default function Sidebar() {
             bestaat, en als vierde en vijfde regel in een rij gelijkvormige
             links waren ze niet te onderscheiden van navigatie. */}
         <span className="nav-groep">Uploaden</span>
-        <NavUpload
-          href="/energielabel"
-          label="Energielabel"
-          actief={pathname === "/energielabel"}
-          bezig={bezigEnergie}
-        />
-        <NavUpload
-          href="/nen"
-          label="NEN2580"
-          actief={pathname === "/nen"}
-          bezig={bezigNen}
-          tag={{ woord: "bèta", soort: "beta" }}
-        />
-        <NavUpload
-          href="/media"
-          label="Media"
-          actief={pathname.startsWith("/media")}
-          bezig={bezigMedia}
-          tag={{ woord: "binnenkort", soort: "binnenkort" }}
-        />
+        {rechten.energielabel && (
+          <NavUpload
+            href="/energielabel"
+            label="Energielabel"
+            actief={pathname === "/energielabel"}
+            bezig={bezigEnergie}
+          />
+        )}
+        {rechten.nen && (
+          <NavUpload
+            href="/nen"
+            label="NEN2580"
+            actief={pathname === "/nen"}
+            bezig={bezigNen}
+          />
+        )}
+        {rechten.media && (
+          <NavUpload
+            href="/media"
+            label="Media"
+            actief={pathname.startsWith("/media")}
+            bezig={bezigMedia}
+            tag={{ woord: "binnenkort", soort: "binnenkort" }}
+          />
+        )}
       </nav>
 
       <div className="side-block is-compact" style={{ marginTop: "auto" }}>
@@ -324,31 +372,22 @@ export default function Sidebar() {
           </span>
           <span className="user-id">
             <b>{accountName ?? "Laden…"}</b>
-            <span>ClickUp-account</span>
+            <span>ingelogd</span>
           </span>
           <svg className="user-chev" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
 
-        {menuOpen && accounts && (
+        {menuOpen && (
           <div className="user-menu" role="menu">
-            <span className="user-menu-label">Wissel van gebruiker</span>
-            {accounts.accounts.map((a) => (
-              <button
-                key={a.name}
-                type="button"
-                className="user-menu-item"
-                onClick={() => switchAccount(a.name)}
-              >
-                {a.name}
-                {a.name === accounts.active && <span className="tick">✓</span>}
-              </button>
-            ))}
-            <div className="user-menu-sep" />
             <a href="/gebruikers" className="user-menu-item" onClick={() => setMenuOpen(false)}>
-              <span className="user-menu-plus">+</span> Gebruiker toevoegen
+              Mijn gegevens en code
             </a>
+            <div className="user-menu-sep" />
+            <button type="button" className="user-menu-item" onClick={uitloggen} disabled={switching}>
+              {switching ? "Bezig…" : "Uitloggen"}
+            </button>
           </div>
         )}
       </div>

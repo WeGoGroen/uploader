@@ -101,6 +101,34 @@ export interface ClickUpAccount {
    * dan is er via ClickUp geen adres te vinden.
    */
   email?: string;
+  /** Beheerders mogen accounts en koppelingen beheren. Afwezig = medewerker. */
+  rol?: "medewerker" | "beheerder";
+  /**
+   * De persoonlijke inlogcode, gehasht. Afwezig betekent: nog de startcode
+   * 0000 — zo hoeft er niets gemigreerd te worden en kan iedereen meteen naar
+   * binnen op de code die hij toch al kreeg.
+   */
+  codeHash?: string;
+  codeSalt?: string;
+  /**
+   * De code zoals een beheerder hem laatst zelf zette, leesbaar.
+   *
+   * Staat leeg zodra de eigenaar hem zelf verandert: vanaf dat moment kent
+   * niemand hem meer behalve hijzelf, want verder ligt de code alleen gehasht
+   * vast. Dit is precies de afweging die het Business Control Center ook maakt
+   * - een beheerder moet een nieuwe collega op weg kunnen helpen zonder dat
+   * iedereen elkaars zelfgekozen code kan meelezen.
+   */
+  codeKlaar?: string;
+  /**
+   * Persoonlijke Mediatask-API-sleutel.
+   *
+   * Mediatask bepaalt de eigenaar van een order aan de hand van de sleutel
+   * waarmee hij is aangemaakt. Met één gedeelde sleutel komt dus al het werk
+   * op naam van één persoon te staan, ook al heeft iedere opnemer daar een
+   * eigen account. Zelfde opzet als het ClickUp-token hierboven.
+   */
+  mediataskToken?: string;
 }
 
 const EXTRA_ACCOUNTS_KEY = "clickup:accounts:extra";
@@ -130,10 +158,23 @@ function envAccounts(): ClickUpAccount[] {
 async function extraAccounts(): Promise<ClickUpAccount[]> {
   const redis = getOptionalRedis();
   if (!redis) return [];
-  const raw = await redis.get(EXTRA_ACCOUNTS_KEY);
-  if (!raw) return [];
-  const parsed = JSON.parse(raw) as ClickUpAccount[];
-  return Array.isArray(parsed) ? parsed : [];
+  /*
+    Een hapering hier mag niemand buitensluiten.
+
+    Sinds iedereen met zijn eigen naam inlogt, is deze lijst het inlogscherm:
+    gooit hij, dan is er geen enkel account om uit te kiezen en komt niemand de
+    app meer in — ook de eigenaar niet. Bij een storing valt de app daarom
+    terug op wat er in de omgeving staat (CLICKUP_ACCOUNTS/CLICKUP_TOKEN), en
+    meldt de ochtendcontrole dat er accounts missen.
+  */
+  try {
+    const raw = await redis.get(EXTRA_ACCOUNTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as ClickUpAccount[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -178,6 +219,26 @@ export async function addClickUpAccount(account: ClickUpAccount): Promise<void> 
 }
 
 /**
+ * Haalt een account weg uit Redis.
+ *
+ * Geeft false terug als het account alleen uit de omgeving komt: dat staat in
+ * CLICKUP_ACCOUNTS of CLICKUP_TOKEN op de server en komt bij de volgende
+ * aanroep gewoon weer terug. Stil "ok" antwoorden zou betekenen dat het scherm
+ * zegt dat iemand weg is terwijl hij morgen weer in de lijst staat.
+ */
+export async function verwijderAccount(naam: string): Promise<boolean> {
+  const redis = requireRedis();
+  const huidig = await extraAccounts();
+  const over = huidig.filter((a) => a.name !== naam);
+  if (over.length !== huidig.length) {
+    await redis.set(EXTRA_ACCOUNTS_KEY, JSON.stringify(over));
+  }
+  // Ook als hij niet in Redis stond kan hij uit de omgeving komen; dan is er
+  // niets verwijderd en hoort de beller dat te weten.
+  return !envAccounts().some((a) => a.name === naam);
+}
+
+/**
  * Werkt een deel van een account bij (bv. alleen de avatar, of alleen het
  * token) zonder de rest te verliezen. Een account dat alleen via
  * CLICKUP_ACCOUNTS bestaat, krijgt zo een Redis-override met dezelfde naam —
@@ -189,6 +250,12 @@ export async function patchClickUpAccount(patch: {
   avatar?: string | null;
   email?: string | null;
   rechten?: Partial<UploadRechten>;
+  rol?: "medewerker" | "beheerder";
+  codeHash?: string;
+  codeSalt?: string;
+  /** Leesbare kopie; null wist hem (de eigenaar koos zelf een code). */
+  codeKlaar?: string | null;
+  mediataskToken?: string;
 }): Promise<void> {
   const current = await getClickUpAccounts();
   const existing = current.find((a) => a.name === patch.name);
@@ -203,6 +270,11 @@ export async function patchClickUpAccount(patch: {
     avatar: patch.avatar === null ? undefined : patch.avatar ?? existing?.avatar,
     email: patch.email === null ? undefined : patch.email ?? existing?.email,
     rechten: patch.rechten ?? existing?.rechten,
+    rol: patch.rol ?? existing?.rol,
+    codeHash: patch.codeHash ?? existing?.codeHash,
+    codeSalt: patch.codeSalt ?? existing?.codeSalt,
+    codeKlaar: patch.codeKlaar === null ? undefined : patch.codeKlaar ?? existing?.codeKlaar,
+    mediataskToken: patch.mediataskToken ?? existing?.mediataskToken,
   });
 }
 
@@ -577,6 +649,60 @@ export async function getTask(accessToken: string, taskId: string): Promise<Clic
   };
 }
 
+export interface ClickUpTaakVolledig {
+  id: string;
+  name: string;
+  status: string;
+  url: string;
+  dateCreated: number | null;
+  dueDate: number | null;
+  /** De custom fields ongewijzigd, inclusief type en opties. */
+  customFields: {
+    name: string;
+    type?: string;
+    value?: unknown;
+    type_config?: { options?: { id?: string; orderindex?: number; name?: string; label?: string }[] };
+  }[];
+}
+
+/**
+ * Dezelfde taak als `getTask`, maar met alles wat er in de velden zit.
+ *
+ * `getTask` gooit type en opties weg, en dat kan ook: de webhook wil alleen het
+ * adres weten. Voor het opnamedossier is dat te weinig — een dropdown geeft
+ * daar een optie-id terug ("3f2a…"), en zonder de optielijst valt daar geen
+ * "HR++ glas" van te maken.
+ */
+export async function getTaakVolledig(
+  accessToken: string,
+  taskId: string
+): Promise<ClickUpTaakVolledig> {
+  const data = await clickupFetch<{
+    id: string;
+    name: string;
+    status?: { status: string };
+    url: string;
+    date_created?: string;
+    due_date?: string | null;
+    custom_fields?: ClickUpTaakVolledig["customFields"];
+  }>(accessToken, `/task/${taskId}`);
+
+  const getal = (v: string | null | undefined) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  return {
+    id: data.id,
+    name: data.name,
+    status: data.status?.status ?? "",
+    url: data.url,
+    dateCreated: getal(data.date_created),
+    dueDate: getal(data.due_date),
+    customFields: data.custom_fields ?? [],
+  };
+}
+
 /**
  * Zet een opmerking op de taak. De automatische SharePoint-ophaalactie
  * gebeurt buiten beeld; zonder zo'n regel in de taak zou niemand kunnen zien
@@ -591,4 +717,36 @@ export async function createTaskComment(
     method: "POST",
     body: JSON.stringify({ comment_text: text, notify_all: false }),
   });
+}
+
+/**
+ * Alle taken van de lijst, inclusief afgeronde, mét custom fields — voor de
+ * inhaalronde die SharePoint tegen Dropbox legt. ClickUp geeft 100 taken per
+ * pagina; doorbladeren tot een pagina leeg terugkomt.
+ */
+export async function getAllTasks(accessToken: string, listId: string): Promise<ClickUpTask[]> {
+  const out: ClickUpTask[] = [];
+  for (let page = 0; page < 50; page++) {
+    const data = await clickupFetch<{
+      tasks: {
+        id: string;
+        name: string;
+        status?: { status: string };
+        url: string;
+        custom_fields?: { name: string; value?: unknown }[];
+      }[];
+    }>(accessToken, `/list/${listId}/task?page=${page}&include_closed=true&subtasks=false`);
+    if (!data.tasks.length) break;
+    out.push(
+      ...data.tasks.map((t) => ({
+        id: t.id,
+        name: t.name,
+        status: t.status?.status ?? "",
+        url: t.url,
+        customFields: (t.custom_fields ?? []).map((f) => ({ name: f.name, value: f.value })),
+      }))
+    );
+    if (data.tasks.length < 100) break;
+  }
+  return out;
 }

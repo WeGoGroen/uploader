@@ -1153,6 +1153,44 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
 }
 .login-prompt { margin: 6px 0 0; font-size: 15px; font-weight: 600; text-align: center; }
 
+/* De accountkeuze op het inlogscherm: eerst wie je bent, dan je code. */
+.login-accounts { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.login-account,
+.login-gekozen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s, background .15s;
+}
+.login-account:hover { border-color: var(--accent); background: var(--accent-soft, #f4faec); }
+.login-gekozen { background: var(--accent-soft, #f4faec); border-color: var(--accent); }
+.login-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 999px;
+  background: var(--accent-soft, #eef4e4);
+  color: var(--accent-ink, #4d7c0f);
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+}
+.login-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.login-naam { flex: 1; font-size: 14px; font-weight: 600; }
+.login-wissel { font-size: 12px; opacity: .6; }
+
 /* Cijferklavier: grote vlakken zodat het met één duim snel gaat op de iPad. */
 .pin-dots { display: flex; justify-content: center; gap: 14px; margin: 6px 0 2px; }
 .pin-dot {

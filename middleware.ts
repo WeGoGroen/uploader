@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, authConfig, isValidSession } from "@/lib/auth";
+import { SESSION_COOKIE, authConfig, leesSessie } from "@/lib/auth";
 
 /**
  * Zet de hele app achter één inlog — inclusief álle API-routes. Zonder dit
@@ -15,6 +15,9 @@ import { SESSION_COOKIE, authConfig, isValidSession } from "@/lib/auth";
 const OPEN_PATHS = [
   "/login",
   "/api/auth/login",
+  // De namenlijst voor het inlogscherm: die heb je nodig vóórdat je ingelogd
+  // bent. Hij geeft alleen namen terug, geen codes of tokens.
+  "/api/auth/accounts",
   "/api/auth/google/callback",
   "/api/auth/dropbox/callback",
   // De ochtendcontrole draait via Vercel Cron en heeft dus geen sessie; die
@@ -56,12 +59,16 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (isOpen(pathname)) return NextResponse.next();
 
-  const { password, secret } = authConfig();
-  // Geen wachtwoord ingesteld: niet dichtgooien, maar wel zichtbaar maken op
-  // de inlogpagina. Anders zou een vergeten variabele de app onbruikbaar maken.
-  if (!password) return NextResponse.next();
+  const { secret } = authConfig();
 
-  if (await isValidSession(secret, request.cookies.get(SESSION_COOKIE)?.value)) {
+  /*
+    Iedereen logt in onder zijn eigen naam; er is geen gedeeld wachtwoord meer
+    dat je kunt vergeten in te stellen. De oude terugval ("geen APP_PASSWORD?
+    dan alles open") is daarmee ook weg: die was bedoeld om te voorkomen dat
+    een vergeten variabele de app onbruikbaar maakte, maar hij zette in de
+    praktijk de deur open zonder dat iemand het merkte.
+  */
+  if (await leesSessie(secret, request.cookies.get(SESSION_COOKIE)?.value)) {
     return NextResponse.next();
   }
 

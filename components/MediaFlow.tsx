@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useIkBen } from "@/components/RechtenProvider";
 import { enqueue, getServerSnapshot, getSnapshot, subscribe } from "@/lib/upload-queue";
 import { MEDIA_STAPPEN, type MediaStap } from "@/lib/media-folders";
 import TodayAppointments from "@/components/TodayAppointments";
@@ -67,7 +68,9 @@ export default function MediaFlow() {
   const [folderError, setFolderError] = useState<string | null>(null);
   const folderInFlight = useRef<Promise<DropboxFolder | null> | null>(null);
 
-  const [account, setAccount] = useState<string | null>(null);
+  // Uit de sessie: zonder ClickUp-token gaf dit null, en dan kreeg de
+  // opname geen eigenaar.
+  const account = useIkBen();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Vaste kop bovenaan, zelfde patroon als de energielabel-flow: meet de
@@ -94,13 +97,6 @@ export default function MediaFlow() {
     () => (huidige ? takenVanOpname.filter((t) => t.folder === huidige.map) : []),
     [takenVanOpname, huidige]
   );
-
-  useEffect(() => {
-    fetch("/api/clickup/list-meta", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setAccount(d?.account?.username ?? null))
-      .catch(() => {});
-  }, []);
 
   // Vanuit het dashboard via /media?addr=<adres>: meteen doorzoeken en
   // selecteren, zodat je niet opnieuw hoeft te zoeken naar een adres dat je
