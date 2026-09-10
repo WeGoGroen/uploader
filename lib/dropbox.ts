@@ -1251,8 +1251,12 @@ export async function verwijderStatusMarkers(
 
 
 export interface ProjectMapDetail {
-  /** Mapnaam direct onder de hoofdmap, bv. "Damrak 1, Amsterdam". */
+  /** Mapnaam, bv. "Damrak 1, Amsterdam". */
   name: string;
+  /** Volledig pad. Nodig sinds afgerond werk in het archief kan staan: de naam
+      alleen zegt dan niet meer waar de map ligt, en een deel-link maken op
+      hoofdmap + naam wijst naar een plek die niet bestaat. */
+  pad: string;
   /** Aantal bestanden in de hele projectmap. */
   files: number;
   /** Per directe submap het aantal bestanden erin (submappen meegerekend).
@@ -1320,8 +1324,11 @@ export async function detailProjectFolders(
 
       if (!perMap.has(projectSleutel)) {
         const weergave = (entry.path_display ?? entry.name).split("/").filter(Boolean);
+        // Alles tot en met de projectmap zelf; wat erbinnen zit valt eraf.
+        const tot = weergave.length - delen.binnen.length;
         perMap.set(projectSleutel, {
-          name: weergave[weergave.length - delen.binnen.length - 1] ?? projectSleutel,
+          name: weergave[tot - 1] ?? projectSleutel,
+          pad: `/${weergave.slice(0, tot).join("/")}`,
           files: 0,
           perSubmap: {},
         });

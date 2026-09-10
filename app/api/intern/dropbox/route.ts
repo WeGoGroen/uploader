@@ -31,11 +31,16 @@ export async function GET(request: Request) {
     HOOFDMAPPEN.map(async (root) => {
       try {
         const { folders, volledig } = await detailProjectFolders(token, root);
-        const projecten = folders.map((f) => ({
-          ...f,
-          sharepoint:
-            statussen[`${root}/${stripStatusMarker(f.name)}`.toLowerCase()] ?? null,
-        }));
+        const projecten = folders.map((f) => {
+          // De statussleutel hangt aan de map waar hij ligt; een gearchiveerde
+          // map staat een niveau dieper en zou anders geen status meer tonen.
+          const ouder = f.pad.slice(0, f.pad.lastIndexOf("/"));
+          return {
+            ...f,
+            sharepoint:
+              statussen[`${ouder}/${stripStatusMarker(f.name)}`.toLowerCase()] ?? null,
+          };
+        });
         return { root, volledig, projecten, fout: null as string | null };
       } catch (err) {
         return {
