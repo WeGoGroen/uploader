@@ -1371,6 +1371,9 @@ export async function verplaats(accessToken: string, van: string, naar: string):
 
 export interface ArchiveerUitkomst {
   archief: string;
+  /** Dropbox is nog aan het verplaatsen. Geen fout: de opdracht staat, en een
+      volgende ronde ziet vanzelf dat de mappen weg zijn uit de hoofdmap. */
+  bezig: boolean;
   verplaatst: string[];
   overgeslagen: { pad: string; reden: string }[];
   mislukt: { pad: string; reden: string }[];
@@ -1447,7 +1450,7 @@ export async function archiveerProjectmappen(
   }
 
   if (opties.droog || teVerplaatsen.length === 0) {
-    return { archief, verplaatst: teVerplaatsen.map((t) => t.van), overgeslagen, mislukt };
+    return { archief, bezig: false, verplaatst: teVerplaatsen.map((t) => t.van), overgeslagen, mislukt };
   }
 
   await createFolder(accessToken, archief);
@@ -1471,36 +1474,48 @@ export async function archiveerProjectmappen(
       throw new DropboxApiError(start.status, `Dropbox move_batch_v2 failed: ${start.status} ${body}`);
     }
 
-    let uitkomst = (await start.json()) as {
+    type Antwoord = {
       ".tag": string;
       async_job_id?: string;
       entries?: { ".tag": string; failure?: unknown }[];
     };
 
-    // Dropbox doet dit asynchroon zodra het er meer dan een handvol zijn.
-    for (let poging = 0; uitkomst[".tag"] === "async_job_id" && poging < 120; poging++) {
-      await new Promise((r) => setTimeout(r, 1000));
+    const eerste = (await start.json()) as Antwoord;
+    let klaar: Antwoord | null = eerste[".tag"] === "complete" ? eerste : null;
+    const jobId = eerste.async_job_id ?? null;
+
+    /*
+      Dropbox doet dit asynchroon zodra het er meer dan een handvol zijn, en
+      antwoordt dan "in_progress" — niet nog een keer "async_job_id". Op dat
+      onderscheid liep de eerste versie stuk: hij stopte na één ronde en meldde
+      een mislukking terwijl Dropbox gewoon aan het werk was.
+    */
+    for (let poging = 0; jobId && !klaar && poging < 130; poging++) {
+      await new Promise((r) => setTimeout(r, 2000));
       const check = await fetch(`${DROPBOX_API_BASE}/files/move_batch/check_v2`, {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ async_job_id: uitkomst.async_job_id }),
+        body: JSON.stringify({ async_job_id: jobId }),
       });
       if (!check.ok) {
         const body = await check.text().catch(() => "");
         throw new DropboxApiError(check.status, `Dropbox move_batch/check_v2 failed: ${check.status} ${body}`);
       }
-      uitkomst = (await check.json()) as typeof uitkomst;
+      const stand = (await check.json()) as Antwoord;
+      if (stand[".tag"] === "complete") klaar = stand;
     }
 
-    if (uitkomst[".tag"] !== "complete" || !uitkomst.entries) {
-      throw new DropboxApiError(0, `Dropbox verplaatste de mappen niet af (${uitkomst[".tag"]})`);
+    if (!klaar?.entries) {
+      // Nog niet af binnen onze tijd. De opdracht staat bij Dropbox en loopt
+      // door; melden dat het loopt is eerlijker dan een fout opwerpen.
+      return { archief, bezig: true, verplaatst, overgeslagen, mislukt };
     }
 
-    uitkomst.entries.forEach((regel, k) => {
+    klaar.entries.forEach((regel, k) => {
       if (regel[".tag"] === "success") verplaatst.push(groep[k].van);
       else mislukt.push({ pad: groep[k].van, reden: JSON.stringify(regel.failure ?? regel).slice(0, 200) });
     });
   }
 
-  return { archief, verplaatst, overgeslagen, mislukt };
+  return { archief, bezig: false, verplaatst, overgeslagen, mislukt };
 }
