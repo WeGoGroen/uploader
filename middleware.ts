@@ -77,9 +77,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.json({ error: "niet_ingelogd" }, { status: 401 });
   }
 
+  // Geen ?next= meer: na het inloggen begin je op het dashboard. Zie de
+  // toelichting in app/login/page.tsx — terugkomen in het scherm waar je
+  // sessie verliep is zelden wat je wilt.
   const login = request.nextUrl.clone();
   login.pathname = "/login";
-  login.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname + request.nextUrl.search)}`;
+  login.search = "";
   return NextResponse.redirect(login);
 }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
 
 /** Lengte van de inlogcode; bij dit aantal cijfers logt de app vanzelf in. */
 const CODE_LENGTH = 4;
@@ -32,8 +31,18 @@ function initialen(naam: string): string {
  * dus: je naam is de inlog, niet een keuze achteraf.
  */
 function LoginForm() {
-  const params = useSearchParams();
-  const next = params.get("next") || "/";
+  /*
+    Na het inloggen kom je altijd op het dashboard uit.
+
+    Er zat een ?next=-doorstuur op: de middleware onthield welke pagina je
+    wilde, en je landde daar weer. Bedoeld voor een gedeelde link, maar in de
+    praktijk werkt het andersom — je sessie verloopt terwijl je ergens in een
+    formulier of op de instellingen staat, je logt opnieuw in, en je staat
+    midden in datzelfde scherm in plaats van bij het begin van je dag. De
+    sessie in deze app duurt dertig dagen, dus opnieuw inloggen betekent bijna
+    altijd: nieuw apparaat, nieuwe dag, nieuwe opname.
+  */
+  const next = "/";
 
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [gekozen, setGekozen] = useState<Account | null>(null);
