@@ -1128,10 +1128,18 @@ async function zoekInEenMap(
 
 const STATUS_HASH = "sharepoint:mapstatus";
 
-/** Redis-veld voor een projectmap: kaal pad, kleine letters. Zo overleeft de
-    status het opruimen van een bolletje uit de naam. */
-function statusVeld(root: string, naam: string): string {
-  return `${root}/${stripStatusMarker(naam)}`.toLowerCase();
+/**
+ * Redis-veld voor een projectmap: hoofdmap + kale mapnaam, kleine letters.
+ *
+ * Bewust de hóófdmap en niet de map waar hij toevallig ligt. Een projectmap
+ * verhuist namelijk naar "Afgerond" zodra het werk klaar is, en met het
+ * volledige pad als sleutel raakte de status bij die verhuizing los van zijn
+ * map — het dashboard toonde daarna een streepje bij honderden overdrachten
+ * die wél gelukt waren. Het adres verandert niet, de plek wel.
+ */
+export function statusVeld(root: string, naam: string): string {
+  const hoofdmap = root.replace(new RegExp(`/${ARCHIEF_MAP}$`, "i"), "");
+  return `${hoofdmap}/${stripStatusMarker(naam)}`.toLowerCase();
 }
 
 /**
@@ -1529,4 +1537,38 @@ export async function archiveerProjectmappen(
   }
 
   return { archief, bezig: false, verplaatst, overgeslagen, mislukt };
+}
+
+/**
+ * Zet statussleutels die nog het archiefpad bevatten om naar de hoofdmap.
+ *
+ * Eenmalig nodig na de overgang naar statusVeld(): de sleutels die vóór het
+ * archiveren geschreven zijn staan goed, maar alles wat ná een verhuizing is
+ * bijgewerkt kreeg ".../Afgerond/<adres>" als veld. Die zouden anders
+ * onvindbaar blijven. Idempotent — een tweede ronde vindt niets meer.
+ */
+export async function herstelStatusSleutels(): Promise<{ verplaatst: number; gelijk: number }> {
+  const redis = getOptionalRedis();
+  if (!redis) return { verplaatst: 0, gelijk: 0 };
+
+  const alles = (await redis.hgetall(STATUS_HASH).catch(() => ({}))) as Record<string, string>;
+  const merk = `/${ARCHIEF_MAP.toLowerCase()}/`;
+  let verplaatst = 0;
+  let gelijk = 0;
+
+  for (const [veld, waarde] of Object.entries(alles)) {
+    if (!veld.includes(merk)) continue;
+    const nieuw = veld.replace(merk, "/");
+    if (nieuw === veld) continue;
+    // Staat er al een sleutel op de goede plek, dan wint die: die is door een
+    // latere ronde geschreven en weet dus meer.
+    if (alles[nieuw] !== undefined) {
+      gelijk++;
+    } else {
+      await redis.hset(STATUS_HASH, nieuw, waarde).catch(() => {});
+      verplaatst++;
+    }
+    await redis.hdel(STATUS_HASH, veld).catch(() => {});
+  }
+  return { verplaatst, gelijk };
 }

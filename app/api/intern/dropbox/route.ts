@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
-import { detailProjectFolders, getFolderStatuses, getSharedAccessToken, stripStatusMarker } from "@/lib/dropbox";
+import { detailProjectFolders, getFolderStatuses, getSharedAccessToken, statusVeld } from "@/lib/dropbox";
 
 export const maxDuration = 60;
 
@@ -31,16 +31,13 @@ export async function GET(request: Request) {
     HOOFDMAPPEN.map(async (root) => {
       try {
         const { folders, volledig } = await detailProjectFolders(token, root);
-        const projecten = folders.map((f) => {
-          // De statussleutel hangt aan de map waar hij ligt; een gearchiveerde
-          // map staat een niveau dieper en zou anders geen status meer tonen.
-          const ouder = f.pad.slice(0, f.pad.lastIndexOf("/"));
-          return {
-            ...f,
-            sharepoint:
-              statussen[`${ouder}/${stripStatusMarker(f.name)}`.toLowerCase()] ?? null,
-          };
-        });
+        // De statussleutel hangt aan de hoofdmap, niet aan de map waar het
+        // project toevallig ligt: een gearchiveerd project houdt zo zijn
+        // status. Zie statusVeld() in lib/dropbox.ts.
+        const projecten = folders.map((f) => ({
+          ...f,
+          sharepoint: statussen[statusVeld(root, f.name)] ?? null,
+        }));
         return { root, volledig, projecten, fout: null as string | null };
       } catch (err) {
         return {

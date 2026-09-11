@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
-import { getSharedAccessToken, verwijderStatusMarkers } from "@/lib/dropbox";
+import { getSharedAccessToken, herstelStatusSleutels, verwijderStatusMarkers } from "@/lib/dropbox";
 
 export const maxDuration = 300;
 
@@ -21,6 +21,9 @@ export async function POST(request: Request) {
   }
 
   const token = await getSharedAccessToken();
+  // Meteen de statussleutels rechtzetten die nog naar het archiefpad wijzen;
+  // dezelfde soort opruiming, en zo is er één route om aan te roepen.
+  const sleutels = await herstelStatusSleutels().catch(() => ({ verplaatst: 0, gelijk: 0 }));
   const uitkomsten = [];
   for (const root of HOOFDMAPPEN) {
     try {
@@ -35,5 +38,5 @@ export async function POST(request: Request) {
       });
     }
   }
-  return NextResponse.json({ uitkomsten });
+  return NextResponse.json({ sleutels, uitkomsten });
 }
