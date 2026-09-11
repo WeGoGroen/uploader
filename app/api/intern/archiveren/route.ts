@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { root?: string; mappen?: string[]; droog?: boolean }
+    | { root?: string; mappen?: string[]; droog?: boolean; terug?: boolean }
     | null;
 
   const root = body?.root?.replace(/\/+$/, "") ?? "";
@@ -37,6 +37,7 @@ export async function POST(request: Request) {
     );
   }
 
+  const terug = body?.terug === true;
   const mappen = (body?.mappen ?? []).filter((m) => typeof m === "string" && m.startsWith(`${root}/`));
   if (mappen.length === 0) {
     return NextResponse.json({ error: "geen mappen onder deze hoofdmap meegestuurd" }, { status: 400 });
@@ -44,7 +45,10 @@ export async function POST(request: Request) {
 
   try {
     const token = await getSharedAccessToken();
-    const uitkomst = await archiveerProjectmappen(token, root, mappen, { droog: body?.droog === true });
+    const uitkomst = await archiveerProjectmappen(token, root, mappen, {
+      droog: body?.droog === true,
+      terug,
+    });
     return NextResponse.json({ ok: uitkomst.mislukt.length === 0, ...uitkomst });
   } catch (err) {
     return NextResponse.json(

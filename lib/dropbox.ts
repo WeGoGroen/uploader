@@ -1398,9 +1398,13 @@ export async function archiveerProjectmappen(
   accessToken: string,
   root: string,
   paden: string[],
-  opties: { droog?: boolean } = {}
+  opties: { droog?: boolean; terug?: boolean } = {}
 ): Promise<ArchiveerUitkomst> {
   const archief = `${root}/${ARCHIEF_MAP}`;
+  // Dezelfde verplaatsing, andere kant op. Terughalen is niet zeldzaam: een
+  // map die op de verkeerde grond is gearchiveerd (bv. een status die toch
+  // niet als afgerond telt) hoort terug te kunnen zonder handwerk in Dropbox.
+  const vanMap = opties.terug ? archief : root;
   const overgeslagen: { pad: string; reden: string }[] = [];
   const mislukt: { pad: string; reden: string }[] = [];
 
@@ -1414,11 +1418,13 @@ export async function archiveerProjectmappen(
       {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify(cursor ? { cursor } : { path: root, recursive: false }),
+        body: JSON.stringify(cursor ? { cursor } : { path: vanMap, recursive: false }),
       }
     );
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+      // Nog geen archiefmap: dan valt er ook niets terug te halen.
+      if (res.status === 409 && body.includes("path/not_found")) break;
       throw new DropboxApiError(res.status, `Dropbox list_folder failed: ${res.status} ${body}`);
     }
     const data = (await res.json()) as {
@@ -1430,8 +1436,8 @@ export async function archiveerProjectmappen(
       if (entry[".tag"] !== "folder") continue;
       if (entry.name.toLowerCase() === ARCHIEF_MAP.toLowerCase()) continue;
       bestaand.set(
-        (entry.path_lower ?? `${root}/${entry.name}`.toLowerCase()),
-        entry.path_display ?? `${root}/${entry.name}`
+        (entry.path_lower ?? `${vanMap}/${entry.name}`.toLowerCase()),
+        entry.path_display ?? `${vanMap}/${entry.name}`
       );
     }
     if (!data.has_more) break;
@@ -1442,18 +1448,23 @@ export async function archiveerProjectmappen(
   for (const pad of paden) {
     const echt = bestaand.get(pad.toLowerCase());
     if (!echt) {
-      overgeslagen.push({ pad, reden: "staat niet (meer) direct onder de hoofdmap" });
+      overgeslagen.push({
+        pad,
+        reden: opties.terug
+          ? "staat niet (meer) in het archief"
+          : "staat niet (meer) direct onder de hoofdmap",
+      });
       continue;
     }
     const naam = echt.slice(echt.lastIndexOf("/") + 1);
-    teVerplaatsen.push({ van: echt, naar: `${archief}/${naam}` });
+    teVerplaatsen.push({ van: echt, naar: `${opties.terug ? root : archief}/${naam}` });
   }
 
   if (opties.droog || teVerplaatsen.length === 0) {
     return { archief, bezig: false, verplaatst: teVerplaatsen.map((t) => t.van), overgeslagen, mislukt };
   }
 
-  await createFolder(accessToken, archief);
+  if (!opties.terug) await createFolder(accessToken, archief);
 
   /* In batches naar Dropbox: honderd losse move-aanroepen lopen tegen
      "too_many_write_operations" aan, en dan is de helft verplaatst. */
