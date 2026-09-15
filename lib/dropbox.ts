@@ -700,6 +700,33 @@ export async function listFolderFiles(
     .map((e) => ({ name: e.name, size: e.size ?? 0 }));
 }
 
+/**
+ * Bestaat deze map in Dropbox?
+ *
+ * Niet listFolderFiles gebruiken voor die vraag: die geeft bij een onbekend pad
+ * bewust een lege lijst terug, en dan is "leeg" niet te onderscheiden van "er
+ * niet". Voor een route die nooit een projectmap mag laten ontstaan is dat
+ * precies het verschil dat ertoe doet — een upload naar een pad dat er niet is,
+ * maakt de hele map alsnog aan.
+ */
+export async function folderExists(accessToken: string, path: string): Promise<boolean> {
+  const res = await fetch(`${DROPBOX_API_BASE}/files/get_metadata`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ path }),
+  });
+  if (res.ok) {
+    const data = (await res.json()) as { ".tag"?: string };
+    return data[".tag"] === "folder";
+  }
+  const body = await res.text().catch(() => "");
+  if (res.status === 409 && body.includes("not_found")) return false;
+  throw new DropboxApiError(res.status, `Dropbox get_metadata failed: ${res.status} ${body}`);
+}
+
 /** Directe download-link (i.p.v. de Dropbox-voorbeeldpagina) voor externe
     diensten zoals Mediatask die zelf het bestand ophalen via een URL. */
 function toDirectDownloadUrl(shareUrl: string): string {

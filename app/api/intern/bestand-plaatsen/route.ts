@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
 import {
   createTemporaryUploadLink,
+  folderExists,
   getSharedAccessToken,
-  listFolderFiles,
   sanitizePathSegment,
 } from "@/lib/dropbox";
 
@@ -79,11 +79,19 @@ export async function POST(request: Request) {
     );
   }
 
-  // Bestaat de projectmap? Een lege lijst is prima; een fout betekent dat de
-  // map er niet is, en dan maken we hem bewust niet aan.
+  // Bestaat de projectmap? Staat hij er niet, dan geven we geen link: een
+  // upload naar dat pad zou de map alsnog laten ontstaan. Dat gebeurt
+  // bijvoorbeeld net na het archiveren, als het oude pad nog rondgaat.
+  let bestaat: boolean;
   try {
-    await listFolderFiles(token, projectmap);
-  } catch {
+    bestaat = await folderExists(token, projectmap);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message.slice(0, 200) : "Dropbox niet te bevragen" },
+      { status: 502 }
+    );
+  }
+  if (!bestaat) {
     return NextResponse.json(
       { error: `de projectmap ${projectmap} bestaat niet in Dropbox — er wordt geen nieuwe aangemaakt` },
       { status: 404 }
