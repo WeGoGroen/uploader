@@ -6,8 +6,10 @@
  * er een opnemer op een iPad opeens buiten staat, en zie je in de logs het
  * verschil tussen "iemand keek" en "de synchronisatie draaide".
  *
- * De routes onder /api/intern zijn uitsluitend lezend en geven geen bestanden
- * terug, alleen tellingen en agendaregels.
+ * De routes onder /api/intern geven geen bestanden terug. De meeste lezen
+ * alleen; de paar die schrijven (overdracht, archiveren, deellink,
+ * bestand-plaatsen) doen dat uitsluitend binnen een projectmap die al bestaat,
+ * en maken er nooit zelf een aan.
  */
 export function isInternRequest(request: Request): boolean {
   const token = process.env.CONTROL_CENTER_TOKEN;
