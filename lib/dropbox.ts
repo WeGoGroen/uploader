@@ -1,5 +1,6 @@
 import { getOptionalRedis } from "@/lib/redis";
 import { fetchProjectPhotos } from "@/lib/streetview";
+import { BIJLAGE_G_BESTANDSNAAM, bijlageGInhoud } from "@/lib/bijlage-g-sjabloon";
 import { mapnaamPastBijAdres, parseProjectFolderName } from "@/lib/projectmap-match";
 
 const DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token";
@@ -606,6 +607,13 @@ export async function ensureProjectFolder(
       perDiepte.get(diepte)!.map((name) => `${path}/${name}`)
     );
   }
+  // Bijlage G hoort bij elke energielabel-opname: de adviseur vult erin welke
+  // informatie er beschikbaar was. Alleen bij energielabels — NEN2580 en media
+  // kennen deze bijlage niet.
+  if (kind === "energielabel") {
+    await voegBijlageGToe(accessToken, path);
+  }
+
   // NEN2580 gebruikt "Photo's" i.p.v. "Foto's"; zonder dit onderscheid zou er
   // een losse extra map in het NEN-sjabloon verschijnen.
   await addStreetViewPhotos(
@@ -630,6 +638,39 @@ export async function ensureProjectFolder(
  * niet meer nodig, en een tweede opname op hetzelfde adres mag nooit een
  * handmatig vervangen gevelfoto overschrijven.
  */
+/**
+ * Zet Bijlage G (ISSO 82.1) los in de projectmap, tussen de submappen.
+ *
+ * Bewust niet in een submap: de adviseur moet hem invullen, en dan hoort hij
+ * in het zicht te liggen zodra je de map van het adres opent — niet twee
+ * klikken diep.
+ *
+ * Nooit overschrijven: staat er al iets met "Bijlage G" in de naam, dan is dat
+ * de ingevulde versie van de adviseur en die is onvervangbaar. Faalt nooit
+ * hard — een ontbrekende bijlage is vervelend, een projectmap die niet
+ * aangemaakt wordt is blokkerend.
+ */
+export async function voegBijlageGToe(
+  accessToken: string,
+  projectPad: string
+): Promise<{ geplaatst: boolean; reden: string }> {
+  try {
+    // listFolderFiles kijkt alleen naar losse bestanden, niet in de submappen —
+    // precies het niveau waar de bijlage hoort te liggen.
+    const bestaand = await listFolderFiles(accessToken, projectPad).catch(() => []);
+    if (bestaand.some((b) => b.name.toLowerCase().includes("bijlage g"))) {
+      return { geplaatst: false, reden: "stond er al" };
+    }
+    await uploadFile(accessToken, `${projectPad}/${BIJLAGE_G_BESTANDSNAAM}`, bijlageGInhoud());
+    console.log("[BIJLAGE-G] geplaatst", { pad: `${projectPad}/${BIJLAGE_G_BESTANDSNAAM}` });
+    return { geplaatst: true, reden: "geplaatst" };
+  } catch (err) {
+    const reden = err instanceof Error ? err.message : String(err);
+    console.error("[BIJLAGE-G] plaatsen mislukt", { pad: projectPad, error: reden });
+    return { geplaatst: false, reden };
+  }
+}
+
 async function addStreetViewPhotos(
   accessToken: string,
   fotoPath: string,
