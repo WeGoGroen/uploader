@@ -1327,6 +1327,10 @@ export async function verwijderStatusMarkers(
 
 
 export interface ProjectMapDetail {
+  /** Ligt Bijlage G los in de projectmap? Het control center leidt hier het
+      signaal "bijlage ontbreekt" uit af; een telling van losse bestanden zegt
+      niet wélk bestand het is. */
+  bijlageG: boolean;
   /** Mapnaam, bv. "Damrak 1, Amsterdam". */
   name: string;
   /** Volledig pad. Nodig sinds afgerond werk in het archief kan staan: de naam
@@ -1403,6 +1407,7 @@ export async function detailProjectFolders(
         // Alles tot en met de projectmap zelf; wat erbinnen zit valt eraf.
         const tot = weergave.length - delen.binnen.length;
         perMap.set(projectSleutel, {
+          bijlageG: false,
           name: weergave[tot - 1] ?? projectSleutel,
           pad: `/${weergave.slice(0, tot).join("/")}`,
           files: 0,
@@ -1416,6 +1421,11 @@ export async function detailProjectFolders(
       // binnen = [...submappen, bestandsnaam]; de eerste submap telt.
       const submap = delen.binnen.length > 1 ? delen.binnen[0] : "";
       project.perSubmap[submap] = (project.perSubmap[submap] ?? 0) + 1;
+      // Los in de projectmap (geen submap) en met "bijlage g" in de naam: dan
+      // ligt de bijlage er, ook als iemand hem hernoemd of ingevuld heeft.
+      if (submap === "" && delen.binnen[0]?.toLowerCase().includes("bijlage g")) {
+        project.bijlageG = true;
+      }
     }
 
     if (!data.has_more) {
