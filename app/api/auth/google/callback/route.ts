@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { exchangeCodeForTokens, getCurrentAccount, storeRefreshToken } from "@/lib/google-calendar";
-import { bewaarPostbus } from "@/lib/postbus";
 import { getOptionalRedis } from "@/lib/redis";
 
 function resultPage(body: string): NextResponse {
@@ -47,39 +46,6 @@ export async function GET(request: Request) {
   try {
     const tokens = await exchangeCodeForTokens(clientId, clientSecret, code, redirectUri);
     const account = await getCurrentAccount(tokens.accessToken);
-
-    /*
-      De postbus is geen teamlid maar het bedrijfsadres waar RVO het afschrift
-      van een energielabel heen mailt. Eén gedeelde koppeling, alleen-lezen, met
-      een eigen sleutel — zie lib/postbus.ts. Hij komt hier langs omdat Google
-      maar één redirect-adres per app kent; de state zegt waarvoor het is.
-    */
-    if (accountName === "postbus") {
-      if (!tokens.refreshToken) {
-        return resultPage(
-          `<h1>Geen refresh-token ontvangen</h1>
-           <p>Verwijder de koppeling met deze app op
-           <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>
-           en probeer het opnieuw.</p>`
-        );
-      }
-      try {
-        await bewaarPostbus(tokens.refreshToken, account.email);
-      } catch (err) {
-        return resultPage(`<h1>Koppelen mislukt</h1><p>${String(err)}</p>`);
-      }
-      const terug = (process.env.CONTROL_CENTER_URL ?? "").replace(/\/+$/, "");
-      return resultPage(`
-        <h1>Postbus gekoppeld als ${account.email}</h1>
-        <p>Het control center kan vanaf nu de mails van
-        <b>noreply_eponline@rvo.nl</b> langslopen en het afschrift in de
-        projectmap zetten. Alleen die afzender, alleen lezen — versturen,
-        verwijderen en labels wijzigen zitten niet in deze koppeling.</p>
-        <p>Intrekken kan altijd op
-        <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
-        ${terug ? `<p><a href="${terug}/systemen">← Terug naar Systemen</a></p>` : ""}
-      `);
-    }
 
     if (!tokens.refreshToken) {
       return resultPage(
