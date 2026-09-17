@@ -33,6 +33,10 @@ const OPEN_PATHS = [
   // route controleert zelf de handtekening die ClickUp over de body zet, en
   // weigert alles zonder geldige handtekening.
   "/api/clickup/webhook",
+  // Resend levert hier de mail van RVO af met het afschrift van een
+  // geregistreerd energielabel. Ook geen sessie, en ook hier controleert de
+  // route zelf de handtekening over de ruwe body.
+  "/api/mail/eponline",
 ];
 
 /**
