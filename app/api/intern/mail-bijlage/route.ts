@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { haalBijlagen } from "@/lib/inkomende-mail";
 import { isInternRequest } from "@/lib/intern-auth";
+import { haalGmailBijlage } from "@/lib/postbus";
 
 export const maxDuration = 30;
 
 /**
- * Een verse downloadlink voor één bijlage uit een binnengekomen mail.
+ * Eén bijlage uit een binnengekomen mail: een verse downloadlink (Resend) of
+ * de bytes zelf (Gmail).
  *
  * Het control center kreeg bij binnenkomst alleen te horen dát er een bijlage
  * is; de link hoort hier vandaan te komen omdat de Resend-sleutel hier staat.
@@ -24,11 +26,36 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     email_id?: string;
     bijlage_id?: string;
+    bron?: string;
   } | null;
   const emailId = body?.email_id?.trim() ?? "";
   const bijlageId = body?.bijlage_id?.trim() ?? "";
   if (!emailId || !bijlageId) {
     return NextResponse.json({ error: "email_id en bijlage_id zijn verplicht" }, { status: 400 });
+  }
+
+  /*
+    Twee bronnen, twee vormen. Resend geeft een tijdelijke link naar zijn eigen
+    CDN; Gmail kent zoiets niet en levert de inhoud in het antwoord mee. Vandaar
+    dat dit eindpunt óf een link óf bytes teruggeeft — de aanroeper kan met
+    allebei overweg, en dat is beter dan dit bestand alsnog door deze server
+    heen laten lopen om er een link van te maken.
+  */
+  if (body?.bron === "gmail") {
+    try {
+      const bijlage = await haalGmailBijlage(emailId, bijlageId);
+      return NextResponse.json({
+        ok: true,
+        bron: "gmail",
+        inhoud_base64: bijlage.base64,
+        grootte: bijlage.grootte,
+      });
+    } catch (err) {
+      const melding = err instanceof Error ? err.message.slice(0, 250) : "Gmail niet te bevragen";
+      // 404 blijft 404: een bijlage die er niet meer is, komt door opnieuw
+      // proberen niet terug.
+      return NextResponse.json({ error: melding }, { status: /\b404\b/.test(melding) ? 404 : 502 });
+    }
   }
 
   let bijlagen;
