@@ -461,9 +461,12 @@ export default function MediaFlow() {
         status: r.bezig > 0 ? ("bezig" as const) : r.mislukt > 0 ? ("mislukt" as const) : ("open" as const),
       }));
   }, [alleTaken, sessies]);
-  // Alleen de mappen waar daadwerkelijk iets in geüpload wordt; de kale "in"
-  // is een tussenlaag en zegt de opnemer niets.
-  const mediaSubmappen = (folder?.subfolders ?? []).filter((naam) => naam.includes("/"));
+  // Alleen de mappen waar deze flow daadwerkelijk in uploadt. "In" en "In/Raw"
+  // zijn tussenlagen en zeggen de opnemer niets, en "OUT" is van de bewerker —
+  // die erbij zetten zou drie mappen tonen die hier altijd leeg blijven.
+  const mediaSubmappen = (folder?.subfolders ?? []).filter((naam) =>
+    MEDIA_STAPPEN.some((st) => st.map === naam)
+  );
 
   function renderDropboxBalk() {
     return (
@@ -528,8 +531,11 @@ export default function MediaFlow() {
                   ) : (
                     <span className="dbx-strip-doc-empty" aria-hidden="true" />
                   )}
+                  {/* Alleen de laatste maplaag: "In/Raw" staat al in het pad
+                      hierboven, en drie keer herhalen duwt de naam die je zoekt
+                      op een smal scherm buiten beeld. */}
                   <span className="dbx-strip-doc-label">
-                    {naam}
+                    {naam.split("/").pop()}
                     {actief && <span className="dbx-strip-doc-now">hier</span>}
                   </span>
                   <span className="dbx-strip-doc-status">
