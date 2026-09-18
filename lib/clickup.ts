@@ -58,6 +58,37 @@ export function rechtenVan(account: Pick<ClickUpAccount, "rechten"> | null | und
   return { ...ALLE_RECHTEN, ...(account?.rechten ?? {}) };
 }
 
+/**
+ * De rechten zoals ze moeten gelden ná een wijziging vanuit het Business
+ * Control Center.
+ *
+ * Alleen vinkjes die écht in het verzoek zitten worden overschreven. Een
+ * payload die er één weglaat bedoelt "laat staan", niet "neem af" — met een
+ * kale Boolean() raakte iemand een recht kwijt dat niemand had uitgevinkt,
+ * en aan de uploaderkant is dat niet te zien: de knop is dan simpelweg weg
+ * uit de zijbalk en het dashboard, zonder melding.
+ *
+ * Bij een nieuw account is er niets om te laten staan, dus daar geldt niet
+ * aangevinkt wél als niet toegestaan. Zonder dat onderscheid zou een
+ * uitnodiging met één vinkje alsnog alle drie de rechten opleveren, want
+ * rechtenVan() leest een account zonder rechten-sleutel als "mag alles".
+ */
+export function rechtenNaWijziging(
+  bestaand: Pick<ClickUpAccount, "rechten"> | null | undefined,
+  gevraagd: Partial<UploadRechten> | null | undefined
+): UploadRechten {
+  const basis: UploadRechten = bestaand
+    ? rechtenVan(bestaand)
+    : { energielabel: false, nen: false, media: false };
+  const kies = (vinkje: boolean | undefined, huidig: boolean) =>
+    vinkje === undefined ? huidig : Boolean(vinkje);
+  return {
+    energielabel: kies(gevraagd?.energielabel, basis.energielabel),
+    nen: kies(gevraagd?.nen, basis.nen),
+    media: kies(gevraagd?.media, basis.media),
+  };
+}
+
 export interface ClickUpAccount {
   name: string;
   token: string;

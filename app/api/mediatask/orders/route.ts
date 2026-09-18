@@ -8,7 +8,8 @@ import {
   submitOrder,
   vindBestaandeDraft,
 } from "@/lib/mediatask";
-import { getFileLinksWithNames, getSharedAccessToken } from "@/lib/dropbox";
+import { getFolderLinkWithCount, getSharedAccessToken } from "@/lib/dropbox";
+import { bouwOrderOpmerking, type OpmerkingMap } from "@/lib/mediatask-opmerking";
 import { bewaarOrderPad, stuurScansVanuitDropbox, type ScanUitkomst } from "@/lib/mediatask-pointclouds";
 import { stuurMediaVanuitDropboxMap, type MediaUitkomst } from "@/lib/mediatask-media";
 
@@ -180,65 +181,53 @@ export async function POST(request: Request) {
     // verwerker het meteen ziet; een mislukte opmerking mag de order niet
     // laten sneuvelen — die is dan al aangemaakt.
     let commentError: string | null = null;
-    // Opmerkingen bij Mediatask zijn altijd in het Engels: hun verwerkers
-    // lezen geen Nederlands.
-    const ordinal = (n: number) => {
-      const rest10 = n % 10;
-      const rest100 = n % 100;
-      if (rest10 === 1 && rest100 !== 11) return `${n}st`;
-      if (rest10 === 2 && rest100 !== 12) return `${n}nd`;
-      if (rest10 === 3 && rest100 !== 13) return `${n}rd`;
-      return `${n}th`;
-    };
-    const label = (n: number) =>
-      n === 0 ? "ground floor" : n < 0 ? `basement level ${-n}` : `${ordinal(n)} floor`;
-    const blokken: string[] = [];
 
-    // Per scanbestand de bouwlagen, zodat de verwerker ziet wélke scan welke
-    // verdiepingen bevat — bij meerdere scans per adres is dat het verschil
-    // tussen bruikbaar en giswerk.
-    const verdiepingen = Object.entries(body.floorsByFile ?? {})
-      .filter(([, f]) => f.length > 0)
-      .map(([name, f]) => `• ${name}: ${f.slice().sort((a, b) => a - b).map(label).join(", ")}`);
-    if (verdiepingen.length > 0) {
-      blokken.push(`Scanned floors per file:\n${verdiepingen.join("\n")}`);
-    }
+    // De mappen in de volgorde waarin de verwerker ze nodig heeft: eerst de
+    // scan, dan het beeldmateriaal waarmee hij die uitwerkt, dan de rest.
+    //
+    // Geen "also uploaded directly"-belofte bij de media: Mediatask's API
+    // accepteert geen foto-bijlagen (elke schrijfactie op het photos-veld geeft
+    // 422 — live vastgesteld), dus deze links zíjn daar de aanlevering.
+    const MAPPEN: { map: string; kop: string; toelichting?: string }[] = [
+      {
+        map: "Optimized",
+        kop: "Point clouds",
+        toelichting: "These are also uploaded directly to this order; this link is a fallback.",
+      },
+      { map: "RAW", kop: "RAW scans" },
+      { map: "Photo's", kop: "Photos" },
+      { map: "Video", kop: "Video" },
+      { map: "360", kop: "360 captures" },
+      { map: "Additionals", kop: "Additional files" },
+    ];
 
-    // Downloadlinks in de opmerking. Dit is nu de enige weg waarlangs de
-    // verwerker bij deze bestanden komt — de scans uit Optimized gaan wél
-    // rechtstreeks mee als puntenwolk, al staan ze hier ook nog als link voor
-    // het geval een puntenwolk niet doorkwam.
+    let mappen: OpmerkingMap[] = [];
     if (body.dropboxFolderPath) {
-      // Geen "also uploaded directly"-beloftes bij de media: Mediatask's API
-      // accepteert geen foto-bijlagen (elke schrijfactie op het photos-veld
-      // geeft 422 — live vastgesteld), dus deze links zíjn de aanlevering.
-      const mappen: { map: string; kop: string }[] = [
-        { map: "Optimized", kop: "Point clouds (Optimized) — also uploaded directly to this order" },
-        { map: "RAW", kop: "RAW scans" },
-        { map: "Additionals", kop: "Additional files" },
-        { map: "Photo's", kop: "Photos — please download via these links" },
-        { map: "Video", kop: "Video — please download via these links" },
-        { map: "360", kop: "360 captures — please download via these links" },
-      ];
       try {
         const at = await getSharedAccessToken();
-        const perMap = await Promise.all(
-          mappen.map((m) =>
-            getFileLinksWithNames(at, `${body.dropboxFolderPath}/${m.map}`).catch(() => [])
+        const gevonden = await Promise.all(
+          MAPPEN.map((m) =>
+            getFolderLinkWithCount(at, `${body.dropboxFolderPath}/${m.map}`).catch(() => null)
           )
         );
-        perMap.forEach((bestanden, i) => {
-          if (bestanden.length === 0) return;
-          blokken.push(`${mappen[i].kop}:\n${bestanden.map((f) => `• ${f.name}: ${f.url}`).join("\n")}`);
-        });
+        mappen = gevonden.flatMap((res, i) =>
+          res ? [{ kop: MAPPEN[i].kop, toelichting: MAPPEN[i].toelichting, aantal: res.count, url: res.url }] : []
+        );
       } catch (err) {
-        console.error("Kon Dropbox-links voor de opmerking niet ophalen", err);
+        // Zonder links blijft de opmerking met de verdiepingen staan: die zegt
+        // op zichzelf al iets, en een order zonder opmerking is slechter dan
+        // een order met een halve.
+        console.error("Kon Dropbox-maplinks voor de opmerking niet ophalen", err);
       }
     }
 
-    if (blokken.length > 0) {
+    const opmerking = bouwOrderOpmerking({
+      verdiepingenPerBestand: body.floorsByFile ?? {},
+      mappen,
+    });
+    if (opmerking) {
       try {
-        await addOrderComment(order.id, blokken.join("\n\n"));
+        await addOrderComment(order.id, opmerking);
       } catch (err) {
         console.error("Mediatask comment failed", err);
         commentError = err instanceof Error ? err.message : "Opmerking plaatsen mislukt";
