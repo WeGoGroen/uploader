@@ -627,14 +627,21 @@ export async function ensureProjectFolder(
     await voegBijlageGToe(accessToken, path);
   }
 
+  // Straatbeeld en luchtfoto helpen bij een energielabel of NEN2580: daar is
+  // het naslag bij de opname. Bij media niet — die map is de aanlevering van
+  // de opnemer, en beeld van Google dat daartussen staat gaat mee de
+  // bewerking in als was het zelf geschoten.
+  //
   // NEN2580 gebruikt "Photo's" i.p.v. "Foto's"; zonder dit onderscheid zou er
   // een losse extra map in het NEN-sjabloon verschijnen.
-  await addStreetViewPhotos(
-    accessToken,
-    `${path}/${kind === "nen" ? "Photo's" : kind === "media" ? "In/Raw/Photo's" : "Foto's"}`,
-    woonplaats,
-    straatEnNummer
-  );
+  if (kind !== "media") {
+    await addStreetViewPhotos(
+      accessToken,
+      `${path}/${kind === "nen" ? "Photo's" : "Foto's"}`,
+      woonplaats,
+      straatEnNummer
+    );
+  }
   const url = await getOrCreateSharedLink(accessToken, path);
   // De aangemaakte submappen teruggeven, zodat de app kan tonen wat er
   // klaarstaat i.p.v. dat de opnemer in Dropbox moet gaan kijken.
