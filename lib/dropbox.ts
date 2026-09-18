@@ -226,11 +226,24 @@ export const NEN_PROJECT_SUBFOLDERS = ["Additionals", "Optimized", "Photo's", "R
  * Media-opnames: los van een energielabel of NEN2580 wordt er ook beeld
  * aangeleverd voor de verkoopstyling van een pand.
  *
- * Alles wat de opnemer aanlevert gaat onder "in" — dat is de afgesproken
- * scheiding tussen wat erin gaat en wat de bewerker er later uit oplevert.
- * Eén map per soort daarbinnen, zodat de ontvanger meteen weet wat waar staat.
+ * Twee kanten: "In" is wat de opnemer aanlevert, "OUT" is wat de bewerker
+ * oplevert. Het onbewerkte materiaal staat een niveau dieper in "In/Raw" —
+ * dan is er in "In" plaats voor wat er verder nog binnenkomt (aanlevering van
+ * de makelaar, een tweede bezoek) zonder dat dat tussen de camerabestanden
+ * belandt. Beide kanten dezelfde drie mappen per soort, zodat "Photo's" aan
+ * de OUT-kant hetzelfde betekent als aan de In-kant.
  */
-export const MEDIA_PROJECT_SUBFOLDERS = ["in", "in/Photo's", "in/Video", "in/360"];
+export const MEDIA_PROJECT_SUBFOLDERS = [
+  "In",
+  "In/Raw",
+  "In/Raw/Photo's",
+  "In/Raw/Video",
+  "In/Raw/360",
+  "OUT",
+  "OUT/Photo's",
+  "OUT/Video",
+  "OUT/360",
+];
 
 /**
  * Maakt meerdere mappen in één API-call aan via Dropbox's batch-endpoint.
@@ -594,7 +607,7 @@ export async function ensureProjectFolder(
         ? MEDIA_PROJECT_SUBFOLDERS
         : PROJECT_SUBFOLDERS;
   await createFolder(accessToken, path);
-  // Per niveau aanmaken: een geneste map ("in/Photo's") kan pas als zijn
+  // Per niveau aanmaken: een geneste map ("In/Raw/Photo's") kan pas als zijn
   // ouder bestaat, en binnen één batch ligt de volgorde niet vast.
   const perDiepte = new Map<number, string[]>();
   for (const name of subfolders) {
@@ -614,14 +627,21 @@ export async function ensureProjectFolder(
     await voegBijlageGToe(accessToken, path);
   }
 
+  // Straatbeeld en luchtfoto helpen bij een energielabel of NEN2580: daar is
+  // het naslag bij de opname. Bij media niet — die map is de aanlevering van
+  // de opnemer, en beeld van Google dat daartussen staat gaat mee de
+  // bewerking in als was het zelf geschoten.
+  //
   // NEN2580 gebruikt "Photo's" i.p.v. "Foto's"; zonder dit onderscheid zou er
   // een losse extra map in het NEN-sjabloon verschijnen.
-  await addStreetViewPhotos(
-    accessToken,
-    `${path}/${kind === "nen" ? "Photo's" : kind === "media" ? "in/Photo's" : "Foto's"}`,
-    woonplaats,
-    straatEnNummer
-  );
+  if (kind !== "media") {
+    await addStreetViewPhotos(
+      accessToken,
+      `${path}/${kind === "nen" ? "Photo's" : "Foto's"}`,
+      woonplaats,
+      straatEnNummer
+    );
+  }
   const url = await getOrCreateSharedLink(accessToken, path);
   // De aangemaakte submappen teruggeven, zodat de app kan tonen wat er
   // klaarstaat i.p.v. dat de opnemer in Dropbox moet gaan kijken.
