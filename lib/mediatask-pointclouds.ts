@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { getSharedAccessToken, listFolderFiles, openFileStream } from "@/lib/dropbox";
-import { attachPointclouds, listPointclouds, requestPointcloudUploads } from "@/lib/mediatask";
+import {
+  attachPointclouds,
+  isDefinitieveWeigering,
+  listPointclouds,
+  requestPointcloudUploads,
+  weigeringUitleg,
+} from "@/lib/mediatask";
 import { getOptionalRedis } from "@/lib/redis";
 
 /**
@@ -29,7 +35,13 @@ export function leesbareFout(err: unknown): string {
   if (/not_found/i.test(t)) return "het bestand staat niet meer in Dropbox";
   if (/insufficient_space/i.test(t)) return "Dropbox zit vol";
   if (/expired_access_token|invalid_access_token/i.test(t)) return "de Dropbox-koppeling is verlopen";
-  if (/\b(401|403)\b/.test(t)) return "Mediatask weigerde het verzoek (geen toegang)";
+  // Een 403 gaat bij Mediatask over déze order: hij is niet van de sleutel
+  // waarmee geüpload wordt, of hij is geen concept meer. "Geen toegang"
+  // stuurde iedereen naar de koppeling kijken, terwijl daar niets aan
+  // mankeert. Welke van de twee het is, zegt weigeringUitleg erbij zodra de
+  // toestand van de order opgehaald kon worden.
+  if (/\b403\b/.test(t)) return "Mediatask neemt niets aan bij deze order (403) — de order hoort niet bij deze sleutel of is al ingediend";
+  if (/\b401\b/.test(t)) return "Mediatask weigerde het verzoek (geen toegang)";
   if (/\b(429)\b/.test(t)) return "te veel verzoeken tegelijk — probeer het zo nog eens";
   if (/\b(50\d)\b/.test(t)) return "Mediatask of Dropbox gaf een serverfout";
   if (/Amazon weigerde/i.test(t)) return t;
@@ -43,6 +55,10 @@ export interface ScanUitkomst {
   /** Hing al aan de order (op de achtergrond verstuurd tijdens het uploaden)
       en is dus niet opnieuw verstuurd. */
   alAanwezig?: boolean;
+  /** Mediatask weigerde het definitief: opnieuw op versturen drukken levert
+      exact dezelfde fout op. Het scherm hoort dan een andere weg te wijzen
+      dan "probeer het nog eens". */
+  definitief?: boolean;
 }
 
 /**
@@ -162,9 +178,15 @@ export async function stuurScanVanuitDropbox(
       void bewaarMd5(path, bekend);
       return uitkomst;
     } catch (err) {
-      // Kan van alles zijn (verkeerde hash, maar ook een Mediatask-storing);
-      // de verse-hash-poging hieronder is in beide gevallen het juiste
-      // antwoord en gedraagt zich als de retry die er vroeger ook al was.
+      // Een verse hash lost precies één ding op: een checksum die niet meer bij
+      // het bestand hoort. Weigert Mediatask het verzoek zélf, dan verandert
+      // een tweede hash daar niets aan — en het opnieuw hashen betekent wél een
+      // complete doorgang van een scan van honderden MB's door Dropbox, om
+      // daarna dezelfde weigering nog een keer te krijgen. Twee foutmeldingen,
+      // minuten wachten, dezelfde oorzaak.
+      if (isDefinitieveWeigering(err)) throw err;
+      // Een storing of hapering: dan is opnieuw proberen met een verse hash
+      // precies goed, en gedraagt dit zich als de retry die er altijd al was.
       console.error(`Scan versturen met bekende MD5 mislukt (${path}), opnieuw met verse hash`, err);
     }
   }
@@ -205,19 +227,33 @@ export async function stuurScansVanuitDropbox(
   // komt daar overheen.
   const alAanwezig = await alAanwezigeNamen(orderId);
 
+  // Weigert Mediatask de eerste scan definitief, dan weigert hij ze allemaal:
+  // de reden zit in de order, niet in het bestand. Verder proberen kost per
+  // scan een doorgang door Dropbox en levert per scan dezelfde foutregel op —
+  // vandaar dat de reden hier één keer wordt vastgesteld en daarna geldt.
+  let weigering: string | null = null;
+
   for (const bestand of bestanden) {
     if (alAanwezig.has(bestand.name)) {
       uitkomsten.push({ naam: bestand.name, ok: true, alAanwezig: true });
+      continue;
+    }
+    if (weigering) {
+      uitkomsten.push({ naam: bestand.name, ok: false, fout: weigering, definitief: true });
       continue;
     }
     try {
       await stuurScanVanuitDropbox(orderId, `${projectPad}/Optimized/${bestand.name}`, token);
       uitkomsten.push({ naam: bestand.name, ok: true });
     } catch (err) {
+      if (isDefinitieveWeigering(err)) {
+        weigering = (await weigeringUitleg(orderId))?.tekst ?? leesbareFout(err);
+      }
       uitkomsten.push({
         naam: bestand.name,
         ok: false,
-        fout: leesbareFout(err),
+        fout: weigering ?? leesbareFout(err),
+        definitief: weigering !== null,
       });
     }
   }

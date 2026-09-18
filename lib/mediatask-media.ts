@@ -3,6 +3,7 @@ import { getSharedAccessToken, listFolderFiles, openFileStream } from "@/lib/dro
 import {
   attachPhotos,
   GeenDirecteUpload,
+  isDefinitieveWeigering,
   listPhotos,
   requestPhotoUploads,
   type MediaUploadTarget,
@@ -132,7 +133,11 @@ export async function stuurMediaVanuitDropbox(
       // Een verkeerde hash is de meest waarschijnlijke oorzaak (het bestand
       // kan ondertussen vervangen zijn); bij een storing is opnieuw proberen
       // met een verse hash net zo goed het juiste antwoord.
-      if (err instanceof GeenDirecteUpload) throw err;
+      //
+      // Maar niet bij een weigering van Mediatask zelf: die blijft staan, en
+      // opnieuw hashen betekent bij een rondleidingsvideo een tweede doorgang
+      // van honderden MB's door Dropbox voor exact dezelfde fout.
+      if (err instanceof GeenDirecteUpload || isDefinitieveWeigering(err)) throw err;
       console.error(`Foto versturen met bekende MD5 mislukt (${path}), opnieuw met verse hash`, err);
     }
   }
@@ -186,9 +191,14 @@ export async function stuurMediaVanuitDropboxMap(
         await stuurMediaVanuitDropbox(orderId, `${mapPad}/${bestand.name}`, token);
         uitkomsten.push({ naam: bestand.name, map, ok: true });
       } catch (err) {
-        if (err instanceof GeenDirecteUpload) {
+        if (err instanceof GeenDirecteUpload || isDefinitieveWeigering(err)) {
           // Geen enkel bestand komt er dan als bijlage in; verder proberen
           // kost alleen tijd. Ineens de hele lijst als link markeren.
+          //
+          // Ook bij een weigering die niet over foto's gaat maar over de order
+          // (403 op een order die geen concept meer is): dan is er per foto,
+          // video en 360-opname niets anders te melden dan diezelfde ene
+          // oorzaak, en zijn de links wél een aanlevering.
           return await alsLinks(projectPad, token, uitkomsten);
         }
         uitkomsten.push({ naam: bestand.name, map, ok: false, fout: leesbareFout(err) });
@@ -213,12 +223,18 @@ async function alsLinks(
   token: string,
   tot_nu_toe: MediaUitkomst[]
 ): Promise<MediaUitkomst[]> {
-  const uitkomsten = tot_nu_toe.filter((u) => !u.ok);
+  const links: MediaUitkomst[] = [];
   for (const map of MEDIA_MAPPEN) {
     const bestanden = await listFolderFiles(token, `${projectPad}/${map}`).catch(() => []);
     for (const b of bestanden) {
-      uitkomsten.push({ naam: b.name, map, ok: true, alsLink: true });
+      links.push({ naam: b.name, map, ok: true, alsLink: true });
     }
   }
-  return uitkomsten;
+  // Een bestand dat eerder om een eigen reden misging (bv. weggehaald uit
+  // Dropbox) staat niet in de linkenlijst en houdt zijn foutmelding. Wat er
+  // wél in staat is nu als link geleverd en hoort niet twee keer terug te
+  // komen — één keer rood en één keer groen was het verwarrendst van alles.
+  const geleverd = new Set(links.map((l) => `${l.map}/${l.naam}`));
+  const resterend = tot_nu_toe.filter((u) => !u.ok && !geleverd.has(`${u.map}/${u.naam}`));
+  return [...resterend, ...links];
 }

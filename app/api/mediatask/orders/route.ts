@@ -4,9 +4,15 @@ import {
   createOrder,
   getOrder,
   getProducts,
+  isEigenOrder,
+  isSleutelGeweigerd,
   listOrders,
+  onthoudEigenOrder,
+  onthoudGeweigerdeOrder,
+  onthoudSleutelWeigering,
   submitOrder,
   vindBestaandeDraft,
+  type MediataskOrder,
 } from "@/lib/mediatask";
 import { getFileLinksWithNames, getSharedAccessToken } from "@/lib/dropbox";
 import { bewaarOrderPad, stuurScansVanuitDropbox, type ScanUitkomst } from "@/lib/mediatask-pointclouds";
@@ -116,21 +122,40 @@ export async function POST(request: Request) {
     const bestaande = body.orderId
       ? null
       : await vindBestaandeDraft(body.street!, body.number!, body.city!).catch(() => null);
-    const order = body.orderId
+
+    // Een verse order aanmaken kan alleen met de volledige veldset. Bij het
+    // afronden stuurt de pagina die altijd mee, ook mét ordernummer — dat is
+    // precies wat het herstel verderop nodig heeft.
+    const kanNieuweOrderMaken = Boolean(
+      body.productId && body.priorityId && body.agencyId && body.city && body.street && body.number && filled.length > 0
+    );
+    const maakOrder = async () => {
+      const verse = await createOrder({
+        product_id: body.productId!,
+        priority_id: body.priorityId!,
+        agency_id: body.agencyId!,
+        state: "draft",
+        city: body.city!,
+        street: body.street!,
+        number: body.number!,
+        postcode: body.postcode,
+        product_configuration: Object.fromEntries(filled),
+        files: { photos, drawings, additional: [] },
+      });
+      // Vastleggen dat hij van ons is. Weigert hij later onze schrijfacties,
+      // dan weten we daarmee dat het niet aan het eigendom ligt en dat nóg een
+      // order aanmaken alleen een leeg concept oplevert.
+      await onthoudEigenOrder(verse.id);
+      return verse;
+    };
+
+    let order: MediataskOrder = body.orderId
       ? await getOrder(body.orderId)
-      : bestaande ??
-        (await createOrder({
-          product_id: body.productId!,
-          priority_id: body.priorityId!,
-          agency_id: body.agencyId!,
-          state: "draft",
-          city: body.city!,
-          street: body.street!,
-          number: body.number!,
-          postcode: body.postcode,
-          product_configuration: Object.fromEntries(filled),
-          files: { photos, drawings, additional: [] },
-        }));
+      : (bestaande ?? (await maakOrder()));
+    // Hebben we deze order zelf zojuist aangemaakt? Zo ja, dan is hij van onze
+    // sleutel en heeft er nóg een aanmaken geen zin — dat zou alleen concepten
+    // achterlaten. Een hergebruikte of meegegeven order kan van een ander zijn.
+    const zelfAangemaakt = !body.orderId && !bestaande;
 
     /*
       Hergebruiken mag, maar niet met een ander product.
@@ -213,7 +238,12 @@ export async function POST(request: Request) {
       // accepteert geen foto-bijlagen (elke schrijfactie op het photos-veld
       // geeft 422 — live vastgesteld), dus deze links zíjn de aanlevering.
       const mappen: { map: string; kop: string }[] = [
-        { map: "Optimized", kop: "Point clouds (Optimized) — also uploaded directly to this order" },
+        // Geen belofte over een directe upload in deze kop: de opmerking wordt
+        // geplaatst vóórdat de puntenwolken verstuurd zijn (daar gaan minuten
+        // overheen, en een opmerking die door een time-out wegvalt is erger dan
+        // een sobere kop). Weigert Mediatask de scan alsnog, dan is deze link
+        // de aanlevering — en dan hoort er niet te staan dat hij er al hangt.
+        { map: "Optimized", kop: "Point clouds (Optimized) — download links" },
         { map: "RAW", kop: "RAW scans" },
         { map: "Additionals", kop: "Additional files" },
         { map: "Photo's", kop: "Photos — please download via these links" },
@@ -236,50 +266,159 @@ export async function POST(request: Request) {
       }
     }
 
-    if (blokken.length > 0) {
-      try {
-        await addOrderComment(order.id, blokken.join("\n\n"));
-      } catch (err) {
-        console.error("Mediatask comment failed", err);
-        commentError = err instanceof Error ? err.message : "Opmerking plaatsen mislukt";
+    /**
+     * Alles wat er aan een order geleverd moet worden: de opmerking, de
+     * puntenwolken en de media.
+     *
+     * Staat apart omdat het soms twee keer moet. Weigert Mediatask alles wat
+     * we aan een order schrijven, dan is die order voor ons onbruikbaar en
+     * gaat dezelfde levering naar een verse order — zie het herstel hieronder.
+     *
+     * Vóór het indienen: aan een ingediende order valt bij Mediatask niets
+     * meer toe te voegen, dus wat er dan niet aan hangt komt er nooit meer bij.
+     */
+    async function leverAan(doel: MediataskOrder) {
+      let commentFout: string | null = null;
+      if (blokken.length > 0) {
+        try {
+          await addOrderComment(doel.id, blokken.join("\n\n"));
+        } catch (err) {
+          console.error("Mediatask comment failed", err);
+          commentFout = err instanceof Error ? err.message : "Opmerking plaatsen mislukt";
+        }
+      }
+
+      // De scans uit Optimized gaan als echte puntenwolk mee. Dit gebeurt hier
+      // en niet in de pagina, zodat het óók gebeurt als de order rechtstreeks
+      // vanaf de orderpagina verstuurd wordt — daar ging het eerder mis: die
+      // route maakte een order aan zonder ooit een scan mee te sturen.
+      let scansUit: ScanUitkomst[] = [];
+      let mediaUit: MediaUitkomst[] = [];
+      /** Ging de scanstap in zijn geheel onderuit (en weten we dus niets)? */
+      let stuk = false;
+      if (body.dropboxFolderPath) {
+        // Onthouden bij welke map deze order hoort, zodat een scan die hun
+        // verwerker later afkeurt opnieuw verstuurd kan worden.
+        await bewaarOrderPad(doel.id, body.dropboxFolderPath);
+        scansUit = await stuurScansVanuitDropbox(doel.id, body.dropboxFolderPath).catch((err) => {
+          console.error("Puntenwolken doorsturen mislukt", err);
+          // Een lege lijst betekent hier "we weten het niet", niet "er was
+          // niets te versturen" — en dat is precies het verschil dat verderop
+          // over indienen beslist.
+          stuk = true;
+          return [];
+        });
+
+        // Foto's, video's en 360-opnames gaan als foto mee aan de order. Net
+        // als bij de scans nooit blokkerend — de order bestaat al, dus een
+        // foto die niet aankomt mag hem niet laten sneuvelen; wat er misging
+        // staat per bestand in het antwoord.
+        mediaUit = await stuurMediaVanuitDropboxMap(doel.id, body.dropboxFolderPath).catch((err) => {
+          console.error("Foto's en video's doorsturen mislukt", err);
+          return [];
+        });
+      }
+      return { commentFout, scansUit, mediaUit, stuk };
+    }
+
+    let levering = await leverAan(order);
+
+    /**
+     * Herstel: een concept waar onze sleutel niet aan mag schrijven.
+     *
+     * `listOrders` geeft ook orders terug die niet van onze sleutel zijn, en
+     * sinds elke opnemer een eigen Mediatask-sleutel heeft betekent "een
+     * concept met het juiste adres" niet meer "een concept waar wij bij
+     * kunnen". Aanmaken en opmerkingen gaan dan gewoon door en pas de
+     * puntenwolk loopt tegen een 403 — op het moment dat de opnemer al klaar
+     * denkt te zijn. Bij Balboastraat 12-3 en 12-4 (units in hetzelfde pand,
+     * waar dus concepten van een ander kunnen staan) liep het zo vast.
+     *
+     * Zo'n order is voor ons dood, dus gaat de levering naar een verse order.
+     * Drie voorwaarden houden dat veilig:
+     *
+     *  - alleen bij een order die we niet zélf net aangemaakt hebben. Weigert
+     *    onze eigen verse order, dan zit het niet in het eigendom en zou nog
+     *    een order alleen een leeg concept achterlaten;
+     *  - alleen zolang de geweigerde order nog concept is. Is hij ingediend,
+     *    dan ligt er echt werk bij de verwerker en zou een tweede order een
+     *    dubbele opdracht zijn — dat is duurder dan een foutmelding;
+     *  - één keer per verzoek.
+     */
+    let verplaatstVan: number | null = null;
+    const definitiefGeweigerd = levering.scansUit.some((x) => !x.ok && x.definitief);
+    // Ook een order uit een eerdere aanroep (de pop-up aan het begin) telt als
+    // de onze: die is met dezelfde weg aangemaakt, dus weigert hij ons, dan
+    // ligt het niet aan het eigendom.
+    const vanOns = zelfAangemaakt || (await isEigenOrder(order.id));
+    // Is eerder al gebleken dat Mediatask ook onze eigen verse orders weigert,
+    // dan is de oorzaak de sleutel en niet de order. Een verse order aanmaken
+    // helpt dan niet en laat alleen een leeg concept achter — bij elke poging
+    // opnieuw. Dus overslaan zolang die rem staat.
+    const sleutelGeweigerd = await isSleutelGeweigerd();
+    if (definitiefGeweigerd && !vanOns && !sleutelGeweigerd && kanNieuweOrderMaken) {
+      const huidige = await getOrder(order.id).catch(() => null);
+      if (String(huidige?.state ?? "").toLowerCase() === "draft") {
+        // Nooit meer oppakken: anders vist vindBestaandeDraft dezelfde order
+        // er bij de volgende paginaopening zo weer uit.
+        await onthoudGeweigerdeOrder(order.id);
+        try {
+          const verse = await maakOrder();
+          console.error(
+            `Order #${order.id} weigert onze schrijfacties en is nog concept; ` +
+              `de aanlevering gaat naar de verse order #${verse.id}`
+          );
+          verplaatstVan = order.id;
+          order = verse;
+          levering = await leverAan(verse);
+        } catch (err) {
+          console.error("Verse order aanmaken na een geweigerd concept mislukt", err);
+        }
       }
     }
 
-    // De scans uit Optimized gaan als echte puntenwolk mee. Dit gebeurt hier
-    // en niet in de pagina, zodat het óók gebeurt als de order rechtstreeks
-    // vanaf de orderpagina verstuurd wordt — daar ging het eerder mis: die
-    // route maakte een order aan zonder ooit een scan mee te sturen.
-    //
-    // Vóór het indienen: aan een ingediende order valt bij Mediatask niets
-    // meer toe te voegen, dus wat er dan niet aan hangt komt er nooit meer bij.
-    let scans: ScanUitkomst[] = [];
-    let media: MediaUitkomst[] = [];
-    if (body.dropboxFolderPath) {
-      // Onthouden bij welke map deze order hoort, zodat een scan die hun
-      // verwerker later afkeurt opnieuw verstuurd kan worden.
-      await bewaarOrderPad(order.id, body.dropboxFolderPath);
-      scans = await stuurScansVanuitDropbox(order.id, body.dropboxFolderPath).catch((err) => {
-        console.error("Puntenwolken doorsturen mislukt", err);
-        return [];
-      });
-
-      // Foto's, video's en 360-opnames gaan als foto mee aan de order. Ook dit
-      // vóór het indienen: aan een ingediende order valt bij Mediatask niets
-      // meer toe te voegen. En net als bij de scans nooit blokkerend — de
-      // order bestaat al, dus een foto die niet aankomt mag hem niet laten
-      // sneuvelen; wat er misging staat per bestand in het antwoord.
-      media = await stuurMediaVanuitDropboxMap(order.id, body.dropboxFolderPath).catch((err) => {
-        console.error("Foto's en video's doorsturen mislukt", err);
-        return [];
-      });
+    // Weigert Mediatask óók een order die we zojuist zelf hebben aangemaakt,
+    // dan gaat het niet over deze order maar over wat de sleutel mag. Dat
+    // vastleggen zet de rem hierboven aan, zodat een volgende poging geen leeg
+    // concept meer achterlaat voor een probleem dat daar niet zit.
+    if (levering.scansUit.some((x) => !x.ok && x.definitief) && (vanOns || verplaatstVan)) {
+      const nu = await getOrder(order.id).catch(() => null);
+      if (String(nu?.state ?? "").toLowerCase() === "draft") {
+        console.error(
+          `Mediatask weigert een puntenwolk op onze eigen verse order #${order.id}; ` +
+            `dit is een rechtenkwestie op de Mediatask-sleutel, niet iets in de order`
+        );
+        await onthoudSleutelWeigering();
+      }
     }
+
+    commentError = levering.commentFout;
+    const scans: ScanUitkomst[] = levering.scansUit;
+    const media: MediaUitkomst[] = levering.mediaUit;
+    const scanStapStuk = levering.stuk;
 
     // Indienen apart afvangen: de order bestaat op dit punt al bij Mediatask,
     // dus een mislukte submit mag niet als "hele upload mislukt" terugkomen —
     // anders maakt een tweede poging een dubbele order aan. De app toont dan
     // dat de order er staat maar handmatig ingediend moet worden.
+    //
+    // En nooit indienen met een scan die er niet aan hangt. Indienen is
+    // eenrichtingsverkeer: daarna neemt Mediatask geen bestanden meer aan, dus
+    // een order die zonder puntenwolk de deur uit gaat is niet meer te
+    // repareren — elke volgende poging krijgt een 403 en de verwerker krijgt
+    // een NEN-opdracht zonder scan. Blijft hij concept, dan kan dezelfde knop
+    // het morgen gewoon afmaken.
     let submitError: string | null = null;
-    if (body.submitNow) {
+    const misluktenScans = scans.filter((s) => !s.ok);
+    if (body.submitNow && misluktenScans.length > 0) {
+      submitError =
+        `Niet ingediend: ${misluktenScans.length} van de ${scans.length} scans hangen niet aan de order ` +
+        `(${misluktenScans[0].fout ?? "onbekende reden"}). De order blijft als concept staan, zodat het opnieuw kan.`;
+    } else if (body.submitNow && scanStapStuk) {
+      submitError =
+        "Niet ingediend: het doorsturen van de scans liep vast, dus of ze aan de order hangen is niet vast te " +
+        "stellen. De order blijft als concept staan — probeer het versturen opnieuw.";
+    } else if (body.submitNow) {
       try {
         await submitOrder(order.id);
         order.state = "submitted";
@@ -295,6 +434,10 @@ export async function POST(request: Request) {
       commentError,
       scans,
       media,
+      // Stond de aanlevering eerst voor een andere order klaar? Dan hoort de
+      // pagina dat te zeggen: het ordernummer dat de opnemer onderweg zag
+      // klopt vanaf nu niet meer.
+      verplaatstVan,
       photoCount: photos.length,
       drawingCount: drawings.length,
       additionalCount: 0,
