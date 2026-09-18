@@ -775,11 +775,6 @@ function toDirectDownloadUrl(shareUrl: string): string {
   return shareUrl.includes("?") ? `${shareUrl}&dl=1` : `${shareUrl}?dl=1`;
 }
 
-/** Directe download-links voor alle bestanden in een map, gebruikt om
-    foto's/tekeningen als kant-en-klare URL's aan te leveren bij Mediatask —
-    geen dubbele upload nodig, ze staan al in Dropbox. */
-/** Zelfde als getFileDirectLinks, maar mét bestandsnaam — nodig om in een
-    Mediatask-opmerking te kunnen zeggen wélk bestand bij welke link hoort. */
 /**
  * Een tijdelijke link naar één bestand: vier uur geldig, geen blijvend spoor.
  *
@@ -827,17 +822,26 @@ export async function listFolderWithTemporaryLinks(
   return uit;
 }
 
-export async function getFileLinksWithNames(
+/**
+ * Eén gedeelde link naar een hele map, plus hoeveel bestanden erin zitten.
+ *
+ * Dit verving een link per bestand in de Mediatask-opmerking. Dat was niet
+ * alleen onleesbaar bij dertig foto's, het was ook traag: per bestand een
+ * aparte create_shared_link, achter elkaar. Nu is het één aanroep voor de map.
+ *
+ * Bewust géén directe download-URL: bij een map betekent dl=1 dat er meteen een
+ * zip begint te lopen, terwijl de verwerker eerst wil zien wat erin zit.
+ *
+ * Geeft null bij een lege of onbestaande map — daar hoort geen kopje met een
+ * link bij.
+ */
+export async function getFolderLinkWithCount(
   accessToken: string,
   folderPath: string
-): Promise<{ name: string; url: string }[]> {
+): Promise<{ url: string; count: number } | null> {
   const files = await listFolderFiles(accessToken, folderPath);
-  const out: { name: string; url: string }[] = [];
-  for (const file of files) {
-    const url = await getOrCreateSharedLink(accessToken, `${folderPath}/${file.name}`);
-    out.push({ name: file.name, url: toDirectDownloadUrl(url) });
-  }
-  return out;
+  if (files.length === 0) return null;
+  return { url: await getOrCreateSharedLink(accessToken, folderPath), count: files.length };
 }
 
 export async function getFileDirectLinks(accessToken: string, folderPath: string): Promise<string[]> {
