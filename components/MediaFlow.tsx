@@ -353,6 +353,23 @@ export default function MediaFlow() {
     setFolderError(null);
   }
 
+  /**
+   * Sluit de opname af vanaf het slotscherm: de opname geldt als afgerond en
+   * verdwijnt uit de lijst met openstaand werk, en je staat klaar voor het
+   * volgende adres.
+   *
+   * De sessie blijft wél staan zolang er nog iets loopt of iets mislukt is:
+   * die lijst is de enige weg terug naar een upload die nog onderweg is, en
+   * die weghalen zou de bestanden onvindbaar maken op het moment dat je ze
+   * juist nodig hebt.
+   */
+  function rondAf() {
+    if (melding) meldAfgerond(melding);
+    if (folder && bezigTotaal === 0 && mislukteTotaal === 0) vergeetMediaSessie(folder.path);
+    opnieuwBeginnen();
+    window.scrollTo(0, 0);
+  }
+
   function volgende() {
     const volgend = MEDIA_STAPPEN[stapIndex + 1];
     // Bij de laatste stap is de opname afgerond; zonder dit blijft hij als
@@ -369,6 +386,7 @@ export default function MediaFlow() {
   }
 
   const bezigTotaal = takenVanOpname.filter((t) => t.dropbox === "uploading").length;
+  const mislukteTotaal = takenVanOpname.filter((t) => t.dropbox === "error").length;
 
   /**
    * Scherm wakker houden zolang er iets omhoog gaat. Een webpagina kan niet
@@ -842,15 +860,14 @@ export default function MediaFlow() {
             })}
           </ul>
 
+          {/* Afronden als laatste handeling, geen sprong naar Dropbox: het werk
+              is hier klaar en de opnemer gaat door naar het volgende adres.
+              Wie tóch in de map wil kijken doet dat met "Openen" in de balk
+              hierboven — dat staat er op elke stap al. */}
           <div className="form-foot" style={{ marginTop: 16 }}>
-            <button className="btn btn-quiet" onClick={opnieuwBeginnen}>
-              Nieuw adres
+            <button className="btn btn-primary btn-block" onClick={rondAf}>
+              Afronden
             </button>
-            {folder && (
-              <a className="btn btn-primary" href={folder.url} target="_blank" rel="noopener noreferrer">
-                Openen in Dropbox
-              </a>
-            )}
           </div>
         </div>
       </>
@@ -986,7 +1003,9 @@ export default function MediaFlow() {
           {/* Overslaan mag: niet elke opname heeft alle drie de soorten. De
               uploads lopen op de achtergrond door als je verdergaat. */}
           <button className="btn btn-primary" onClick={volgende}>
-            {laatste ? "Afronden →" : taken.length === 0 ? "Overslaan →" : "Volgende →"}
+            {/* Niet "Afronden": dat is de knop op het slotscherm zelf. Deze
+                brengt je daarheen, naar het overzicht van wat er staat. */}
+            {laatste ? "Klaar →" : taken.length === 0 ? "Overslaan →" : "Volgende →"}
           </button>
         </div>
       </div>
