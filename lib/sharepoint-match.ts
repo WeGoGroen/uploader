@@ -182,12 +182,31 @@ export function parseAdresVeld(
     .filter(Boolean);
   if (regels.length === 0) return null;
 
-  const addressLine = regels[0];
-  if (!parseAddressLine(addressLine)) return null;
+  /*
+    Twee schrijfwijzen komen voor, en de tweede werd stil verkeerd gelezen.
 
-  // Tweede regel is "1055 BW  AMSTERDAM"; zonder tweede regel staat de plaats
-  // soms achter een komma op de eerste.
-  const plaatsRegel = regels[1] ?? "";
+    Meestal staat het adres op twee regels: straat+nummer boven, "1055 BW
+    AMSTERDAM" eronder. Maar een deel van de taken heeft alles op één regel met
+    een komma ertussen: "Balboastraat 12-3, 1057VV Amsterdam". Zonder de splitsing
+    hieronder gaf die vorm géén woonplaats terug, viel taskToAddress terug op de
+    taaknaam — en daar stond bij drie adressen "Amsterdam1". Dan zoekt de
+    overdracht een projectmap die niet bestaat en meldt "niets gevonden", terwijl
+    de map er gewoon staat.
+  */
+  let addressLine = regels[0];
+  let plaatsRegel = regels[1] ?? "";
+
+  if (!plaatsRegel && addressLine.includes(",")) {
+    const komma = addressLine.lastIndexOf(",");
+    const links = addressLine.slice(0, komma).trim();
+    const rechts = addressLine.slice(komma + 1).trim();
+    if (links && rechts && parseAddressLine(links)) {
+      addressLine = links;
+      plaatsRegel = rechts;
+    }
+  }
+
+  if (!parseAddressLine(addressLine)) return null;
   const woonplaats = plaatsRegel.replace(/^\s*\d{4}\s?[A-Za-z]{2}\s*/, "").trim();
   if (!woonplaats) return null;
 
@@ -259,6 +278,33 @@ export function matchesPostcodeFolder(name: string, sleutel: PostcodeSleutel): b
   if (!pc || pc.index === undefined) return false;
   if (`${pc[1]}${pc[2]}` !== sleutel.postcode) return false;
 
-  const voorPostcode = compact(genormaliseerd.slice(0, pc.index));
-  return voorPostcode === sleutel.huisnummer;
+  /*
+    Het huisnummer staat meestal vóór de postcode ("58-3 1055 BW WG"), maar in
+    het archief komen twee andere vormen voor die anders stil zouden afvallen:
+
+      "1053 BT 1-3 WGG"                        — postcode eerst
+      "Anna van den Vondelstraat 5-1 1054GX …" — mét straatnaam ervoor
+
+    Bij de eerste staat het nummer erachter, bij de tweede is alles-voor-de-
+    postcode niet het huisnummer maar straat+nummer. Daarom kijken we naar
+    beide kanten, en aan de voorkant naar het laatste stuk in plaats van naar
+    alles: precies genoeg om deze vormen te herkennen zonder de scheiding
+    tussen buren op te geven — postcode én huisnummer moeten nog steeds exact
+    kloppen.
+  */
+  const voor = genormaliseerd.slice(0, pc.index);
+  const na = genormaliseerd.slice(pc.index + pc[0].length);
+
+  if (compact(voor) === sleutel.huisnummer) return true;
+
+  // Laatste "woordgroep" vóór de postcode: het huisnummer begint bij het
+  // laatste losse getal, alles daarvóór is straatnaam.
+  const staart = voor.match(/(\d[A-Z0-9\s.-]*)$/);
+  if (staart && compact(staart[1]) === sleutel.huisnummer) return true;
+
+  // Achter de postcode: eerste woordgroep, vóór eventuele initialen/plaats.
+  const kop = na.match(/^[\s,-]*(\d[A-Z0-9\s.-]*?)(?:\s+[A-Z]{2,}\d*\s*)?$/);
+  if (kop && compact(kop[1]) === sleutel.huisnummer) return true;
+
+  return false;
 }

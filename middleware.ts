@@ -33,6 +33,10 @@ const OPEN_PATHS = [
   // route controleert zelf de handtekening die ClickUp over de body zet, en
   // weigert alles zonder geldige handtekening.
   "/api/clickup/webhook",
+  // Resend levert hier de mail van RVO af met het afschrift van een
+  // geregistreerd energielabel. Ook geen sessie, en ook hier controleert de
+  // route zelf de handtekening over de ruwe body.
+  "/api/mail/eponline",
 ];
 
 /**
@@ -77,9 +81,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.json({ error: "niet_ingelogd" }, { status: 401 });
   }
 
+  // Geen ?next= meer: na het inloggen begin je op het dashboard. Zie de
+  // toelichting in app/login/page.tsx — terugkomen in het scherm waar je
+  // sessie verliep is zelden wat je wilt.
   const login = request.nextUrl.clone();
   login.pathname = "/login";
-  login.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname + request.nextUrl.search)}`;
+  login.search = "";
   return NextResponse.redirect(login);
 }
 

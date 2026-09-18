@@ -147,6 +147,25 @@ describe("taskToAddress", () => {
     });
   });
 
+  it("leest ook het adres dat op één regel met een komma staat", () => {
+    /*
+      Een deel van de taken heeft A1 zo ingevuld, en de taaknaam is daar geen
+      betrouwbare terugval: bij Balboastraat 12-3, 12-4 en Marco Polostraat
+      188-1 staat er "Amsterdam1" in de naam. Dan zoekt de overdracht een
+      projectmap die niet bestaat terwijl de map er gewoon staat.
+    */
+    expect(
+      taskToAddress({
+        name: "Balboastraat 12-3 1057VV Amsterdam1",
+        customFields: [{ name: "A1 Adres:", value: "Balboastraat 12-3, 1057VV Amsterdam" }],
+      })
+    ).toEqual({
+      addressLine: "Balboastraat 12-3",
+      woonplaats: "Amsterdam",
+      postcodeRegel: "1057VV Amsterdam",
+    });
+  });
+
   it("valt terug op de taaknaam als het veld ontbreekt", () => {
     expect(taskToAddress({ name: "Kerkstraat 12, 1234 AB Utrecht", customFields: [] })).toEqual({
       addressLine: "Kerkstraat 12",
@@ -207,5 +226,49 @@ describe("matchesPostcodeFolder", () => {
   it("geeft null als postcode of huisnummer ontbreekt", () => {
     expect(postcodeSleutel("Sanderijnstraat", "1055 BW AMSTERDAM")).toBeNull();
     expect(postcodeSleutel("Sanderijnstraat 58-3", "AMSTERDAM")).toBeNull();
+  });
+});
+
+describe("matchesPostcodeFolder — vormen uit het archief", () => {
+  // Echte mapnamen uit Gereed die eerder allemaal afvielen.
+  const sleutel = (adres: string, pc: string) => postcodeSleutel(adres, pc)!;
+
+  it("herkent de postcode vóór het huisnummer", () => {
+    expect(matchesPostcodeFolder("1053 BT 1-3 WGG", sleutel("Kerkstraat 1-3", "1053 BT AMSTERDAM"))).toBe(true);
+    expect(matchesPostcodeFolder("1077 AW 191-2 WGG", sleutel("Straat 191-2", "1077 AW AMSTERDAM"))).toBe(true);
+  });
+
+  it("herkent een mapnaam met de straatnaam erin", () => {
+    expect(
+      matchesPostcodeFolder(
+        "Anna van den Vondelstraat 5-1 1054GX Amsterdam",
+        sleutel("Anna van den Vondelstraat 5-1", "1054 GX AMSTERDAM")
+      )
+    ).toBe(true);
+    expect(
+      matchesPostcodeFolder(
+        "Ceintuurbaan 206-3 1072GC Amsterdam",
+        sleutel("Ceintuurbaan 206-3", "1072 GC AMSTERDAM")
+      )
+    ).toBe(true);
+  });
+
+  it("herkent een huisletter aan weerskanten", () => {
+    expect(matchesPostcodeFolder("27H 1055PB Amsterdam", sleutel("Straat 27 H", "1055 PB AMSTERDAM"))).toBe(true);
+    expect(matchesPostcodeFolder("18 F 3532 GG  UTRECHT", sleutel("Straat 18 F", "3532 GG UTRECHT"))).toBe(true);
+  });
+
+  it("houdt buren nog steeds uit elkaar", () => {
+    const s = sleutel("Ceintuurbaan 206-3", "1072 GC AMSTERDAM");
+    expect(matchesPostcodeFolder("Ceintuurbaan 206-2 1072GC Amsterdam", s)).toBe(false);
+    expect(matchesPostcodeFolder("Ceintuurbaan 206 1072GC Amsterdam", s)).toBe(false);
+    // Zelfde nummers, andere postcode.
+    expect(matchesPostcodeFolder("Ceintuurbaan 206-3 1072GD Amsterdam", s)).toBe(false);
+  });
+
+  it("matcht niet als de straat wel klopt maar het nummer niet meekomt", () => {
+    expect(
+      matchesPostcodeFolder("Anna van den Vondelstraat 1054GX Amsterdam", sleutel("Anna van den Vondelstraat 5-1", "1054 GX AMSTERDAM"))
+    ).toBe(false);
   });
 });

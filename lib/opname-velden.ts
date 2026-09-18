@@ -202,12 +202,21 @@ export function bijlagenUitVelden(velden: RuwVeld[]): DossierBijlage[] {
         code: gesplitst.code,
         label: gesplitst.label,
         naam: typeof b.title === "string" ? b.title : url.split("/").pop() || "bijlage",
-        // De middelste maat: op een tegel van vier centimeter is de grote
-        // versie niet zichtbaar beter, en vijftig grote maakt de PDF onnodig
-        // zwaar om in Dropbox te zetten.
+        /*
+          De grote miniatuur (900x1200), niet de middelste (225x300).
+
+          Op de tegel van vier centimeter lijkt dat verspilling, maar een PDF
+          wordt gelezen op een scherm en daar wordt ingezoomd. Op 900 pixels is
+          het typeplaatje onderop een cv-ketel leesbaar — merk, type, bouwjaar,
+          vermogens — en op 225 is het een grijze vlek. Dat verschil is precies
+          waar dit dossier voor bedoeld is.
+
+          Het origineel (3088 pixels, ~2,4 MB per foto) zou 120 MB per dossier
+          worden; de grote miniatuur kost 130 KB en is genoeg gebleken.
+        */
         miniatuurUrl:
-          (typeof b.thumbnail_medium === "string" ? b.thumbnail_medium : null) ??
-          (typeof b.thumbnail_large === "string" ? b.thumbnail_large : null),
+          (typeof b.thumbnail_large === "string" ? b.thumbnail_large : null) ??
+          (typeof b.thumbnail_medium === "string" ? b.thumbnail_medium : null),
         url,
         mime: typeof b.mimetype === "string" ? b.mimetype : "",
       });

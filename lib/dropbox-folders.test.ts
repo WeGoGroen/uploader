@@ -108,8 +108,10 @@ describe("summarizeProjectFolders", () => {
   });
 
   it("reports an incomplete listing instead of looping forever", async () => {
-    // Altijd has_more: true — de noodrem moet ingrijpen.
-    const pages = Array.from({ length: 40 }, () => ({
+    // Altijd has_more: true — de noodrem moet ingrijpen. Ruim méér pagina's
+    // stubben dan de rem (200): raakt de stub eerder op dan de rem afgaat,
+    // dan test dit per ongeluk de stub in plaats van de rem.
+    const pages = Array.from({ length: 250 }, () => ({
       entries: [entry("folder", `${ROOT}/Damrak 1, Amsterdam`)],
       has_more: true,
       cursor: "c",

@@ -2,6 +2,9 @@ import {
   checkSaveUrlJob,
   createFolder,
   createFolders,
+  PROJECT_SUBFOLDERS,
+  NEN_PROJECT_SUBFOLDERS,
+  MEDIA_PROJECT_SUBFOLDERS,
   getSharedAccessToken as getDropboxToken,
   findProjectFolder,
   listFilePathsRecursive,
@@ -191,6 +194,10 @@ export async function syncSharePointFiles(input: {
   /** Regel met de postcode ("1055 BW  AMSTERDAM"). Nodig om de map te vinden:
       MO Consultancy noemt mappen naar postcode + huisnummer, niet naar straat. */
   postcodeRegel?: string | null;
+  /** Alleen voor de inhaalronde over het archief: ontbreekt de projectmap,
+      maak hem dan aan mét de vaste indeling. De webhook laat dit uit — bij
+      lopend werk betekent een ontbrekende map dat er iets níet klopt. */
+  maakProjectmapAan?: boolean;
 }): Promise<SyncResult> {
   const config = await requireSharePointConfig();
   const graphToken = await getGraphToken();
@@ -213,12 +220,40 @@ export async function syncSharePointFiles(input: {
   // gespeld adres, of een opname die nooit via de app is aangemaakt. Dan is
   // een nieuwe map naast de bestaande het slechtste antwoord: de bestanden
   // raken verspreid over twee mappen zonder dat iemand het merkt.
-  const bestaand = await findProjectFolder(
+  let bestaand = await findProjectFolder(
     dropboxToken,
     input.kind,
     input.woonplaats,
     input.addressLine
   ).catch(() => null);
+
+  if (!bestaand && input.maakProjectmapAan) {
+    // Archiefwerk van vóór de app: de projectmap bestond nooit. Aanmaken met
+    // dezelfde vaste indeling als elke andere projectmap, zodat er niet twee
+    // soorten mappen ontstaan. Bewust zonder gevelfoto's en deel-link — dit
+    // zijn honderden mappen tegelijk, en die extra's horen bij een opname die
+    // ingepland wordt, niet bij een archief.
+    const pad = projectFolderPath(input.kind, input.woonplaats, input.addressLine);
+    await createFolder(dropboxToken, pad);
+    const vaste =
+      input.kind === "nen"
+        ? NEN_PROJECT_SUBFOLDERS
+        : input.kind === "media"
+          ? MEDIA_PROJECT_SUBFOLDERS
+          : PROJECT_SUBFOLDERS;
+    const perDiepte = new Map<number, string[]>();
+    for (const naam of vaste) {
+      const diepte = naam.split("/").length;
+      perDiepte.set(diepte, [...(perDiepte.get(diepte) ?? []), naam]);
+    }
+    for (const diepte of [...perDiepte.keys()].sort((a, b) => a - b)) {
+      await createFolders(
+        dropboxToken,
+        perDiepte.get(diepte)!.map((naam) => `${pad}/${naam}`)
+      ).catch(() => {});
+    }
+    bestaand = { path: pad, name: pad.slice(pad.lastIndexOf("/") + 1) };
+  }
 
   if (!bestaand) {
     throw new SyncError(
