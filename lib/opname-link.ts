@@ -22,7 +22,10 @@ export function opnameLink(opname: {
 }): string {
   // heeftMediatask blijft de terugval voor opnames van vóór het soort-veld.
   const isNen = opname.soort === "nen" || (!opname.soort && opname.heeftMediatask);
-  if (!isNen) return `/energielabel?draft=${opname.id}`;
+  // Coderen, want een id is niet altijd een simpel woord: een media-opname
+  // legt haar id vast als "media-<Dropbox-pad>", inclusief schuine strepen,
+  // spaties en komma's.
+  if (!isNen) return `/energielabel?draft=${encodeURIComponent(opname.id)}`;
 
   const adres = (opname.straatnaam || opname.titel || "").trim();
   return adres ? `/nen?addr=${encodeURIComponent(adres)}` : "/nen";

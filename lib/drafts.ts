@@ -188,6 +188,22 @@ export async function listDrafts(limiet = LIJST_LIMIET): Promise<DraftSamenvatti
   return [...concepten, ...geupload].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+/**
+ * Het concept-id terug uit de padsegmenten van /api/drafts/<id>.
+ *
+ * Niet elk id is één segment. Een media-opname legt haar id vast als
+ * `media-${folder.path}` — een Dropbox-pad, dus met schuine strepen erin:
+ * "media-/Automatie Media/Rustenburgerstraat 356-1, Amsterdam". De route is
+ * daarom een catch-all; hier worden de segmenten weer aaneengeplakt.
+ *
+ * Heeft de client het id van tevoren gecodeerd, dan is het één segment en doet
+ * de join niets. Zo werken oude en nieuwe aanroepen allebei.
+ */
+export function draftIdUitPad(delen: string[] | string | undefined | null): string {
+  if (!delen) return "";
+  return (Array.isArray(delen) ? delen.join("/") : delen).trim();
+}
+
 export async function getDraft(id: string): Promise<DraftRecord | null> {
   const redis = requireRedis();
   const raw = await redis.get(KEY(id));

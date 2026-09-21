@@ -661,7 +661,7 @@ export default function Home() {
     const id = new URLSearchParams(window.location.search).get("draft");
     if (!id) return;
     resumedRef.current = true;
-    fetch(`/api/drafts/${id}`)
+    fetch(`/api/drafts/${encodeURIComponent(id)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         const draft = data?.draft;

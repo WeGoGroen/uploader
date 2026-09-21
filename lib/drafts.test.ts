@@ -83,6 +83,7 @@ vi.mock("@/lib/redis", () => ({ requireRedis: () => redis }));
 const {
   archiveerOudeOpnames,
   deleteDraft,
+  draftIdUitPad,
   getDraft,
   isVerwijderd,
   listDrafts,
@@ -267,5 +268,46 @@ describe("een verwijderde opname blijft verwijderd", () => {
     await deleteDraft("a");
     expect(await saveDraft(opname("b", { straatnaam: "Rustenburgerstraat 356-I" }))).toBe(true);
     expect((await listDrafts()).map((d) => d.id)).toEqual(["b"]);
+  });
+});
+
+/*
+  Het id van een media-opname is een Dropbox-pad.
+
+  components/MediaFlow.tsx legt het vast als `media-${folder.path}`, dus met
+  schuine strepen erin. De route /api/drafts/<id> was één segment breed en kon
+  zo'n verzoek niet matchen: DELETE gaf 502 en het concept bleef staan. Op het
+  scherm zag dat eruit als "verwijderen doet niets" — de opname verdween uit de
+  lijst en stond daarna onveranderd op het dashboard, met zijn oude datum, want
+  er was nooit iets weggehaald.
+*/
+describe("een concept-id dat een pad is", () => {
+  const MEDIA = "media-/Automatie Media/Rustenburgerstraat 356-1, Amsterdam";
+
+  it("puts the path segments back together exactly", () => {
+    expect(draftIdUitPad(["media-", "Automatie Media", "Rustenburgerstraat 356-1, Amsterdam"])).toBe(
+      MEDIA
+    );
+  });
+
+  // Codeert de client het id vooraf, dan komt het als één segment binnen en
+  // mag de samenvoeging er niets meer aan veranderen.
+  it("leaves an already-whole id alone", () => {
+    expect(draftIdUitPad([MEDIA])).toBe(MEDIA);
+    expect(draftIdUitPad("abc123")).toBe("abc123");
+  });
+
+  it("has nothing to say about an empty path", () => {
+    expect(draftIdUitPad([])).toBe("");
+    expect(draftIdUitPad(undefined)).toBe("");
+  });
+
+  it("stores and deletes such a recording like any other", async () => {
+    await saveDraft(opname(MEDIA, { straatnaam: "Rustenburgerstraat 356-1" }));
+    expect((await listDrafts()).map((d) => d.id)).toEqual([MEDIA]);
+
+    await deleteDraft(MEDIA);
+    expect(await getDraft(MEDIA)).toBeNull();
+    expect(await listDrafts()).toHaveLength(0);
   });
 });

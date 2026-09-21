@@ -120,7 +120,7 @@ export default function Opnames() {
           terwijl het dashboard — dat opnieuw ophaalt — hem gewoon terugkreeg.
         */
         try {
-          const res = await fetch(`/api/drafts/${d.id}`, { method: "DELETE" });
+          const res = await fetch(`/api/drafts/${encodeURIComponent(d.id)}`, { method: "DELETE" });
           if (!res.ok) {
             const data = await res.json().catch(() => null);
             throw new Error(data?.error ?? `de server gaf ${res.status} terug`);
