@@ -5,6 +5,7 @@ import { useRechten } from "@/components/RechtenProvider";
 import { opnameLink } from "@/lib/opname-link";
 import { vergeetTakenVoor } from "@/lib/upload-queue";
 import { taakHoortBij } from "@/lib/upload-overview";
+import { sameAddress } from "@/lib/address-format";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 
 type DraftRecord = Pick<
@@ -38,6 +39,7 @@ export default function Opnames() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [verwijderFout, setVerwijderFout] = useState<string | null>(null);
+  const [verwijderBezig, setVerwijderBezig] = useState<string | null>(null);
   // Kerncijfers over de doorstroom. Bij honderden opnames per maand zegt een
   // lijst weinig; deze getallen wel.
   const [cijfers, setCijfers] = useState<{
@@ -85,56 +87,75 @@ export default function Opnames() {
     }
   }
 
-  async function removeDraft(id: string) {
-    const draft = drafts?.find((d) => d.id === id);
+  /*
+    Weghalen wat op het dashboard één regel is.
+
+    Het dashboard voegt alles van één adres samen tot één regel — meerdere
+    concepten, een afgeronde opname met ontbrekende bijlages, en de uploads op
+    dit apparaat. Deze knop haalde daar precies één record uit. Wie twee keer
+    op hetzelfde adres begonnen was, zag de regel dus gewoon blijven staan en
+    kon niet weten waarom. Eén klik ruimt nu op wat het dashboard als één klus
+    toont.
+  */
+  async function verwijderOpname(gekozen: DraftRecord) {
+    const adres = gekozen.straatnaam || gekozen.titel;
     setVerwijderFout(null);
+    setVerwijderBezig(gekozen.id);
 
-    /*
-      Eerst de server, en pas uit de lijst halen als dat ook echt gelukt is.
+    const samen = (drafts ?? []).filter(
+      (d) =>
+        d.id === gekozen.id ||
+        (!!adres && !!d.straatnaam && sameAddress(d.straatnaam, adres))
+    );
 
-      Dit stond op `.catch(() => {})` met de verwijdering er onvoorwaardelijk
-      achter: een mislukte verwijdering zag er hier dus uit als een gelukte,
-      terwijl de opname op het dashboard gewoon bleef staan — dat haalt zijn
-      concepten opnieuw op en kreeg hem dan nog steeds terug.
-    */
     try {
-      const res = await fetch(`/api/drafts/${id}`, { method: "DELETE" });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error ?? `De server gaf ${res.status} terug.`);
+      const mislukt: string[] = [];
+      for (const d of samen) {
+        /*
+          Pas weghalen als de server het ook echt gedaan heeft.
+
+          Dit stond op `.catch(() => {})` met de regel er onvoorwaardelijk
+          achter weg: een mislukte verwijdering zag er dan uit als een gelukte,
+          terwijl het dashboard — dat opnieuw ophaalt — hem gewoon terugkreeg.
+        */
+        try {
+          const res = await fetch(`/api/drafts/${d.id}`, { method: "DELETE" });
+          if (!res.ok) {
+            const data = await res.json().catch(() => null);
+            throw new Error(data?.error ?? `de server gaf ${res.status} terug`);
+          }
+        } catch (err) {
+          mislukt.push(err instanceof Error ? err.message : "onbekende fout");
+        }
+
+        /*
+          En dan wat er op dit apparaat van klaarstaat: één mislukte upload
+          houdt de dashboardregel in zijn eentje overeind, en het bestand komt
+          bij het volgende bezoek gewoon weer uit IndexedDB terug.
+
+          Wat al in Dropbox staat blijft staan. Dat zijn de scans zelf, niet de
+          administratie eromheen.
+        */
+        const eigenAdres = d.straatnaam || d.titel;
+        if (eigenAdres) {
+          await vergeetTakenVoor((t) => taakHoortBij(t, eigenAdres, d.soort)).catch(() => {});
+        }
       }
-    } catch (err) {
-      setVerwijderFout(
-        err instanceof Error ? err.message : "Kon de opname niet verwijderen."
-      );
-      return;
-    }
 
-    setDrafts((prev) => prev?.filter((d) => d.id !== id) ?? null);
+      if (mislukt.length > 0) {
+        setVerwijderFout(
+          mislukt.length === samen.length
+            ? `Verwijderen mislukt: ${mislukt[0]}.`
+            : `Niet alles is verwijderd (${mislukt.length} van ${samen.length}): ${mislukt[0]}.`
+        );
+      }
 
-    /*
-      En dan wat er op dit apparaat van klaarstaat.
-
-      Het dashboard bouwt zijn lijst uit twee bronnen: de concepten van de
-      server én de uploadwachtrij hier in de browser. Eén mislukte upload
-      houdt zo'n regel in zijn eentje overeind. Zonder deze stap verdween de
-      opname hier wel en bleef hij daar staan — precies de klacht.
-
-      Wat al in Dropbox staat blijft staan: dat zijn de scans zelf, niet de
-      administratie eromheen, en die weggooien is een ander besluit dan dit.
-    */
-    const adres = draft?.straatnaam || draft?.titel;
-    if (!adres) return;
-    try {
-      await vergeetTakenVoor((t) => taakHoortBij(t, adres, draft?.soort));
-    } catch {
-      // De opname zelf is wél weg; alleen het opruimen hier is misgegaan. Dat
-      // is precies het geval waarin hij op het dashboard blijft staan, dus dat
-      // hoort de gebruiker te weten in plaats van het straks zelf te ontdekken.
-      setVerwijderFout(
-        "De opname is verwijderd, maar de bestanden die op dit apparaat klaarstonden " +
-          "konden niet worden opgeruimd. Daardoor kan hij op het dashboard blijven staan."
-      );
+      // Opnieuw ophalen in plaats van de regel er lokaal uit halen. Wat je
+      // hierna ziet is wat er werkelijk nog staat — anders blijft een mislukte
+      // verwijdering onzichtbaar tot de volgende keer laden.
+      await load();
+    } finally {
+      setVerwijderBezig(null);
     }
   }
 
@@ -238,8 +259,12 @@ export default function Opnames() {
                     <a className="btn btn-primary" href={opnameLink(d)}>
                       Verder afmaken
                     </a>
-                    <button className="btn-text" onClick={() => removeDraft(d.id)}>
-                      Verwijderen
+                    <button
+                      className="btn-text"
+                      onClick={() => verwijderOpname(d)}
+                      disabled={verwijderBezig === d.id}
+                    >
+                      {verwijderBezig === d.id ? "Bezig…" : "Verwijderen"}
                     </button>
                   </div>
                 </div>
@@ -254,6 +279,10 @@ export default function Opnames() {
               <h2>Bijlages ontbreken in ClickUp</h2>
               <span className="section-count">{incomplete.length}</span>
             </div>
+            <p className="note">
+              Verwijderen haalt de opname hier en van het dashboard weg. De
+              ClickUp-taak en de bestanden in Dropbox blijven staan.
+            </p>
             <div className="draft-list">
               {incomplete.map((d) => (
                 <div className="draft-row" key={d.id}>
@@ -279,6 +308,17 @@ export default function Opnames() {
                         Open in ClickUp
                       </a>
                     )}
+                    {/* Deze stonden wél op het dashboard maar waren nergens
+                        weg te krijgen: deze sectie had geen verwijderknop. Dat
+                        is precies het geval waarin je klikt op wat je wél kunt
+                        vinden en de regel toch blijft staan. */}
+                    <button
+                      className="btn-text"
+                      onClick={() => verwijderOpname(d)}
+                      disabled={verwijderBezig === d.id}
+                    >
+                      {verwijderBezig === d.id ? "Bezig…" : "Verwijderen"}
+                    </button>
                   </div>
                 </div>
               ))}
