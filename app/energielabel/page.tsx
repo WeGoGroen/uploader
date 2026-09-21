@@ -736,6 +736,11 @@ export default function Home() {
       })
         .then((res) => {
           if (res.ok) markDraftSynced(id);
+          // 409: deze opname is bewust verwijderd. De lokale kopie hier laten
+          // staan betekent dat hij bij de volgende synchronisatie opnieuw
+          // wordt aangeboden — en dat is precies hoe een weggegooide opname
+          // steeds terugkwam.
+          else if (res.status === 409) clearDraftLocal(id);
         })
         .catch(() => {
           // Blijft gemarkeerd als "pendingSync" in localStorage — wordt
@@ -761,6 +766,9 @@ export default function Home() {
         })
           .then((res) => {
             if (res.ok) markDraftSynced(local.id);
+            // Door de server weggegooid: opruimen in plaats van bij elke
+            // paginaopening opnieuw aanbieden.
+            else if (res.status === 409) clearDraftLocal(local.id);
           })
           .catch(() => {});
       }
