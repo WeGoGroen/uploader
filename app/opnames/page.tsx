@@ -170,7 +170,23 @@ export default function Opnames() {
   */
   const magDitAfmaken = (d: DraftRecord) =>
     d.soort === "nen" ? rechten.nen : d.soort === "media" ? rechten.media : rechten.energielabel;
-  const zichtbaar = drafts?.filter(magDitAfmaken) ?? null;
+
+  /*
+    Een recht bepaalt wat je mag AFMAKEN, niet wat je mag ZIEN.
+
+    Deze lijst filterde hele opnames weg op rechten. Het dashboard doet dat
+    bewust niet — daar staat in UploadPanel: "Het adres zelf mag hij wel zien:
+    hij heeft er NEN2580 op gedaan, en dat werk hoort niet te verdwijnen." Hier
+    gebeurde het omgekeerde, en dat botste hard: een NEN-opname van iemand
+    zonder NEN-recht stond wél op het dashboard en ontbrak hier volledig. Er
+    was dus een regel op het dashboard waar nergens in de app een knop bij
+    hoorde — niet om af te maken, en niet om weg te halen.
+
+    De oorspronkelijke zorg blijft terecht: een knop "verder afmaken" naar een
+    formulier waar je niet mag komen eindigt op de omleiding terug naar het
+    dashboard. Die knop is dus wat hier verdwijnt, niet de opname.
+  */
+  const zichtbaar = drafts;
 
   const unfinished = zichtbaar?.filter((d) => d.status === "concept") ?? [];
   // Een opname met ontbrekende bijlages is óók nog af te maken werk: de
@@ -256,9 +272,16 @@ export default function Opnames() {
                     </div>
                   </div>
                   <div className="draft-actions">
-                    <a className="btn btn-primary" href={opnameLink(d)}>
-                      Verder afmaken
-                    </a>
+                    {magDitAfmaken(d) ? (
+                      <a className="btn btn-primary" href={opnameLink(d)}>
+                        Verder afmaken
+                      </a>
+                    ) : (
+                      <span className="note">
+                        Jij mag dit soort opname niet afmaken — vraag of je dat
+                        recht erbij krijgt, of haal hem weg.
+                      </span>
+                    )}
                     <button
                       className="btn-text"
                       onClick={() => verwijderOpname(d)}
@@ -300,9 +323,16 @@ export default function Opnames() {
                     </div>
                   </div>
                   <div className="draft-actions">
-                    <a className="btn btn-primary" href={opnameLink(d)}>
-                      Bijlages opnieuw uploaden
-                    </a>
+                    {magDitAfmaken(d) ? (
+                      <a className="btn btn-primary" href={opnameLink(d)}>
+                        Bijlages opnieuw uploaden
+                      </a>
+                    ) : (
+                      <span className="note">
+                        Jij mag dit soort opname niet afmaken — vraag of je dat
+                        recht erbij krijgt, of haal hem weg.
+                      </span>
+                    )}
                     {d.clickupTaskUrl && (
                       <a className="btn btn-quiet" href={d.clickupTaskUrl} target="_blank" rel="noreferrer">
                         Open in ClickUp
