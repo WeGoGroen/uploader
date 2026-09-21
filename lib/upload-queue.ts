@@ -172,6 +172,40 @@ export function clearFinished(folderPath: string) {
   emit();
 }
 
+/**
+ * Haalt alles weg wat bij één opname hoort: uit de lijst in beeld én uit de
+ * bewaarde uploads.
+ *
+ * Allebei is nodig. Alleen uit de lijst halen laat het bestand in IndexedDB
+ * staan, en hervatOpenstaandeUploads() leest dat bij het volgende bezoek
+ * gewoon terug — dan staat de verwijderde opname er weer, en precies dát was
+ * de klacht. Alleen de opslag leegmaken laat de regel staan tot je ververst.
+ *
+ * Ook de opslag wordt zelfstandig doorzocht en niet alleen op de taken die nu
+ * in beeld staan: het hervatten is asynchroon, dus wie snel genoeg verwijdert
+ * zou anders langs een nog niet ingeladen upload heen lopen.
+ *
+ * Geeft terug hoeveel er weg zijn, zodat de aanroeper kan zeggen wat er is
+ * gebeurd in plaats van het te moeten gokken.
+ */
+export async function vergeetTakenVoor(
+  hoortErbij: (item: { folderPath: string }) => boolean
+): Promise<number> {
+  const ids = new Set(tasks.filter(hoortErbij).map((t) => t.id));
+  if (ids.size > 0) {
+    tasks = tasks.filter((t) => !ids.has(t.id));
+    emit();
+  }
+
+  // De uploads die bewaard staan maar (nog) niet in beeld zijn.
+  for (const bewaard of await openstaandeUploads()) {
+    if (hoortErbij(bewaard)) ids.add(bewaard.id);
+  }
+  for (const id of ids) await vergeetUpload(id);
+
+  return ids.size;
+}
+
 export function enqueue(
   folderPath: string,
   folder: string,

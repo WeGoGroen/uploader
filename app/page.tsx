@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { detectServices, extractGrossFloorArea, extractKlant } from "@/lib/calendar-services";
 import { adresSleutel, calendarLocationToBagQuery, sameAddress, splitAddress } from "@/lib/address-format";
 import { checkBagAddress, type BagCheckResult } from "@/lib/bag-check";
@@ -36,6 +37,34 @@ type DraftRecord = Pick<
   | "updatedAt"
   | "heeftMediatask"
 >;
+
+/**
+ * De uploadpagina's sturen wie er geen recht op heeft hierheen met
+ * ?geenrecht=<soort> (zie app/<soort>/layout.tsx). Dat label hoort er ook
+ * uit te komen: zonder melding is dat een stille sprong terug naar het
+ * dashboard, en met de knop óók al weg uit de zijbalk is het enige wat je
+ * ziet dat de pagina "niet laadt".
+ */
+const GEENRECHT_LABELS: Record<string, string> = {
+  energielabel: "Energielabel",
+  nen: "NEN2580",
+  media: "Media",
+};
+
+/** Apart component omdat useSearchParams() een Suspense-grens nodig heeft. */
+function GeenRechtMelding() {
+  const soort = useSearchParams().get("geenrecht");
+  if (!soort) return null;
+  return (
+    <p className="banner is-bad" style={{ marginBottom: 18 }}>
+      <span>
+        Je hebt geen rechten voor {GEENRECHT_LABELS[soort] ?? soort}-opnames, dus die uploadpagina
+        gaat niet open. Laat de beheerder dit in het Business Control Center bij Werknemers
+        aanzetten.
+      </span>
+    </p>
+  );
+}
 
 function formatTime(iso: string | null): string {
   if (!iso || iso.length === 10) return "";
@@ -252,6 +281,10 @@ export default function Dashboard() {
       <header className="topline">
         <span className="eyebrow">Dashboard</span>
       </header>
+
+      <Suspense fallback={null}>
+        <GeenRechtMelding />
+      </Suspense>
 
       <div className="dash-grid">
         <div>
