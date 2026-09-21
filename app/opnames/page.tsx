@@ -6,6 +6,7 @@ import { opnameLink } from "@/lib/opname-link";
 import { vergeetTakenVoor } from "@/lib/upload-queue";
 import { taakHoortBij } from "@/lib/upload-overview";
 import { sameAddress } from "@/lib/address-format";
+import { clearDraftLocal } from "@/lib/local-drafts";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 
 type DraftRecord = Pick<
@@ -136,6 +137,18 @@ export default function Opnames() {
           Wat al in Dropbox staat blijft staan. Dat zijn de scans zelf, niet de
           administratie eromheen.
         */
+        /*
+          De kopie op dit apparaat moet ook weg.
+
+          Het energielabelformulier bewaart het concept in localStorage en
+          duwt het terug naar de server zodra die pagina opent of het apparaat
+          weer verbinding krijgt. Zonder dit stond de opname er even later
+          gewoon weer — met zijn oorspronkelijke datum, want de server neemt
+          een meegestuurde updatedAt over. Dat is wat "verwijderen doet niets"
+          in de praktijk betekende.
+        */
+        clearDraftLocal(d.id);
+
         const eigenAdres = d.straatnaam || d.titel;
         if (eigenAdres) {
           await vergeetTakenVoor((t) => taakHoortBij(t, eigenAdres, d.soort)).catch(() => {});

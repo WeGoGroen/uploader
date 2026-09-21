@@ -59,7 +59,16 @@ export async function POST(request: Request) {
   };
 
   try {
-    await saveDraft(record);
+    const opgeslagen = await saveDraft(record);
+    if (!opgeslagen) {
+      /*
+        Deze opname is eerder bewust verwijderd. Een apparaat dat de lokale
+        kopie nog had probeert hem terug te zetten; dat is precies wat het
+        verwijderen ongedaan maakte. 409 en niet 200, zodat de client 'm niet
+        als "gesynchroniseerd" afvinkt en blijft proberen.
+      */
+      return NextResponse.json({ error: "verwijderd" }, { status: 409 });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(

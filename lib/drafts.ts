@@ -75,6 +75,24 @@ const KEY = (id: string) => `draft:${id}`;
 const KORT = (id: string) => `draft:kort:${id}`;
 const Z = (status: DraftStatus) => `drafts:z:${status}`;
 const OUDE_INDEX = "drafts:index";
+/*
+  Grafsteen van een bewust verwijderde opname.
+
+  Verwijderen was niet het laatste woord. Het energielabelformulier houdt een
+  kopie in localStorage en duwt die terug zodra die pagina opent of het
+  apparaat weer verbinding krijgt (zie syncPendingDrafts in
+  app/energielabel/page.tsx) — met de oorspronkelijke updatedAt erbij, zodat
+  de opname terugkwam alsof er niets gebeurd was. Wie hem wegklikte zag hem
+  even later gewoon weer staan, en er was geen enkele manier om dat te winnen:
+  de lokale kopie staat op het apparaat en overleeft elke serveractie.
+
+  Vandaar hier de weigering. Alleen het apparaat opruimen is niet genoeg —
+  dezelfde opname kan op een tweede iPad of in een ander tabblad staan.
+*/
+const WEG = (id: string) => `draft:weg:${id}`;
+/** Lang genoeg dat elk apparaat dat de kopie nog had intussen gesynchroniseerd
+    is; de sleutel zelf is een handvol bytes. */
+const WEG_SECONDEN = 90 * 24 * 60 * 60;
 const MIGRATIE_VLAG = "drafts:gemigreerd";
 
 /** Standaard aantal dat een lijst teruggeeft; ruim boven wat een scherm toont. */
@@ -176,8 +194,13 @@ export async function getDraft(id: string): Promise<DraftRecord | null> {
   return raw ? (JSON.parse(raw) as DraftRecord) : null;
 }
 
-export async function saveDraft(record: DraftRecord): Promise<void> {
+/**
+ * Slaat een opname op. Geeft false als hij geweigerd is omdat hij eerder
+ * bewust verwijderd werd — zie WEG hierboven.
+ */
+export async function saveDraft(record: DraftRecord): Promise<boolean> {
   const redis = requireRedis();
+  if (await isVerwijderd(record.id)) return false;
   const anders: DraftStatus = record.status === "concept" ? "uploaded" : "concept";
   await redis
     .pipeline()
@@ -188,6 +211,7 @@ export async function saveDraft(record: DraftRecord): Promise<void> {
     // opname in allebei en telt hij dubbel.
     .zrem(Z(anders), record.id)
     .exec();
+  return true;
 }
 
 export async function deleteDraft(id: string): Promise<void> {
@@ -198,7 +222,14 @@ export async function deleteDraft(id: string): Promise<void> {
     .del(KORT(id))
     .zrem(Z("concept"), id)
     .zrem(Z("uploaded"), id)
+    .set(WEG(id), String(Date.now()), "EX", WEG_SECONDEN)
     .exec();
+}
+
+/** Is deze opname eerder bewust verwijderd? */
+export async function isVerwijderd(id: string): Promise<boolean> {
+  const redis = requireRedis();
+  return (await redis.get(WEG(id))) !== null;
 }
 
 /**

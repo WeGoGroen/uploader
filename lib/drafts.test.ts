@@ -84,6 +84,7 @@ const {
   archiveerOudeOpnames,
   deleteDraft,
   getDraft,
+  isVerwijderd,
   listDrafts,
   listDraftsByStatus,
   saveDraft,
@@ -216,5 +217,55 @@ describe("migratie van de oude indeling", () => {
     redis._sets.set("drafts:index", new Set(["mag-niet-terugkomen"]));
     redis._strings.set("draft:mag-niet-terugkomen", JSON.stringify(opname("mag-niet-terugkomen")));
     expect(await listDraftsByStatus("concept")).toEqual([]);
+  });
+});
+
+/*
+  Verwijderen was niet het laatste woord.
+
+  Het energielabelformulier bewaart het concept in localStorage en duwt het
+  terug zodra die pagina opent of het apparaat weer verbinding krijgt. De
+  POST-route neemt een meegestuurde updatedAt over, dus de opname kwam terug
+  met zijn oorspronkelijke datum — alsof het verwijderen nooit gebeurd was.
+  Alleen het apparaat opruimen is niet genoeg: dezelfde opname kan op een
+  tweede iPad of in een ander tabblad staan. Dus weigert de opslag hem.
+*/
+describe("een verwijderde opname blijft verwijderd", () => {
+  it("refuses to take the same recording back", async () => {
+    const d = opname("a");
+    await saveDraft(d);
+    await deleteDraft("a");
+
+    // Precies wat een achtergebleven apparaat terugstuurt: dezelfde opname,
+    // ongewijzigd, met de oude datum erbij.
+    expect(await saveDraft(d)).toBe(false);
+    expect(await getDraft("a")).toBeNull();
+    expect(await listDrafts()).toHaveLength(0);
+  });
+
+  it("says so, so the device can stop trying", async () => {
+    await saveDraft(opname("a"));
+    expect(await isVerwijderd("a")).toBe(false);
+    await deleteDraft("a");
+    expect(await isVerwijderd("a")).toBe(true);
+  });
+
+  it("leaves every other recording alone", async () => {
+    await saveDraft(opname("a"));
+    await saveDraft(opname("b"));
+    await deleteDraft("a");
+
+    expect(await saveDraft(opname("b", { updatedAt: 9999 }))).toBe(true);
+    const over = await listDrafts();
+    expect(over.map((d) => d.id)).toEqual(["b"]);
+  });
+
+  // Een nieuwe opname op hetzelfde adres moet gewoon kunnen: de grafsteen
+  // geldt het id, niet het pand.
+  it("does not block a fresh recording at the same address", async () => {
+    await saveDraft(opname("a", { straatnaam: "Rustenburgerstraat 356-I" }));
+    await deleteDraft("a");
+    expect(await saveDraft(opname("b", { straatnaam: "Rustenburgerstraat 356-I" }))).toBe(true);
+    expect((await listDrafts()).map((d) => d.id)).toEqual(["b"]);
   });
 });
