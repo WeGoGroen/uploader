@@ -33,6 +33,9 @@ const KLEUR = {
   blauw: rgb(0.012, 0.412, 0.631),
   blauwZacht: rgb(0.878, 0.949, 0.992),
   vlak: rgb(0.957, 0.961, 0.961),
+  /* Voor een veld dat uit een foto is gelezen maar niet zeker is. Geen rood:
+     er is niets kapot, er valt iets na te vragen. */
+  attentie: rgb(0.588, 0.4, 0.102),
 };
 
 const MAAT = {
@@ -75,6 +78,10 @@ export interface DossierInvoer {
   aangemaaktMs: number | null;
   streefdatumMs: number | null;
   groepen: DossierGroep[];
+  /** Groepen die niet uit ClickUp komen maar ergens anders vandaan: sectie F
+      met wat er uit de opnamefoto's is gelezen. Apart gehouden van `groepen`
+      zodat meteen zichtbaar blijft wat een mens invulde en wat een agent las. */
+  extraGroepen?: DossierGroep[];
   fotos: DossierFoto[];
   /** Bijlagen die geen afbeelding zijn — video's, een LAZ-scan. Die kunnen niet
       afgedrukt worden, maar horen wel vermeld: anders lijkt het dossier
@@ -297,6 +304,9 @@ interface Cel {
   labelRegels: string[];
   regels: string[];
   leeg: boolean;
+  /** Toelichting onder de waarde, in de attentiekleur. Leeg bij velden die een
+      mens heeft ingevuld; gevuld bij velden die ergens uit zijn gelezen. */
+  redenRegels: string[];
 }
 
 /**
@@ -355,6 +365,7 @@ function tekenGroep(vel: Vel, groep: DossierGroep, kolommen: number): void {
     labelRegels: knip(`${v.code} \u00b7 ${v.label}`, vel.normaal, MAAT.label, kolomBreedte),
     leeg: v.waarde === null,
     regels: v.waarde === null ? ["-"] : knip(v.waarde, vel.normaal, MAAT.waarde, kolomBreedte),
+    redenRegels: v.reden ? knip(v.reden, vel.normaal, MAAT.bijschrift, kolomBreedte) : [],
   }));
 
   const rijen: Cel[][] = [];
@@ -365,7 +376,13 @@ function tekenGroep(vel: Vel, groep: DossierGroep, kolommen: number): void {
   const rijHoogte = (rij: Cel[]) =>
     Math.max(...rij.map((c) => c.labelRegels.length)) * REGEL.label +
     2 +
-    Math.max(...rij.map((c) => c.regels.length)) * REGEL.waarde;
+    Math.max(...rij.map((c) => c.regels.length)) * REGEL.waarde +
+    // De reden hangt onder de waarde en mag de rij eronder niet raken: lucht
+    // erboven om hem van de waarde te scheiden, en eronder omdat het volgende
+    // label anders tegen de laatste regel aan komt te staan.
+    (Math.max(...rij.map((c) => c.redenRegels.length)) > 0
+      ? 4 + Math.max(...rij.map((c) => c.redenRegels.length)) * REGEL.bijschrift + 4
+      : 0);
 
   const kopHoogte = REGEL.label + 8;
   const inhoud =
@@ -411,6 +428,15 @@ function tekenGroep(vel: Vel, groep: DossierGroep, kolommen: number): void {
       for (const regel of cel.regels) {
         vel.schrijf(regel, x, wy, MAAT.waarde, cel.leeg ? KLEUR.leeg : KLEUR.tekst);
         wy -= REGEL.waarde;
+      }
+
+      /* Waarom dit veld leeg is of niet zeker. Staat er alleen als er iets te
+         melden valt, zodat de gewone velden er niet anders uit gaan zien. */
+      wy -= 4;
+      for (const regel of cel.redenRegels) {
+        wy -= MAAT.bijschrift;
+        vel.schrijf(regel, x, wy, MAAT.bijschrift, KLEUR.attentie);
+        wy -= REGEL.bijschrift - MAAT.bijschrift;
       }
     });
 
@@ -595,6 +621,12 @@ export async function bouwOpnameDossier(invoer: DossierInvoer): Promise<Uint8Arr
     // Opmerkingen zijn lopende tekst; die gaan over de volle breedte staan in
     // plaats van in drie smalle kolommen waar niets in past.
     tekenGroep(vel, groep, groep.letter === "E" ? 1 : 3);
+  }
+
+  /* --- En wat er uit de foto's is gelezen --------------------------------- */
+
+  for (const groep of invoer.extraGroepen ?? []) {
+    tekenGroep(vel, groep, 3);
   }
 
   /* --- De bijlagen die geen foto zijn ------------------------------------- */

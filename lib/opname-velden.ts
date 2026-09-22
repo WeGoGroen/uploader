@@ -31,6 +31,11 @@ export interface DossierVeld {
   /** Null als het veld leeg is; leeg blijft staan in het dossier, want een
       niet-ingevuld veld is informatie. */
   waarde: string | null;
+  /** Waarom het veld leeg is of niet zeker is. Alleen gevuld bij velden die
+      niet door een mens zijn ingevuld maar ergens uit zijn gelezen: dan is
+      "waarom niet" net zo belangrijk als de waarde zelf. Komt in het dossier
+      onder de waarde te staan, in de attentiekleur. */
+  reden?: string | null;
 }
 
 export interface DossierGroep {
