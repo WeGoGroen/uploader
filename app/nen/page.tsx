@@ -554,7 +554,7 @@ export default function UploadNen() {
           (d: { straatnaam: string }) => d.straatnaam === straatEnNummer
         );
         if (!kort) return null;
-        const vol = await fetch(`/api/drafts/${kort.id}`, { cache: "no-store" })
+        const vol = await fetch(`/api/drafts/${encodeURIComponent(kort.id)}`, { cache: "no-store" })
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null);
         return (vol?.draft ?? null) as DraftRecord | null;

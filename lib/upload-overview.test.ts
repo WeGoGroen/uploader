@@ -371,3 +371,80 @@ describe("een verwijderde opname verdwijnt ook van het dashboard", () => {
     expect(r[0].adres).toBe("Dam 5, Amsterdam");
   });
 });
+
+/*
+  Waar het echt op vastliep. De dashboardregel van één adres wordt gevoed door
+  álle records van dat adres — meerdere concepten, én een afgeronde opname
+  waarvan de bijlages niet in ClickUp zijn gekomen. Eén record weghalen laat de
+  regel dus staan, en voor dat laatste soort zat er tot nu toe helemaal geen
+  verwijderknop in de lijst.
+*/
+describe("waarom een regel bleef staan na verwijderen", () => {
+  const adres = "Rustenburgerstraat 356-I";
+
+  it("keeps the row for an upload whose attachments never reached ClickUp", () => {
+    const r = bouwOpenstaand(
+      [],
+      [concept({ id: "a", straatnaam: adres, status: "uploaded", incompleteDocs: ["Bijlage G"] })]
+    );
+    expect(r).toHaveLength(1);
+    expect(r[0].redenen.join(" ")).toContain("bijlages ontbreken");
+  });
+
+  it("keeps the row when only one of several records for the address goes", () => {
+    const alles = [
+      concept({ id: "a", straatnaam: adres }),
+      concept({ id: "b", straatnaam: "Rustenburgerstraat 356 I", status: "uploaded", incompleteDocs: ["Bijlage G"] }),
+    ];
+    // Zo ging het eerder: één record weg, de rest blijft de regel voeden.
+    expect(bouwOpenstaand([], alles.filter((d) => d.id !== "a"))).toHaveLength(1);
+    // En zo hoort het: alles van dat adres in één keer.
+    expect(bouwOpenstaand([], [])).toHaveLength(0);
+  });
+
+  // De twee schrijfwijzen hierboven zijn hetzelfde pand; daarom gaat het
+  // opruimen langs sameAddress en niet langs een letterlijke vergelijking.
+  it("treats both spellings of the address as one job", () => {
+    const r = bouwOpenstaand([], [
+      concept({ id: "a", straatnaam: adres }),
+      concept({ id: "b", straatnaam: "Rustenburgerstraat 356 I" }),
+    ]);
+    expect(r).toHaveLength(1);
+  });
+});
+
+/*
+  Een media-opname is een eigen product.
+
+  De indeling kende maar twee uitkomsten, dus kwam een fotoserie onder
+  "Energielabel" te staan. Dat is precies de regel waar hier weken naar gezocht
+  is: het dashboard zei ENERGIELABEL terwijl het de media-opname was die de
+  regel overeind hield.
+*/
+describe("een media-opname op het dashboard", () => {
+  const media = concept({
+    id: "media-/Automatie Media/Rustenburgerstraat 356-1, Amsterdam",
+    straatnaam: "Rustenburgerstraat 356-1",
+    soort: "media",
+  });
+
+  it("calls itself media, not energielabel", () => {
+    expect(soorten(bouwOpenstaand([], [media])[0])).toEqual(["media"]);
+  });
+
+  it("links back to the media page instead of the energielabel form", () => {
+    const [product] = bouwOpenstaand([], [media])[0].producten;
+    expect(product.href).toBe("/media?addr=Rustenburgerstraat%20356-1");
+  });
+
+  // Op één adres kunnen ze naast elkaar lopen; dan hoort de media-opname het
+  // energielabel niet te overschrijven en andersom ook niet.
+  it("stands next to an energielabel on the same address", () => {
+    const r = bouwOpenstaand(
+      [],
+      [media, concept({ id: "d9", straatnaam: "Rustenburgerstraat 356-1", soort: "energielabel" })]
+    );
+    expect(r).toHaveLength(1);
+    expect(soorten(r[0])).toEqual(["energielabel", "media"]);
+  });
+});

@@ -83,7 +83,9 @@ vi.mock("@/lib/redis", () => ({ requireRedis: () => redis }));
 const {
   archiveerOudeOpnames,
   deleteDraft,
+  draftIdUitPad,
   getDraft,
+  isVerwijderd,
   listDrafts,
   listDraftsByStatus,
   saveDraft,
@@ -216,5 +218,96 @@ describe("migratie van de oude indeling", () => {
     redis._sets.set("drafts:index", new Set(["mag-niet-terugkomen"]));
     redis._strings.set("draft:mag-niet-terugkomen", JSON.stringify(opname("mag-niet-terugkomen")));
     expect(await listDraftsByStatus("concept")).toEqual([]);
+  });
+});
+
+/*
+  Verwijderen was niet het laatste woord.
+
+  Het energielabelformulier bewaart het concept in localStorage en duwt het
+  terug zodra die pagina opent of het apparaat weer verbinding krijgt. De
+  POST-route neemt een meegestuurde updatedAt over, dus de opname kwam terug
+  met zijn oorspronkelijke datum — alsof het verwijderen nooit gebeurd was.
+  Alleen het apparaat opruimen is niet genoeg: dezelfde opname kan op een
+  tweede iPad of in een ander tabblad staan. Dus weigert de opslag hem.
+*/
+describe("een verwijderde opname blijft verwijderd", () => {
+  it("refuses to take the same recording back", async () => {
+    const d = opname("a");
+    await saveDraft(d);
+    await deleteDraft("a");
+
+    // Precies wat een achtergebleven apparaat terugstuurt: dezelfde opname,
+    // ongewijzigd, met de oude datum erbij.
+    expect(await saveDraft(d)).toBe(false);
+    expect(await getDraft("a")).toBeNull();
+    expect(await listDrafts()).toHaveLength(0);
+  });
+
+  it("says so, so the device can stop trying", async () => {
+    await saveDraft(opname("a"));
+    expect(await isVerwijderd("a")).toBe(false);
+    await deleteDraft("a");
+    expect(await isVerwijderd("a")).toBe(true);
+  });
+
+  it("leaves every other recording alone", async () => {
+    await saveDraft(opname("a"));
+    await saveDraft(opname("b"));
+    await deleteDraft("a");
+
+    expect(await saveDraft(opname("b", { updatedAt: 9999 }))).toBe(true);
+    const over = await listDrafts();
+    expect(over.map((d) => d.id)).toEqual(["b"]);
+  });
+
+  // Een nieuwe opname op hetzelfde adres moet gewoon kunnen: de grafsteen
+  // geldt het id, niet het pand.
+  it("does not block a fresh recording at the same address", async () => {
+    await saveDraft(opname("a", { straatnaam: "Rustenburgerstraat 356-I" }));
+    await deleteDraft("a");
+    expect(await saveDraft(opname("b", { straatnaam: "Rustenburgerstraat 356-I" }))).toBe(true);
+    expect((await listDrafts()).map((d) => d.id)).toEqual(["b"]);
+  });
+});
+
+/*
+  Het id van een media-opname is een Dropbox-pad.
+
+  components/MediaFlow.tsx legt het vast als `media-${folder.path}`, dus met
+  schuine strepen erin. De route /api/drafts/<id> was één segment breed en kon
+  zo'n verzoek niet matchen: DELETE gaf 502 en het concept bleef staan. Op het
+  scherm zag dat eruit als "verwijderen doet niets" — de opname verdween uit de
+  lijst en stond daarna onveranderd op het dashboard, met zijn oude datum, want
+  er was nooit iets weggehaald.
+*/
+describe("een concept-id dat een pad is", () => {
+  const MEDIA = "media-/Automatie Media/Rustenburgerstraat 356-1, Amsterdam";
+
+  it("puts the path segments back together exactly", () => {
+    expect(draftIdUitPad(["media-", "Automatie Media", "Rustenburgerstraat 356-1, Amsterdam"])).toBe(
+      MEDIA
+    );
+  });
+
+  // Codeert de client het id vooraf, dan komt het als één segment binnen en
+  // mag de samenvoeging er niets meer aan veranderen.
+  it("leaves an already-whole id alone", () => {
+    expect(draftIdUitPad([MEDIA])).toBe(MEDIA);
+    expect(draftIdUitPad("abc123")).toBe("abc123");
+  });
+
+  it("has nothing to say about an empty path", () => {
+    expect(draftIdUitPad([])).toBe("");
+    expect(draftIdUitPad(undefined)).toBe("");
+  });
+
+  it("stores and deletes such a recording like any other", async () => {
+    await saveDraft(opname(MEDIA, { straatnaam: "Rustenburgerstraat 356-1" }));
+    expect((await listDrafts()).map((d) => d.id)).toEqual([MEDIA]);
+
+    await deleteDraft(MEDIA);
+    expect(await getDraft(MEDIA)).toBeNull();
+    expect(await listDrafts()).toHaveLength(0);
   });
 });

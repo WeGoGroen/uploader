@@ -28,3 +28,32 @@ describe("opnameLink", () => {
     expect(opnameLink({ id: "leeg", soort: "nen" })).toBe("/nen");
   });
 });
+
+// Een media-opname heeft een pad als id. Onverpakt in een querystring gezet
+// levert dat een link op die het id niet heelhuids overdraagt.
+describe("een id dat een pad is", () => {
+  it("survives the trip through the query string", () => {
+    const id = "media-/Automatie Media/Rustenburgerstraat 356-1, Amsterdam";
+    const link = opnameLink({ id, straatnaam: "Rustenburgerstraat 356-1" });
+    const terug = new URL(link, "https://voorbeeld.nl").searchParams.get("draft");
+    expect(terug).toBe(id);
+  });
+});
+
+describe("een media-opname", () => {
+  // Haar id is het pad van de projectmap, geen formulierconcept: de
+  // mediapagina zoekt het adres zelf weer op, net als de NEN-pagina.
+  it("opens the media page on the address", () => {
+    expect(
+      opnameLink({
+        id: "media-/Automatie Media/Rustenburgerstraat 356-1, Amsterdam",
+        soort: "media",
+        straatnaam: "Rustenburgerstraat 356-1",
+      })
+    ).toBe("/media?addr=Rustenburgerstraat%20356-1");
+  });
+
+  it("falls back to the media page without an address", () => {
+    expect(opnameLink({ id: "media-/leeg", soort: "media" })).toBe("/media");
+  });
+});
