@@ -14,6 +14,8 @@
  */
 
 import { compressImage, isCompressibleImage, mayCompressFolder } from "@/lib/image-compress";
+import { tijdslimiet } from "@/lib/tijdslimiet";
+import { vraagUploadLink } from "@/lib/upload-links";
 import {
   bewaarUpload,
   bewaarUploadSessie,
@@ -47,22 +49,23 @@ export interface UploadTask {
 /**
  * Parallelisme op gewicht i.p.v. op aantal bestanden. "3 bestanden tegelijk"
  * behandelde 60 foto's van 800KB hetzelfde als 3 video's van 100MB — de
- * uplink stond bij fotoseries grotendeels leeg. Een klein bestand weegt 1,
- * een groot bestand (dat zelf al in parallelle blokken gaat) weegt 6: binnen
- * het budget passen dus 12 foto's, of 2 grote bestanden, of een mengsel.
+ * uplink stond bij fotoseries grotendeels leeg.
  *
- * Twaalf en niet zes, omdat een fotoserie in de praktijk met twintig tegelijk
- * binnenkomt en elke foto vooral wáchttijd is: verbinding opzetten, versturen,
- * antwoord afwachten. Die wachttijd loopt parallel, de bytes delen de uplink.
- * Nog verder omhoog levert weinig meer op — dan is de uplink zelf vol en
- * begint Dropbox bij te veel gelijktijdige verzoeken met 429 te antwoorden.
+ * Het gewicht is precies het aantal verbindingen dat een taak openzet: een
+ * foto er één, een groot bestand er CHUNK_PARALLEL (zijn blokken gaan immers
+ * tegelijk). Binnen het budget past dus één video plus twee foto's, of zes
+ * foto's — nooit meer dan zes verbindingen tegelijk.
  *
- * Het gewicht van een groot bestand groeit mee (3 → 6), zodat er nog steeds
- * hooguit twee video's tegelijk gaan. Die trekken de uplink met hun vier
- * parallelle blokken al vol; er een derde naast zetten maakt alles trager.
+ * Twaalf stond hier eerder, met de gedachte dat elke foto vooral wáchttijd
+ * is. Die vlieger gaat maar half op: de wachttijd loopt inderdaad parallel,
+ * maar de bytes delen één uplink, dus twaalf tegelijk kruipen samen naar 40%
+ * en dan is er níets af. Valt de verbinding weg, dan is al dat verstuurde
+ * werk weg. Met zes is dezelfde serie even snel klaar, maar zijn er onderweg
+ * steeds bestanden écht binnen. Bovendien is twaalf gelijktijdig schrijven in
+ * dezelfde map precies waar Dropbox met 429 (too_many_write_operations) op
+ * antwoordt, en elke 429 kost wachttijd plus een herkansing.
  */
-const PARALLEL_BUDGET = 12;
-const GEWICHT_GROOT = 6;
+const PARALLEL_BUDGET = 6;
 // Boven deze grens accepteert een enkele Dropbox-upload het bestand niet meer
 // in één keer; dan valt de upload terug op de chunked server-route.
 const DIRECT_UPLOAD_MAX = 140 * 1024 * 1024;
@@ -73,21 +76,39 @@ const SERVER_UPLOAD_MAX = 4 * 1024 * 1024;
 const CHUNK_SIZE = 4 * 1024 * 1024;
 /** Aantal blokken dat tegelijk omhoog gaat bij een groot bestand. */
 const CHUNK_PARALLEL = 4;
+/** Zie hierboven: een groot bestand kost precies zoveel verbindingen. */
+const GEWICHT_GROOT = CHUNK_PARALLEL;
 /**
- * Blokgrootte voor de directe weg naar Dropbox. Veel groter dan de 4MB die
- * via onze server past, want daar geldt de Vercel-limiet niet — minder
- * rondjes over het netwerk en dus sneller. Blijft een veelvoud van 4MB,
- * zoals Dropbox voor concurrent-sessies vereist.
+ * Bovengrens voor de blokgrootte op de directe weg naar Dropbox. Veel groter
+ * dan de 4MB die via onze server past, want daar geldt de Vercel-limiet niet
+ * — minder rondjes over het netwerk en dus sneller.
  */
-const DIRECT_CHUNK_SIZE = 16 * 1024 * 1024;
+const DIRECT_CHUNK_MAX = 16 * 1024 * 1024;
 /**
  * Vanaf deze grootte gaat een bestand in parallelle blokken omhoog i.p.v. als
- * één stroom. Video's zaten hier precies tussenin: ze bleven onder de
- * 140MB-grens en gingen dus als één lange POST, terwijl één verbinding op
- * 4G/5G de uplink zelden vol trekt. Onder deze grens weegt het opzetten van
- * een uploadsessie niet op tegen de winst.
+ * één stroom. Eén verbinding trekt op 4G/5G de uplink zelden vol, dus hoe
+ * eerder blokken beginnen hoe beter — maar onder de drie blokken weegt het
+ * opzetten van een sessie (start + close + finish) niet op tegen de winst.
+ * Drie blokken van 4MB is dus de ondergrens.
+ *
+ * Stond op 24MB, waardoor een 360-panorama van 20MB als één lange POST ging.
  */
-const PARALLEL_VANAF = 24 * 1024 * 1024;
+const PARALLEL_VANAF = 3 * CHUNK_SIZE;
+
+/**
+ * De blokgrootte voor dit bestand.
+ *
+ * Eén vaste maat werkt niet aan beide kanten: met 16MB-blokken gaat een
+ * bestand van 20MB in twee blokken, waarvan er één 4MB is — dan staan er twee
+ * werkers te wachten op een derde die er niet is. Delen door het aantal
+ * werkers geeft ieder werk, afgerond naar beneden op de 4MB die Dropbox voor
+ * concurrent-sessies eist, en begrensd zodat een video van 2GB niet in blokken
+ * van 128MB gaat (één hapering kost dan 128MB opnieuw).
+ */
+export function blokGrootte(fileSize: number): number {
+  const perWerker = Math.floor(fileSize / CHUNK_PARALLEL / CHUNK_SIZE) * CHUNK_SIZE;
+  return Math.min(DIRECT_CHUNK_MAX, Math.max(CHUNK_SIZE, perWerker));
+}
 
 let tasks: UploadTask[] = [];
 const listeners = new Set<() => void>();
@@ -448,34 +469,22 @@ async function runTask(task: UploadTask, file: File) {
 
 /** Rechtstreeks naar Dropbox — de snelle weg. */
 async function uploadDirect(task: UploadTask, file: File, fullPath: string) {
-  const linkRes = await fetch("/api/dropbox/upload-link", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: fullPath }),
-  });
-  if (!linkRes.ok) {
+  // Eén link per bestand, maar wel per serie opgehaald: zie lib/upload-links.ts.
+  const link = await vraagUploadLink(fullPath);
+  if (!link) {
     // Geen link te krijgen: via de server proberen zodat de opname doorgaat.
     await uploadViaServer(task, file);
     return;
   }
-  const { link } = (await linkRes.json()) as { link: string };
 
-  await metBlokRetry(
-    () =>
-      new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", link);
-        xhr.setRequestHeader("Content-Type", "application/octet-stream");
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) setProgress(task.id, e.loaded, e.total);
-        };
-        xhr.onload = () =>
-          xhr.status >= 200 && xhr.status < 300
-            ? resolve()
-            : reject(new Error(`Dropbox weigerde het bestand (gaf ${xhr.status})`));
-        xhr.onerror = () => reject(new Error("Netwerkfout bij uploaden"));
-        xhr.send(file);
-      })
+  await metBlokRetry(() =>
+    verstuurXhr({
+      url: link,
+      body: file,
+      headers: { "Content-Type": "application/octet-stream" },
+      onProgress: (verzonden, totaal) => setProgress(task.id, verzonden, totaal),
+      melding: (status) => `Dropbox weigerde het bestand (gaf ${status})`,
+    })
   );
 }
 
@@ -488,23 +497,20 @@ async function uploadViaServer(task: UploadTask, file: File) {
   const form = new FormData();
   form.append("path", `${task.folderPath}/${task.folder}`);
   form.append("file", file);
-  await new Promise<void>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/dropbox/upload-file");
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) setProgress(task.id, e.loaded, e.total);
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) return resolve();
-      let msg = "Uploaden mislukt";
-      try {
-        msg = JSON.parse(xhr.responseText).error ?? msg;
-      } catch {}
-      reject(new Error(msg));
-    };
-    xhr.onerror = () => reject(new Error("Netwerkfout bij uploaden"));
-    xhr.send(form);
-  });
+  await metBlokRetry(() =>
+    verstuurXhr({
+      url: "/api/dropbox/upload-file",
+      body: form,
+      onProgress: (verzonden, totaal) => setProgress(task.id, verzonden, totaal),
+      melding: (_status, body) => {
+        try {
+          return (JSON.parse(body).error as string) ?? "Uploaden mislukt";
+        } catch {
+          return "Uploaden mislukt";
+        }
+      },
+    })
+  );
 }
 
 /**
@@ -572,38 +578,222 @@ export function afsluitBlok(
 }
 
 /**
+ * Een antwoord dat we niet wilden: statuscode én wat er in de body stond.
+ *
+ * Eerder werd de fout als losse tekst doorgegeven en er met een reguliere
+ * expressie weer uit gevist ("gaf 429"). Dat werkte zolang niemand een melding
+ * herschreef — en wie dat wel deed zette ongemerkt alle herkansingen uit. Nu
+ * dragen de fouten hun eigen gegevens.
+ */
+export class UploadFout extends Error {
+  constructor(
+    public status: number,
+    public body: string,
+    /** Wat de server in Retry-After meegaf, in seconden. */
+    public retryAfter: number | null = null,
+    melding?: string
+  ) {
+    super(melding ?? `Uploaden mislukt — gaf ${status}`);
+    this.name = "UploadFout";
+  }
+}
+
+/** Netwerk weg, stilgevallen of afgebroken: herhalen heeft altijd zin. */
+export class NetwerkFout extends Error {
+  constructor(melding = "Netwerkfout bij uploaden") {
+    super(melding);
+    this.name = "NetwerkFout";
+  }
+}
+
+/**
+ * De code die Dropbox zélf gaf.
+ *
+ * Onze eigen chunk-route verpakt élke Dropbox-fout als een 502, dus daar zegt
+ * de buitenste status niets. Staat de code van Dropbox in de body, dan telt
+ * die: een 409 ("closed", "incorrect_offset") wordt bij een herhaling precies
+ * hetzelfde antwoord, en dat is twee keer 4MB voor niets op een verbinding
+ * waar het toch al niet vlot ging.
+ */
+function dropboxStatus(err: UploadFout): number {
+  const vanDropbox = /failed: (\d{3})/.exec(err.body);
+  return vanDropbox ? Number(vanDropbox[1]) : err.status;
+}
+
+/**
+ * Heeft het zin dit nog eens te proberen? Alleen bij netwerkfouten, 429 en
+ * 5xx — een 401 of een 409 op het pad blijft meteen fataal, daar lost wachten
+ * niets aan op.
+ */
+export function magOpnieuw(err: unknown): boolean {
+  if (err instanceof NetwerkFout) return true;
+  if (err instanceof UploadFout) {
+    const status = dropboxStatus(err);
+    return status === 429 || status >= 500;
+  }
+  // Fouten die alleen tekst dragen, van code die nog niet door verstuurXhr
+  // loopt.
+  return blokFoutHerstelbaar(err);
+}
+
+/**
+ * Is de uploadsessie zelf stuk? Dan heeft hervatten geen zin en moet het
+ * bestand opnieuw beginnen. Bij elke andere fout zijn de blokken die Dropbox
+ * al binnen heeft gewoon nog geldig — en die opnieuw sturen is precies het
+ * werk dat we willen besparen.
+ */
+export function sessieOnbruikbaar(err: unknown): boolean {
+  if (!(err instanceof UploadFout)) return false;
+  // Alleen een 409: dát is de status waarmee Dropbox iets over de sessie zelf
+  // zegt. Een 401 (token verlopen) noemt ook "expired", maar daar is de sessie
+  // niets mis mee — die hoeft alleen een vers token. Op status vergeten te
+  // letten zou een video van 800MB weggooien om een token van vier uur oud.
+  if (dropboxStatus(err) !== 409) return false;
+  return /not_found|incorrect_offset|closed|expired|invalid/i.test(err.body);
+}
+
+/**
  * Herkansingen per blok. Eén netwerk-hik op blok 5 van 8 gooide voorheen de
  * hele poging weg; nu krijgt dat ene blok gewoon nog een kans terwijl de rest
- * blijft staan. Alleen bij fouten waar herhalen zin heeft (netwerk, 429,
- * 5xx) — een 401 blijft meteen fataal, daar lost wachten niets aan op.
+ * blijft staan.
  */
-const BLOK_POGINGEN = 3;
+const BLOK_POGINGEN = 5;
+const WACHT_MAX_MS = 60_000;
+
+/**
+ * Hoe lang wachten voor de volgende poging.
+ *
+ * Retry-After wint: zegt Dropbox "wacht vijftien seconden", dan is drie keer
+ * binnen vier seconden terugkomen drie keer dezelfde 429. Zonder die header
+ * verdubbelt de wachttijd per poging, met een willekeurige marge erbovenop —
+ * anders komen tien uploads die samen een 429 kregen ook weer samen terug, en
+ * lokken ze precies dezelfde fout opnieuw uit.
+ */
+export function wachttijd(poging: number, retryAfter: number | null): number {
+  if (retryAfter && retryAfter > 0) return Math.min(retryAfter * 1000, WACHT_MAX_MS);
+  const basis = Math.min(1000 * 2 ** (poging - 1), 20_000);
+  return basis + Math.round(Math.random() * basis * 0.5);
+}
 
 function wachtEven(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * Zelfde beoordeling, maar op de tékst van een melding — voor fouten die hun
+ * statuscode niet apart dragen. Zie dropboxStatus() voor het waarom van de
+ * blik door onze eigen 502 heen.
+ */
 export function blokFoutHerstelbaar(err: unknown): boolean {
   const melding = err instanceof Error ? err.message : "";
-  // Onze eigen route verpakt élke Dropbox-fout als een 502, dus daar zegt de
-  // buitenste code niets. Staat de code van Dropbox zelf in de melding, dan
-  // telt die: een 409 ("closed", "incorrect_offset") wordt bij een herhaling
-  // precies hetzelfde antwoord, en dat is twee keer 4MB voor niets op een
-  // verbinding waar het toch al niet vlot ging.
   const vanDropbox = /failed: (\d{3})/.exec(melding);
   if (vanDropbox) return /^(429|5\d\d)$/.test(vanDropbox[1]);
   return /Netwerkfout/.test(melding) || /gaf (429|5\d\d)/.test(melding);
 }
 
-async function metBlokRetry(stuur: () => Promise<void>): Promise<void> {
+async function metBlokRetry<T>(doe: () => Promise<T>): Promise<T> {
   for (let poging = 1; ; poging++) {
     try {
-      return await stuur();
+      return await doe();
     } catch (err) {
-      if (poging >= BLOK_POGINGEN || !blokFoutHerstelbaar(err)) throw err;
-      await wachtEven(poging === 1 ? 1000 : 3000);
+      if (poging >= BLOK_POGINGEN || !magOpnieuw(err)) throw err;
+      await wachtEven(wachttijd(poging, err instanceof UploadFout ? err.retryAfter : null));
     }
   }
+}
+
+/**
+ * Zo lang mag een lopende upload stilstaan voordat we hem afbreken.
+ *
+ * Een harde tijdslimiet kan hier niet: een video van 800MB mag best een half
+ * uur duren. Wat niet mag is stílstaan. Een XHR op een dood mobiel kanaal
+ * blijft namelijk hangen zonder ooit onload of onerror te geven — de taak
+ * rondde dan nooit af, en omdat pump() het slot pas vrijgeeft als de taak áf
+ * is, zette één zo'n upload de hele wachtrij stil. Alles op "bezig", 0%, voor
+ * altijd; precies het beeld waarmee "de uploader loopt vast" begint.
+ */
+const STILSTAND_MS = 45_000;
+/** Na de laatste byte wachten we op antwoord. Dropbox mag daar bij het
+    afronden van een groot bestand even over doen. */
+const ANTWOORD_MS = 120_000;
+/** Kleine JSON-aanroepen naar onze eigen server. */
+const KORT_MS = 20_000;
+/**
+ * Een blok van 4MB via onze server. Fetch geeft geen voortgang bij het
+ * versturen, dus hier kan alleen een harde grens — ruim genomen, want op een
+ * trage uplink duurt 4MB al gauw een paar minuten. Het is een noodrem tegen
+ * blijven hangen, geen tijdsbudget.
+ */
+const BLOK_ANTWOORD_MS = 5 * 60_000;
+
+interface VerstuurOpties {
+  url: string;
+  body: Blob | ArrayBuffer | FormData | null;
+  headers?: Record<string, string>;
+  onProgress?: (verzonden: number, totaal: number) => void;
+  /** Vertaalt een foutantwoord naar een melding voor in beeld. */
+  melding?: (status: number, body: string) => string;
+}
+
+/** Eén verzoek met bestandsinhoud, mét bewaking op stilstand. */
+function verstuurXhr({ url, body, headers = {}, onProgress, melding }: VerstuurOpties): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let afgerond = false;
+    let bewaker: ReturnType<typeof setTimeout> | null = null;
+
+    const stop = () => {
+      if (bewaker) clearTimeout(bewaker);
+      bewaker = null;
+    };
+    const eenmalig = (fn: () => void) => {
+      if (afgerond) return;
+      afgerond = true;
+      stop();
+      fn();
+    };
+    const bewaak = (ms: number, waarom: string) => {
+      stop();
+      bewaker = setTimeout(() => {
+        eenmalig(() => {
+          xhr.abort();
+          reject(new NetwerkFout(`Netwerkfout: ${waarom}`));
+        });
+      }, ms);
+    };
+
+    xhr.open("POST", url);
+    for (const [naam, waarde] of Object.entries(headers)) xhr.setRequestHeader(naam, waarde);
+
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      bewaak(STILSTAND_MS, "de upload stond stil");
+      onProgress?.(e.loaded, e.total);
+    };
+    // Alles verstuurd: vanaf hier wachten we op de server, niet op de uplink.
+    xhr.upload.onloadend = () => bewaak(ANTWOORD_MS, "geen antwoord na het versturen");
+    xhr.onload = () =>
+      eenmalig(() => {
+        if (xhr.status >= 200 && xhr.status < 300) return resolve(xhr.responseText);
+        const tekst = xhr.responseText ?? "";
+        const naSeconden = Number(xhr.getResponseHeader("Retry-After"));
+        reject(
+          new UploadFout(
+            xhr.status,
+            tekst,
+            Number.isFinite(naSeconden) && naSeconden > 0 ? naSeconden : null,
+            melding?.(xhr.status, tekst)
+          )
+        );
+      });
+    xhr.onerror = () => eenmalig(() => reject(new NetwerkFout()));
+    xhr.ontimeout = () => eenmalig(() => reject(new NetwerkFout("Netwerkfout: tijd verstreken")));
+
+    // Ook vóór de eerste byte: een verbinding die niet opgezet wordt hangt net
+    // zo hard als een verbinding die halverwege stilvalt.
+    bewaak(STILSTAND_MS, "de verbinding kwam niet op gang");
+    xhr.send(body);
+  });
 }
 
 function safeArg(value: unknown): string {
@@ -627,11 +817,22 @@ async function uploadChunkedDirect(task: UploadTask, file: File, fullPath: strin
     await chunkedDirectPoging(task, file, fullPath, true);
   } catch (err) {
     const bewaard = await leesUploadSessie(task.id);
-    // Alleen opnieuw beginnen als er ook echt iets te hergebruiken viel;
+    // Alleen een tweede poging als er ook echt iets te hergebruiken viel;
     // anders was dit gewoon een mislukte upload en heeft herhalen geen zin.
     if (!bewaard) throw err;
-    await vergeetUploadSessie(task.id);
-    await chunkedDirectPoging(task, file, fullPath, false);
+
+    /*
+      En dan hervatten, niet opnieuw beginnen.
+
+      Dit gooide de sessie altijd weg en stuurde het hele bestand nóg een keer.
+      Bij een video van 800MB op 4G is dat een half uur werk dat de prullenbak
+      in gaat om een hapering op één blok — terwijl de blokken die Dropbox al
+      binnen heeft gewoon geldig blijven. Alleen als de sessie zélf stuk is
+      (verlopen, of op een verkeerde positie) valt er niets te hervatten.
+    */
+    const opnieuwBeginnen = sessieOnbruikbaar(err);
+    if (opnieuwBeginnen) await vergeetUploadSessie(task.id);
+    await chunkedDirectPoging(task, file, fullPath, !opnieuwBeginnen);
   }
 }
 
@@ -641,58 +842,93 @@ async function chunkedDirectPoging(
   fullPath: string,
   hervatten: boolean
 ) {
-  const res = await fetch("/api/dropbox/session-token", { cache: "no-store" });
-  if (!res.ok) throw new Error("no-token");
-  const { token } = (await res.json()) as { token: string };
+  const haalToken = async (): Promise<string> => {
+    const res = await fetch("/api/dropbox/session-token", {
+      cache: "no-store",
+      signal: tijdslimiet(KORT_MS),
+    }).catch(() => null);
+    if (!res?.ok) throw new Error("no-token");
+    return ((await res.json()) as { token: string }).token;
+  };
+
+  let token = await haalToken();
+
+  /**
+   * Een token is een paar uur geldig; een video van twee gigabyte op 4G is dat
+   * soms ook. Verloopt het onderweg, dan gaf elk volgend blok een 401 — geen
+   * fout om op te wachten, dus de hele poging sneuvelde. Eén vers token en
+   * verder waar we waren is het hele antwoord.
+   */
+  const metVersToken = async <T>(doe: () => Promise<T>): Promise<T> => {
+    try {
+      return await doe();
+    } catch (err) {
+      if (!(err instanceof UploadFout) || err.status !== 401) throw err;
+      token = await haalToken();
+      return doe();
+    }
+  };
 
   const dbx = async (endpoint: string, arg: unknown, body?: BodyInit | null) => {
-    const r = await fetch(`https://content.dropboxapi.com/2/files/${endpoint}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/octet-stream",
-        // Niet-ASCII (bv. een accent in de bestandsnaam) mag niet rauw in een
-        // header; safeArg doet dezelfde escaping als de append hieronder.
-        "Dropbox-API-Arg": safeArg(arg),
-      },
-      body: body ?? null,
-    });
-    if (!r.ok) throw new Error(`Dropbox ${endpoint} gaf ${r.status}`);
+    let r: Response;
+    try {
+      r = await fetch(`https://content.dropboxapi.com/2/files/${endpoint}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/octet-stream",
+          // Niet-ASCII (bv. een accent in de bestandsnaam) mag niet rauw in een
+          // header; safeArg doet dezelfde escaping als de append hieronder.
+          "Dropbox-API-Arg": safeArg(arg),
+        },
+        body: body ?? null,
+        signal: tijdslimiet(ANTWOORD_MS),
+      });
+    } catch {
+      // fetch gooit een kale TypeError bij een netwerkfout of tijdslimiet.
+      throw new NetwerkFout();
+    }
+    if (!r.ok) {
+      const tekst = await r.text().catch(() => "");
+      const naSeconden = Number(r.headers.get("Retry-After"));
+      throw new UploadFout(
+        r.status,
+        tekst,
+        Number.isFinite(naSeconden) && naSeconden > 0 ? naSeconden : null,
+        `Dropbox ${endpoint} gaf ${r.status}`
+      );
+    }
     return r;
   };
+
+  const blok = blokGrootte(file.size);
 
   // Een bewaarde sessie is alleen bruikbaar met dezelfde blokindeling; met een
   // andere blokgrootte wijzen de bewaarde posities naar de verkeerde plek.
   const bewaard = hervatten ? await leesUploadSessie(task.id) : null;
-  const bruikbaar = bewaard && bewaard.chunkSize === DIRECT_CHUNK_SIZE ? bewaard : null;
+  const bruikbaar = bewaard && bewaard.chunkSize === blok ? bewaard : null;
 
   let sessionId: string;
   if (bruikbaar) {
     sessionId = bruikbaar.sessionId;
   } else {
-    const started = await dbx("upload_session/start", {
-      close: false,
-      session_type: { ".tag": "concurrent" },
-    });
+    const started = await metBlokRetry(() =>
+      dbx("upload_session/start", { close: false, session_type: { ".tag": "concurrent" } })
+    );
     ({ session_id: sessionId } = (await started.json()) as { session_id: string });
-    await bewaarUploadSessie({ id: task.id, sessionId, chunkSize: DIRECT_CHUNK_SIZE, klaar: [] });
+    await bewaarUploadSessie({ id: task.id, sessionId, chunkSize: blok, klaar: [] });
   }
 
-  const { alle: alleRanges, resterend: ranges, alGedaan } = blokIndeling(
-    file.size,
-    DIRECT_CHUNK_SIZE,
-    bruikbaar?.klaar ?? []
-  );
+  const { resterend: ranges, alGedaan } = blokIndeling(file.size, blok, bruikbaar?.klaar ?? []);
   const klaar = new Set<number>(bruikbaar?.klaar ?? []);
-  void alleRanges;
 
   // De blokken die er al waren tellen mee in de balk, anders zou een hervatte
   // upload van 80% weer bij 0% beginnen te tekenen.
   let uploaded = alGedaan;
   let next = 0;
   // Bytes die op dit moment onderweg zijn, per werker. Zonder deze
-  // tussenstand zou de balk pas per voltooid blok van 16MB verspringen —
-  // grote sprongen en een schatting die lang op hetzelfde getal blijft staan.
+  // tussenstand zou de balk pas per voltooid blok verspringen — grote sprongen
+  // en een schatting die lang op hetzelfde getal blijft staan.
   const inFlight = new Map<number, number>();
   const report = () =>
     setProgress(task.id, uploaded + [...inFlight.values()].reduce((a, b) => a + b, 0), file.size);
@@ -700,45 +936,38 @@ async function chunkedDirectPoging(
 
   async function stuurBlok(workerId: number, from: number, to: number, sluit: boolean) {
     const arg = { cursor: { session_id: sessionId, offset: from }, close: sluit };
-    await metBlokRetry(
-      () =>
-        new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open("POST", "https://content.dropboxapi.com/2/files/upload_session/append_v2");
-          xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-          xhr.setRequestHeader("Content-Type", "application/octet-stream");
-          xhr.setRequestHeader("Dropbox-API-Arg", safeArg(arg));
-          xhr.upload.onprogress = (e) => {
-            if (!e.lengthComputable) return;
-            inFlight.set(workerId, e.loaded);
-            report();
-          };
-          xhr.onload = () => {
-            inFlight.delete(workerId);
-            if (xhr.status >= 200 && xhr.status < 300) return resolve();
-            // Een herkansing op het sluitende blok kan "closed" terugkrijgen:
-            // de vorige poging was dan wél aangekomen en heeft de sessie al
-            // dichtgedaan. Doorgaan naar finish; die controleert de lengte en
-            // klapt alsnog als er echt iets ontbreekt.
-            if (sluit && xhr.status === 409 && /closed/.test(xhr.responseText)) return resolve();
-            reject(new Error(`Dropbox append gaf ${xhr.status}`));
-          };
-          xhr.onerror = () => {
-            inFlight.delete(workerId);
-            reject(new Error("Netwerkfout bij uploaden"));
-          };
-          xhr.send(file.slice(from, to));
-        })
-    );
+    try {
+      await metVersToken(() =>
+        metBlokRetry(() =>
+          verstuurXhr({
+            url: "https://content.dropboxapi.com/2/files/upload_session/append_v2",
+            body: file.slice(from, to),
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/octet-stream",
+              "Dropbox-API-Arg": safeArg(arg),
+            },
+            onProgress: (verzonden) => {
+              inFlight.set(workerId, verzonden);
+              report();
+            },
+            melding: (status) => `Dropbox append gaf ${status}`,
+          }).finally(() => inFlight.delete(workerId))
+        )
+      );
+    } catch (err) {
+      // Een herkansing op het sluitende blok kan "closed" terugkrijgen: de
+      // vorige poging was dan wél aangekomen en heeft de sessie al dichtgedaan.
+      // Doorgaan naar finish; die controleert de lengte en klapt alsnog als er
+      // echt iets ontbreekt.
+      const alDicht =
+        sluit && err instanceof UploadFout && err.status === 409 && /closed/.test(err.body);
+      if (!alDicht) throw err;
+    }
     uploaded += to - from;
     klaar.add(from);
     // Meteen vastleggen: juist een afgebroken sessie moet dit terugvinden.
-    void bewaarUploadSessie({
-      id: task.id,
-      sessionId,
-      chunkSize: DIRECT_CHUNK_SIZE,
-      klaar: [...klaar],
-    });
+    void bewaarUploadSessie({ id: task.id, sessionId, chunkSize: blok, klaar: [...klaar] });
     report();
   }
 
@@ -758,10 +987,16 @@ async function chunkedDirectPoging(
   );
   if (sluit) await stuurBlok(0, sluit[0], sluit[1], true);
 
-  await dbx("upload_session/finish", {
-    cursor: { session_id: sessionId, offset: file.size },
-    commit: { path: fullPath, mode: "overwrite", autorename: false, mute: true },
-  });
+  // Afronden staat aan het éínd van een lange upload — juist daar is het token
+  // het oudst.
+  await metVersToken(() =>
+    metBlokRetry(() =>
+      dbx("upload_session/finish", {
+        cursor: { session_id: sessionId, offset: file.size },
+        commit: { path: fullPath, mode: "overwrite", autorename: false, mute: true },
+      })
+    )
+  );
   await vergeetUploadSessie(task.id);
 }
 
@@ -775,11 +1010,40 @@ async function chunkedDirectPoging(
  * laatste een veelvoud van 4MB is — vandaar de vaste CHUNK_SIZE.
  */
 async function uploadChunked(task: UploadTask, file: File, fullPath: string) {
-  const startRes = await fetch("/api/dropbox/upload-chunk?action=start-concurrent", { method: "POST" });
-  if (!startRes.ok) {
-    const data = await startRes.json().catch(() => null);
-    throw new Error(data?.error ?? "Uploadsessie starten mislukt");
-  }
+  /** Eén aanroep naar onze eigen chunk-route, met tijdslimiet en nette fout. */
+  const chunkRoute = async (query: string, body: BodyInit | null, ruimMs = ANTWOORD_MS) => {
+    let res: Response;
+    try {
+      res = await fetch(`/api/dropbox/upload-chunk?${query}`, {
+        method: "POST",
+        body,
+        signal: tijdslimiet(ruimMs),
+      });
+    } catch {
+      // fetch gooit een kale TypeError bij een netwerkfout of tijdslimiet.
+      throw new NetwerkFout();
+    }
+    if (!res.ok) {
+      const tekst = await res.text().catch(() => "");
+      let melding = `Uploaden mislukt — gaf ${res.status}`;
+      try {
+        const data = JSON.parse(tekst) as { error?: string };
+        if (data.error) melding = `${data.error} (gaf ${res.status})`;
+      } catch {}
+      const naSeconden = Number(res.headers.get("Retry-After"));
+      throw new UploadFout(
+        res.status,
+        tekst,
+        Number.isFinite(naSeconden) && naSeconden > 0 ? naSeconden : null,
+        melding
+      );
+    }
+    return res;
+  };
+
+  const startRes = await metBlokRetry(() =>
+    chunkRoute("action=start-concurrent", null, KORT_MS)
+  );
   const { sessionId } = (await startRes.json()) as { sessionId: string };
 
   const ranges: [number, number][] = [];
@@ -789,32 +1053,26 @@ async function uploadChunked(task: UploadTask, file: File, fullPath: string) {
   let next = 0;
   async function stuurBlok(from: number, to: number, sluit: boolean) {
     const chunk = await file.slice(from, to).arrayBuffer();
-    await metBlokRetry(async () => {
-      let res: Response;
-      try {
-        res = await fetch(
-          `/api/dropbox/upload-chunk?action=append&sessionId=${encodeURIComponent(sessionId)}&offset=${from}${
+    try {
+      await metBlokRetry(() =>
+        chunkRoute(
+          `action=append&sessionId=${encodeURIComponent(sessionId)}&offset=${from}${
             sluit ? "&close=1" : ""
           }`,
-          { method: "POST", body: chunk }
-        );
-      } catch {
-        // fetch gooit een kale TypeError bij een netwerkfout; hernoemen
-        // zodat metBlokRetry 'm als herstelbaar herkent.
-        throw new Error("Netwerkfout bij uploaden");
-      }
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        const melding: string = data?.error ?? "";
-        // Zelfde uitzondering als bij de directe weg: een herkansing op het
-        // sluitende blok kan "closed" terugkrijgen omdat de vorige poging al
-        // aankwam. Finish controleert daarna alsnog of alles er staat.
-        if (sluit && res.status === 502 && /closed/.test(melding)) return;
-        // Statuscode altijd in de melding, zodat metBlokRetry netwerk- en
-        // serverfouten kan herkennen als herstelbaar.
-        throw new Error(melding ? `${melding} (gaf ${res.status})` : `Uploaden mislukt — gaf ${res.status}`);
-      }
-    });
+          chunk,
+          BLOK_ANTWOORD_MS
+        )
+      );
+    } catch (err) {
+      // Zelfde uitzondering als bij de directe weg: een herkansing op het
+      // sluitende blok kan "closed" terugkrijgen omdat de vorige poging al
+      // aankwam. Finish controleert daarna alsnog of alles er staat.
+      // Onze route verpakt de 409 van Dropbox als een 502, dus kijken we naar
+      // de code die Dropbox zelf gaf.
+      const alDicht =
+        sluit && err instanceof UploadFout && dropboxStatus(err) === 409 && /closed/.test(err.body);
+      if (!alDicht) throw err;
+    }
     uploaded += to - from;
     setProgress(task.id, uploaded, file.size);
   }
@@ -832,16 +1090,14 @@ async function uploadChunked(task: UploadTask, file: File, fullPath: string) {
   await Promise.all(Array.from({ length: Math.min(CHUNK_PARALLEL, parallel.length) }, worker));
   if (sluit) await stuurBlok(sluit[0], sluit[1], true);
 
-  const finishRes = await fetch(
-    `/api/dropbox/upload-chunk?action=finish&sessionId=${encodeURIComponent(sessionId)}&offset=${
-      file.size
-    }&path=${encodeURIComponent(fullPath)}`,
-    { method: "POST", body: new ArrayBuffer(0) }
+  await metBlokRetry(() =>
+    chunkRoute(
+      `action=finish&sessionId=${encodeURIComponent(sessionId)}&offset=${file.size}&path=${encodeURIComponent(
+        fullPath
+      )}`,
+      new ArrayBuffer(0)
+    )
   );
-  if (!finishRes.ok) {
-    const data = await finishRes.json().catch(() => null);
-    throw new Error(data?.error ?? "Upload afronden mislukt");
-  }
 }
 
 
@@ -851,6 +1107,9 @@ async function fileExists(folderPath: string, folder: string, name: string): Pro
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: `${folderPath}/${folder}` }),
+      // Zonder tijdslimiet houdt deze controle het uploadslot bezet: de taak
+      // rondt pas af als dit antwoord er is, en pump() wacht daarop.
+      signal: tijdslimiet(KORT_MS),
     });
     const data = await res.json();
     return ((data.files ?? []) as { name: string }[]).some((f) => f.name === name);
