@@ -32,7 +32,11 @@ export const MEDIA_STAPPEN: MediaStap[] = [
     naam: "Video",
     uitleg: "Rondleidingen en drone-beelden",
     map: "In/Raw/Video",
-    accept: "video/*",
+    // De extensies staan er expliciet bij naast "video/*". Een iPad beoordeelt
+    // een bestand in de Bestanden-app op zijn type-aanduiding, en die kent hij
+    // van drone- en camerabestanden lang niet altijd — dan staat de video grijs
+    // en valt hij niet te kiezen. Met de extensies erbij mag hij wél.
+    accept: "video/*,.mov,.mp4,.m4v,.avi,.mts,.m2ts,.mkv,.insv,.lrv,.lrf,.3gp,.mpg,.mpeg,.wmv",
   },
   {
     key: "360",
