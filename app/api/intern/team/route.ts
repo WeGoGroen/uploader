@@ -3,6 +3,7 @@ import { isInternRequest } from "@/lib/intern-auth";
 import {
   getClickUpAccounts,
   patchClickUpAccount,
+  rechtenNaWijziging,
   rechtenVan,
   verwijderAccount,
   type UploadRechten,
@@ -194,18 +195,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Dat is geen geldig e-mailadres." }, { status: 400 });
   }
 
-  const rechten: Partial<UploadRechten> = {
-    energielabel: Boolean(body?.rechten?.energielabel),
-    nen: Boolean(body?.rechten?.nen),
-    media: Boolean(body?.rechten?.media),
-  };
-  if (!rechten.energielabel && !rechten.nen && !rechten.media) {
-    return NextResponse.json(
-      { error: "Kies minstens één uploadsoort, anders kan deze persoon niets." },
-      { status: 400 }
-    );
-  }
-
   /*
     Vóór het opslaan kijken of deze naam al bestond: dit endpoint bedient én
     het uitnodigen van iemand nieuws, én het wijzigen van rechten van iemand
@@ -214,7 +203,16 @@ export async function POST(request: Request) {
     kreeg iemand bij elke rechtenwijziging opnieuw een "welkom".
   */
   const voorAf = await getClickUpAccounts().catch(() => []);
-  const bestondAl = voorAf.some((a) => a.name === naam);
+  const bestaand = voorAf.find((a) => a.name === naam);
+  const bestondAl = Boolean(bestaand);
+
+  const rechten = rechtenNaWijziging(bestaand, body?.rechten);
+  if (!rechten.energielabel && !rechten.nen && !rechten.media) {
+    return NextResponse.json(
+      { error: "Kies minstens één uploadsoort, anders kan deze persoon niets." },
+      { status: 400 }
+    );
+  }
 
   try {
     await patchClickUpAccount({ name: naam, email, rechten });
@@ -232,7 +230,7 @@ export async function POST(request: Request) {
     const { onderwerp, html } = uploaderUitnodiging({
       naam,
       startcode: STARTCODE,
-      rechten: rechten as { energielabel: boolean; nen: boolean; media: boolean },
+      rechten,
     });
     const resultaat = await stuurMail(onderwerp, html, [email], "uitnodiging_upload");
     gemaild = resultaat.verstuurd;

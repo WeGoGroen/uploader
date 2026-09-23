@@ -82,6 +82,35 @@ export function soortUitPad(folderPath: string): Soort {
   return "energielabel";
 }
 
+/**
+ * Hoort dit wachtrij-item bij deze opname?
+ *
+ * Voor het adres dezelfde vergelijking waarmee bouwOpenstaand() hieronder een
+ * concept bij een bestaande regel zoekt. Dat is geen toeval maar de hele
+ * bedoeling: wie een opname weghaalt moet precies de items kwijtraken die zijn
+ * regel overeind houden. Met een eigen vergelijking zou bij elk verschil in
+ * schrijfwijze ("206 III" tegenover "206-3") de regel blijven staan terwijl de
+ * opname weg is — en dat is juist de klacht die dit moet verhelpen.
+ *
+ * Het product telt mee zodra het bekend is. Op één pand kan zowel een
+ * energielabel als een NEN2580 lopen; die staan op het dashboard samen op één
+ * regel, maar het zijn twee opdrachten. De ene weggooien mag de uploads van de
+ * andere niet meenemen. Van opnames van vóór het soort-veld weten we het niet,
+ * en dan is het hele adres opruimen beter dan niets opruimen — juist daar zit
+ * het werk dat al maanden blijft staan.
+ *
+ * Werkt op alles met een folderPath, zodat zowel een lopende taak als een in
+ * IndexedDB bewaarde upload erlangs kan.
+ */
+export function taakHoortBij(
+  item: { folderPath: string },
+  adres: string,
+  soort?: Soort | null
+): boolean {
+  if (!sameAddress(adresUitPad(item.folderPath), adres)) return false;
+  return !soort || soortUitPad(item.folderPath) === soort;
+}
+
 /** Naam van een product zoals hij op het dashboard staat. */
 export const PRODUCT_LABEL: Record<Soort, string> = {
   nen: "NEN2580",

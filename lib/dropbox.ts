@@ -5,7 +5,7 @@ import { mapnaamPastBijAdres, parseProjectFolderName } from "@/lib/projectmap-ma
 
 const DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token";
 const REFRESH_TOKEN_KEY = "dropbox:refresh_token";
-const DROPBOX_API_BASE = "https://api.dropboxapi.com/2";
+export const DROPBOX_API_BASE = "https://api.dropboxapi.com/2";
 const DROPBOX_CONTENT_BASE = "https://content.dropboxapi.com/2";
 
 export interface DropboxTokens {
@@ -31,7 +31,7 @@ function safeHeaderJson(value: unknown): string {
   );
 }
 
-class DropboxApiError extends Error {
+export class DropboxApiError extends Error {
   constructor(
     public status: number,
     message: string
@@ -788,6 +788,29 @@ export async function folderExists(accessToken: string, path: string): Promise<b
   throw new DropboxApiError(res.status, `Dropbox get_metadata failed: ${res.status} ${body}`);
 }
 
+/**
+ * De metagegevens van één bestand of map, op pad of op id ("id:...").
+ *
+ * Geeft null als het er niet is, en gooit alleen bij een echte storing — zodat
+ * de aanroeper "bestaat niet" niet hoeft af te leiden uit een foutmelding.
+ */
+export async function getMetadata(
+  accessToken: string,
+  padOfId: string
+): Promise<{ ".tag"?: string; id?: string; name?: string; path_display?: string; path_lower?: string } | null> {
+  const res = await fetch(`${DROPBOX_API_BASE}/files/get_metadata`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ path: padOfId }),
+  });
+  if (res.ok) {
+    return (await res.json()) as { ".tag"?: string; id?: string; name?: string; path_display?: string; path_lower?: string };
+  }
+  const body = await res.text().catch(() => "");
+  if (res.status === 409 && body.includes("not_found")) return null;
+  throw new DropboxApiError(res.status, `Dropbox get_metadata failed: ${res.status} ${body}`);
+}
+
 /** Directe download-link (i.p.v. de Dropbox-voorbeeldpagina) voor externe
     diensten zoals Mediatask die zelf het bestand ophalen via een URL. */
 function toDirectDownloadUrl(shareUrl: string): string {
@@ -795,11 +818,6 @@ function toDirectDownloadUrl(shareUrl: string): string {
   return shareUrl.includes("?") ? `${shareUrl}&dl=1` : `${shareUrl}?dl=1`;
 }
 
-/** Directe download-links voor alle bestanden in een map, gebruikt om
-    foto's/tekeningen als kant-en-klare URL's aan te leveren bij Mediatask —
-    geen dubbele upload nodig, ze staan al in Dropbox. */
-/** Zelfde als getFileDirectLinks, maar mét bestandsnaam — nodig om in een
-    Mediatask-opmerking te kunnen zeggen wélk bestand bij welke link hoort. */
 /**
  * Een tijdelijke link naar één bestand: vier uur geldig, geen blijvend spoor.
  *
@@ -847,17 +865,26 @@ export async function listFolderWithTemporaryLinks(
   return uit;
 }
 
-export async function getFileLinksWithNames(
+/**
+ * Eén gedeelde link naar een hele map, plus hoeveel bestanden erin zitten.
+ *
+ * Dit verving een link per bestand in de Mediatask-opmerking. Dat was niet
+ * alleen onleesbaar bij dertig foto's, het was ook traag: per bestand een
+ * aparte create_shared_link, achter elkaar. Nu is het één aanroep voor de map.
+ *
+ * Bewust géén directe download-URL: bij een map betekent dl=1 dat er meteen een
+ * zip begint te lopen, terwijl de verwerker eerst wil zien wat erin zit.
+ *
+ * Geeft null bij een lege of onbestaande map — daar hoort geen kopje met een
+ * link bij.
+ */
+export async function getFolderLinkWithCount(
   accessToken: string,
   folderPath: string
-): Promise<{ name: string; url: string }[]> {
+): Promise<{ url: string; count: number } | null> {
   const files = await listFolderFiles(accessToken, folderPath);
-  const out: { name: string; url: string }[] = [];
-  for (const file of files) {
-    const url = await getOrCreateSharedLink(accessToken, `${folderPath}/${file.name}`);
-    out.push({ name: file.name, url: toDirectDownloadUrl(url) });
-  }
-  return out;
+  if (files.length === 0) return null;
+  return { url: await getOrCreateSharedLink(accessToken, folderPath), count: files.length };
 }
 
 export async function getFileDirectLinks(accessToken: string, folderPath: string): Promise<string[]> {
@@ -1669,4 +1696,108 @@ export async function herstelStatusSleutels(): Promise<{ verplaatst: number; gel
     await redis.hdel(STATUS_HASH, veld).catch(() => {});
   }
   return { verplaatst, gelijk };
+}
+
+// ---------------------------------------------------------------------------
+// Eén projectmap volledig uitlezen
+// ---------------------------------------------------------------------------
+
+export interface MapBestand {
+  /** Pad binnen de projectmap, in de schrijfwijze van Dropbox zelf. */
+  pad: string;
+  naam: string;
+  grootte: number;
+  id: string;
+}
+
+export interface MapInhoud {
+  /** Het Dropbox-id van de projectmap zelf ("id:..."). Hiermee blijft de
+      koppeling staan als de map naar Afgerond verhuist. */
+  id: string;
+  /** Het pad zoals het nú is. */
+  pad: string;
+  bestanden: MapBestand[];
+  /** Ook de lege mappen: het verschil tussen "map bestaat maar is leeg" en
+      "map bestaat niet" is precies wat een controle wil weten. */
+  mappen: string[];
+}
+
+/**
+ * De volledige inhoud van één projectmap, tot de laatste pagina.
+ *
+ * Waarom naast listFilePathsRecursive: die slaat mapregels over en geeft alles
+ * in kleine letters terug. Voor een controle is dat allebei fataal — een lege
+ * VABI-map is dan onzichtbaar, en een bestand dat met zijn eigen schrijfwijze
+ * teruggeschreven moet worden is niet meer te reconstrueren.
+ *
+ * Er wordt doorgepagineerd tot has_more onwaar is. Afkappen zou "ontbreekt"
+ * opleveren over onderdelen die er wél zijn, en daarna zou het aanvullen ze
+ * dubbel neerzetten — precies wat een tweede klik niet mag doen.
+ */
+export async function leesProjectmap(accessToken: string, padOfId: string): Promise<MapInhoud> {
+  const meta = await getMetadata(accessToken, padOfId);
+  if (!meta || meta[".tag"] !== "folder") {
+    throw new DropboxApiError(404, `Geen map gevonden op ${padOfId}`);
+  }
+  const pad = (meta.path_display ?? meta.path_lower ?? padOfId) as string;
+  const id = (meta.id ?? "") as string;
+  const prefix = `${pad.toLowerCase()}/`;
+
+  const bestanden: MapBestand[] = [];
+  const mappen: string[] = [];
+  let cursor: string | null = null;
+
+  for (;;) {
+    const res: Response = await fetch(
+      `${DROPBOX_API_BASE}/files/list_folder${cursor ? "/continue" : ""}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        // Op id zoeken mag bij de eerste aanroep ook, maar het pad is
+        // leesbaarder in de logs en we hebben hem hierboven toch al opgehaald.
+        body: JSON.stringify(cursor ? { cursor } : { path: pad, recursive: true }),
+      }
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      if (res.status === 409 && body.includes("path/not_found")) break;
+      throw new DropboxApiError(res.status, `Dropbox list_folder failed: ${res.status} ${body}`);
+    }
+
+    const data = (await res.json()) as {
+      entries: {
+        ".tag": string;
+        id?: string;
+        name?: string;
+        size?: number;
+        path_lower?: string;
+        path_display?: string;
+      }[];
+      cursor: string;
+      has_more: boolean;
+    };
+
+    for (const entry of data.entries) {
+      const lower = entry.path_lower ?? "";
+      if (!lower.startsWith(prefix)) continue;
+      const vol = entry.path_display ?? entry.path_lower ?? "";
+      const relatief = vol.slice(pad.length + 1);
+      if (!relatief) continue;
+      if (entry[".tag"] === "folder") {
+        mappen.push(relatief);
+      } else if (entry[".tag"] === "file") {
+        bestanden.push({
+          pad: relatief,
+          naam: entry.name ?? relatief.split("/").pop() ?? relatief,
+          grootte: Number(entry.size) || 0,
+          id: entry.id ?? "",
+        });
+      }
+    }
+
+    if (!data.has_more) break;
+    cursor = data.cursor;
+  }
+
+  return { id, pad, bestanden, mappen };
 }

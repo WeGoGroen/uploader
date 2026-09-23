@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRechten } from "@/components/RechtenProvider";
 import { opnameLink } from "@/lib/opname-link";
+import { vergeetTakenVoor } from "@/lib/upload-queue";
+import { taakHoortBij } from "@/lib/upload-overview";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 
 type DraftRecord = Pick<
@@ -35,6 +37,7 @@ export default function Opnames() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [verwijderFout, setVerwijderFout] = useState<string | null>(null);
   // Kerncijfers over de doorstroom. Bij honderden opnames per maand zegt een
   // lijst weinig; deze getallen wel.
   const [cijfers, setCijfers] = useState<{
@@ -83,8 +86,56 @@ export default function Opnames() {
   }
 
   async function removeDraft(id: string) {
-    await fetch(`/api/drafts/${id}`, { method: "DELETE" }).catch(() => {});
+    const draft = drafts?.find((d) => d.id === id);
+    setVerwijderFout(null);
+
+    /*
+      Eerst de server, en pas uit de lijst halen als dat ook echt gelukt is.
+
+      Dit stond op `.catch(() => {})` met de verwijdering er onvoorwaardelijk
+      achter: een mislukte verwijdering zag er hier dus uit als een gelukte,
+      terwijl de opname op het dashboard gewoon bleef staan — dat haalt zijn
+      concepten opnieuw op en kreeg hem dan nog steeds terug.
+    */
+    try {
+      const res = await fetch(`/api/drafts/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? `De server gaf ${res.status} terug.`);
+      }
+    } catch (err) {
+      setVerwijderFout(
+        err instanceof Error ? err.message : "Kon de opname niet verwijderen."
+      );
+      return;
+    }
+
     setDrafts((prev) => prev?.filter((d) => d.id !== id) ?? null);
+
+    /*
+      En dan wat er op dit apparaat van klaarstaat.
+
+      Het dashboard bouwt zijn lijst uit twee bronnen: de concepten van de
+      server én de uploadwachtrij hier in de browser. Eén mislukte upload
+      houdt zo'n regel in zijn eentje overeind. Zonder deze stap verdween de
+      opname hier wel en bleef hij daar staan — precies de klacht.
+
+      Wat al in Dropbox staat blijft staan: dat zijn de scans zelf, niet de
+      administratie eromheen, en die weggooien is een ander besluit dan dit.
+    */
+    const adres = draft?.straatnaam || draft?.titel;
+    if (!adres) return;
+    try {
+      await vergeetTakenVoor((t) => taakHoortBij(t, adres, draft?.soort));
+    } catch {
+      // De opname zelf is wél weg; alleen het opruimen hier is misgegaan. Dat
+      // is precies het geval waarin hij op het dashboard blijft staan, dus dat
+      // hoort de gebruiker te weten in plaats van het straks zelf te ontdekken.
+      setVerwijderFout(
+        "De opname is verwijderd, maar de bestanden die op dit apparaat klaarstonden " +
+          "konden niet worden opgeruimd. Daardoor kan hij op het dashboard blijven staan."
+      );
+    }
   }
 
   /*
@@ -157,6 +208,7 @@ export default function Opnames() {
 
         {loading && !drafts && <p className="note">Concepten laden…</p>}
         {error && <p className="conn-err">{error}</p>}
+        {verwijderFout && <p className="conn-err">{verwijderFout}</p>}
 
         {nietsTeDoen && (
           <p className="note">Niets meer af te maken — al je opnames zijn doorgezet.</p>

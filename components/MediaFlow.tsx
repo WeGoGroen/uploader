@@ -353,29 +353,33 @@ export default function MediaFlow() {
     setFolderError(null);
   }
 
-  /**
-   * Sluit de opname af vanaf het slotscherm: de opname geldt als afgerond en
-   * verdwijnt uit de lijst met openstaand werk, en je staat klaar voor het
-   * volgende adres.
-   *
-   * De sessie blijft wél staan zolang er nog iets loopt of iets mislukt is:
-   * die lijst is de enige weg terug naar een upload die nog onderweg is, en
-   * die weghalen zou de bestanden onvindbaar maken op het moment dat je ze
-   * juist nodig hebt.
-   */
-  function rondAf() {
-    if (melding) meldAfgerond(melding);
-    if (folder && bezigTotaal === 0 && mislukteTotaal === 0) vergeetMediaSessie(folder.path);
-    opnieuwBeginnen();
-    window.scrollTo(0, 0);
-  }
-
   function volgende() {
     const volgend = MEDIA_STAPPEN[stapIndex + 1];
     // Bij de laatste stap is de opname afgerond; zonder dit blijft hij als
     // "niet afgemaakt" gelden en krijg je er een herinnering over.
     if (!volgend && melding) meldAfgerond(melding);
     setStap(volgend ? volgend.key : "klaar");
+    window.scrollTo(0, 0);
+  }
+
+  /**
+   * De slotknop op het klaar-scherm: de opname is gedaan, dus hem afsluiten en
+   * terug naar het adresscherm voor de volgende.
+   *
+   * Nog een keer als afgerond melden: de hartslag loopt door zolang dit scherm
+   * open staat en zet de opname elke vijf minuten terug op "concept". Wie hier
+   * even blijft staan kreeg er anders alsnog een herinnering over.
+   *
+   * De opname alleen uit "Openstaande opnames" halen als er niets meer loopt
+   * of mislukt is. De wachtrij draait buiten dit scherm door, en die lijst is
+   * op de mediapagina de enige weg terug naar een upload die nog onderweg is —
+   * de zwevende melding van UploadResume is hier juist verborgen.
+   */
+  function afronden() {
+    if (melding) meldAfgerond(melding);
+    const onderweg = takenVanOpname.some((t) => t.dropbox === "uploading" || t.dropbox === "error");
+    if (folder && !onderweg) vergeetMediaSessie(folder.path);
+    opnieuwBeginnen();
     window.scrollTo(0, 0);
   }
 
@@ -386,7 +390,6 @@ export default function MediaFlow() {
   }
 
   const bezigTotaal = takenVanOpname.filter((t) => t.dropbox === "uploading").length;
-  const mislukteTotaal = takenVanOpname.filter((t) => t.dropbox === "error").length;
 
   /**
    * Scherm wakker houden zolang er iets omhoog gaat. Een webpagina kan niet
@@ -866,12 +869,12 @@ export default function MediaFlow() {
             })}
           </ul>
 
-          {/* Afronden als laatste handeling, geen sprong naar Dropbox: het werk
-              is hier klaar en de opnemer gaat door naar het volgende adres.
-              Wie tóch in de map wil kijken doet dat met "Openen" in de balk
-              hierboven — dat staat er op elke stap al. */}
-          <div className="form-foot" style={{ marginTop: 16 }}>
-            <button className="btn btn-primary btn-block" onClick={rondAf}>
+          {/* Eén slotknop: afronden brengt je terug naar het adresscherm, dus
+              een aparte "Nieuw adres" ernaast deed hetzelfde. Dropbox blijft
+              bereikbaar via "Openen" in de balk bovenaan — dat scheelt de
+              opnemer een omweg langs de Dropbox-app om hier klaar te zijn. */}
+          <div className="form-foot" style={{ marginTop: 16, justifyContent: "flex-end" }}>
+            <button className="btn btn-primary" onClick={afronden}>
               Afronden
             </button>
           </div>

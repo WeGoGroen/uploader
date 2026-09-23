@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { bouwOpenstaand, gemiddeldPct, soortUitPad, type OverzichtDraft } from "./upload-overview";
+import {
+  bouwOpenstaand,
+  gemiddeldPct,
+  soortUitPad,
+  taakHoortBij,
+  type OverzichtDraft,
+} from "./upload-overview";
 import type { UploadTask } from "./upload-queue";
 
 function taak(p: Partial<UploadTask> & { id: string; folderPath: string }): UploadTask {
@@ -291,5 +297,77 @@ describe("een opname blijft de soort waarmee hij begon", () => {
     );
     expect(regel.producten[0].soort).toBe("nen");
     expect(regel.producten[0].href).toBe("/nen?addr=Dam%201");
+  });
+});
+
+/*
+  Een verwijderde opname bleef op het dashboard staan. Die lijst komt uit twee
+  bronnen — de concepten van de server en de uploadwachtrij op het apparaat —
+  en het verwijderen raakte alleen de eerste. Deze regel bepaalt wat er bij het
+  opruimen van de tweede meegaat.
+*/
+describe("taakHoortBij", () => {
+  it("claims the files queued for that address", () => {
+    expect(taakHoortBij({ folderPath: NEN }, "Damrak 1, Amsterdam")).toBe(true);
+    expect(taakHoortBij({ folderPath: NEN }, "Damrak 1")).toBe(true);
+  });
+
+  it("leaves another address alone", () => {
+    expect(taakHoortBij({ folderPath: NEN }, "Dam 5, Amsterdam")).toBe(false);
+    // Een huisletter is een ander pand, geen andere schrijfwijze.
+    expect(taakHoortBij({ folderPath: NEN }, "Damrak 1A")).toBe(false);
+  });
+
+  // Hiervoor wordt sameAddress hergebruikt in plaats van een eigen
+  // tekstvergelijking: anders blijft de regel staan bij een opname die in de
+  // map anders geschreven is dan in het concept.
+  it("sees the same floor written differently as one address", () => {
+    const pad = "/Automatie NEN2580/Nieuwe Prinsengracht 206 III, Amsterdam";
+    expect(taakHoortBij({ folderPath: pad }, "Nieuwe Prinsengracht 206-3")).toBe(true);
+  });
+
+  it("keeps the other product on the same address out of it", () => {
+    const nen = "/Automatie NEN2580/Damrak 1, Amsterdam";
+    const label = "/Automatie Energielabels/Damrak 1, Amsterdam";
+    expect(taakHoortBij({ folderPath: nen }, "Damrak 1", "nen")).toBe(true);
+    expect(taakHoortBij({ folderPath: label }, "Damrak 1", "nen")).toBe(false);
+  });
+
+  // Opnames van vóór het soort-veld weten niet wat ze zijn. Juist daar zit het
+  // werk dat al maanden blijft staan, dus dan liever het hele adres opruimen.
+  it("takes the whole address when the product is unknown", () => {
+    const label = "/Automatie Energielabels/Damrak 1, Amsterdam";
+    expect(taakHoortBij({ folderPath: label }, "Damrak 1", undefined)).toBe(true);
+    expect(taakHoortBij({ folderPath: label }, "Damrak 1", null)).toBe(true);
+  });
+});
+
+describe("een verwijderde opname verdwijnt ook van het dashboard", () => {
+  const adres = "Damrak 1, Amsterdam";
+
+  // De stand waar de klacht over ging: het concept is weg, maar er staat nog
+  // een mislukte upload op het apparaat — en die hield de regel in zijn eentje
+  // overeind.
+  it("still shows the address while a failed upload is left behind", () => {
+    const r = bouwOpenstaand([taak({ id: "a", folderPath: NEN, dropbox: "error" })], []);
+    expect(r).toHaveLength(1);
+    expect(r[0].adres).toBe(adres);
+  });
+
+  it("is gone once its queued files go with it", () => {
+    const taken = [taak({ id: "a", folderPath: NEN, dropbox: "error" })];
+    const over = taken.filter((t) => !taakHoortBij(t, adres, "nen"));
+    expect(bouwOpenstaand(over, [])).toHaveLength(0);
+  });
+
+  it("does not take a neighbour down with it", () => {
+    const taken = [
+      taak({ id: "a", folderPath: NEN, dropbox: "error" }),
+      taak({ id: "b", folderPath: LABEL, dropbox: "error" }),
+    ];
+    const over = taken.filter((t) => !taakHoortBij(t, adres, "nen"));
+    const r = bouwOpenstaand(over, []);
+    expect(r).toHaveLength(1);
+    expect(r[0].adres).toBe("Dam 5, Amsterdam");
   });
 });

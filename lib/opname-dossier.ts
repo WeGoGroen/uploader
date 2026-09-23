@@ -9,6 +9,7 @@ import {
 import { taskToAddress } from "@/lib/sharepoint-match";
 import { bijlagenUitVelden, bouwGroepen, splitsCode, veldTekst, type RuwVeld } from "@/lib/opname-velden";
 import { bouwOpnameDossier, type DossierFoto } from "@/lib/opname-pdf";
+import type { DossierGroep } from "@/lib/opname-velden";
 
 /**
  * Het opnameformulier uit ClickUp als PDF in de projectmap.
@@ -129,7 +130,7 @@ async function haalAfbeeldingen(
  */
 export async function dossierVoorTaak(
   taskId: string,
-  opties: { opnieuw?: boolean } = {}
+  opties: { opnieuw?: boolean; extraGroepen?: DossierGroep[] } = {}
 ): Promise<DossierUitkomst> {
   let token: string;
   try {
@@ -232,6 +233,7 @@ export async function dossierVoorTaak(
     aangemaaktMs: taak.dateCreated,
     streefdatumMs: taak.dueDate,
     groepen,
+    extraGroepen: opties.extraGroepen,
     fotos,
     andereBijlagen: anders.map((b) => ({ code: b.code, naam: b.naam })),
     opgehaaldOp: new Date(),
