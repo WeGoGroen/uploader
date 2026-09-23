@@ -34,6 +34,15 @@ describe("isMediaProjectmap", () => {
     expect(isMediaProjectmap("/Automatie Media/Afgerond")).toBe(false);
   });
 
+  it("kijkt naar de map en niet naar de schrijfwijze — Dropbox doet dat ook niet", () => {
+    // Dit stond omgekeerd: het archief in kleine letters gold als adresmap, en
+    // een écht gearchiveerd adres in kleine letters werd geweigerd.
+    expect(isMediaProjectmap("/Automatie Media/afgerond")).toBe(false);
+    expect(isMediaProjectmap("/Automatie Media/AFGEROND")).toBe(false);
+    expect(isMediaProjectmap("/Automatie Media/afgerond/Dam 5, Amsterdam")).toBe(true);
+    expect(isMediaProjectmap("/Automatie Media/AfGeRoNd/Dam 5, Amsterdam")).toBe(true);
+  });
+
   it("weigert een niveau dieper — daar beslist de submap over", () => {
     expect(isMediaProjectmap("/Automatie Media/Stadionkade 18-H, Amsterdam/in")).toBe(false);
   });
