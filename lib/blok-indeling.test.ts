@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blokIndeling } from "./upload-queue";
+import { afsluitBlok, blokFoutHerstelbaar, blokIndeling } from "./upload-queue";
 
 const MB = 1024 * 1024;
 const BLOK = 16 * MB;
@@ -72,5 +72,79 @@ describe("blokIndeling", () => {
     expect(alle[0][0]).toBe(0);
     expect(alle[alle.length - 1][1]).toBe(100 * MB);
     for (let i = 1; i < alle.length; i++) expect(alle[i][0]).toBe(alle[i - 1][1]);
+  });
+});
+
+/**
+ * Het blok dat de sessie sluit mag nooit naast andere blokken lopen: zodra
+ * Dropbox 'm binnen heeft, weigert hij elke append die nog onderweg was met
+ * een 409 "closed". Daar sneuvelde het uploaden van video's op — die zijn als
+ * enige groot genoeg om in blokken te gaan.
+ */
+describe("afsluitBlok", () => {
+  it("houdt het laatste blok apart van wat parallel mag", () => {
+    const { resterend } = blokIndeling(100 * MB, BLOK, []);
+    const { parallel, sluit } = afsluitBlok(100 * MB, resterend);
+    expect(sluit).toEqual([96 * MB, 100 * MB]);
+    expect(parallel).toHaveLength(resterend.length - 1);
+    expect(parallel.every(([, to]) => to !== 100 * MB)).toBe(true);
+  });
+
+  it("laat samen nog steeds elk blok één keer over", () => {
+    const { resterend } = blokIndeling(100 * MB, BLOK, []);
+    const { parallel, sluit } = afsluitBlok(100 * MB, resterend);
+    expect([...parallel, sluit!].sort((a, b) => a[0] - b[0])).toEqual(resterend);
+  });
+
+  it("geeft een bestand van één blok alleen als sluitend blok terug", () => {
+    const { resterend } = blokIndeling(10 * MB, BLOK, []);
+    const { parallel, sluit } = afsluitBlok(10 * MB, resterend);
+    expect(parallel).toEqual([]);
+    expect(sluit).toEqual([0, 10 * MB]);
+  });
+
+  it("heeft niets te sluiten als dat blok er bij het hervatten al door was", () => {
+    // Kan alleen als alles al gelukt was: het sluitende blok gaat als laatste.
+    const { resterend } = blokIndeling(40 * MB, BLOK, [32 * MB]);
+    const { parallel, sluit } = afsluitBlok(40 * MB, resterend);
+    expect(sluit).toBeNull();
+    expect(parallel).toEqual([
+      [0, 16 * MB],
+      [16 * MB, 32 * MB],
+    ]);
+  });
+
+  it("valt niet over een bestand dat exact op de blokgrens eindigt", () => {
+    const { resterend } = blokIndeling(32 * MB, BLOK, []);
+    const { parallel, sluit } = afsluitBlok(32 * MB, resterend);
+    expect(sluit).toEqual([16 * MB, 32 * MB]);
+    expect(parallel).toEqual([[0, 16 * MB]]);
+  });
+});
+
+describe("blokFoutHerstelbaar", () => {
+  it("probeert opnieuw bij netwerk, 429 en serverfouten", () => {
+    expect(blokFoutHerstelbaar(new Error("Netwerkfout bij uploaden"))).toBe(true);
+    expect(blokFoutHerstelbaar(new Error("Dropbox append gaf 429"))).toBe(true);
+    expect(blokFoutHerstelbaar(new Error("Dropbox append gaf 503"))).toBe(true);
+  });
+
+  it("geeft het op bij een fout die niet vanzelf overgaat", () => {
+    expect(blokFoutHerstelbaar(new Error("Dropbox append gaf 401"))).toBe(false);
+    expect(blokFoutHerstelbaar(new Error("Dropbox append gaf 409"))).toBe(false);
+  });
+
+  // Onze route maakt van elke Dropbox-fout een 502; dan telt de code die
+  // Dropbox zelf gaf, anders herhalen we een 409 drie keer voor niets.
+  it("kijkt door de 502 van onze eigen route heen", () => {
+    const closed = new Error(
+      'Dropbox upload_session/append_v2 failed: 409 {"error_summary":"closed/.."} (gaf 502)'
+    );
+    expect(blokFoutHerstelbaar(closed)).toBe(false);
+
+    const druk = new Error(
+      'Dropbox upload_session/append_v2 failed: 429 {"error_summary":"too_many_requests/.."} (gaf 502)'
+    );
+    expect(blokFoutHerstelbaar(druk)).toBe(true);
   });
 });

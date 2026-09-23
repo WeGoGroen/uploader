@@ -544,6 +544,34 @@ export function blokIndeling(
 }
 
 /**
+ * Zet het blok dat de sessie sluit apart van de blokken die parallel mogen.
+ *
+ * Bij een concurrent-sessie moet het blok dat het bestand compleet maakt
+ * `close: true` meesturen, anders weigert finish met
+ * "concurrent_session_not_closed". Maar zodra dat blok binnen is, is de sessie
+ * dicht: elke append die dán nog onderweg is, krijgt van Dropbox een 409
+ * "closed" terug.
+ *
+ * En precies dat gebeurde. De werkers pakten de blokken op volgorde, dus het
+ * sluitende blok ging als laatste de deur uit — maar het is ook het kleinste
+ * (de rest na de hele veelvouden), dus het was er vaak als eerste, terwijl er
+ * nog drie blokken van 16MB onderweg waren. Die sneuvelden dan alle drie, en
+ * 409 is geen fout waar opnieuw proberen iets aan verandert.
+ *
+ * Een video is het enige wat hier langskomt dat groot genoeg is om in blokken
+ * te gaan; foto's blijven onder de grens. Vandaar dat dit zich liet zien als
+ * "video's uploaden lukt niet" en de rest gewoon werkte.
+ */
+export function afsluitBlok(
+  fileSize: number,
+  resterend: [number, number][]
+): { parallel: [number, number][]; sluit: [number, number] | null } {
+  const idx = resterend.findIndex(([, to]) => to === fileSize);
+  if (idx === -1) return { parallel: resterend, sluit: null };
+  return { parallel: resterend.filter((_, i) => i !== idx), sluit: resterend[idx] };
+}
+
+/**
  * Herkansingen per blok. Eén netwerk-hik op blok 5 van 8 gooide voorheen de
  * hele poging weg; nu krijgt dat ene blok gewoon nog een kans terwijl de rest
  * blijft staan. Alleen bij fouten waar herhalen zin heeft (netwerk, 429,
@@ -555,8 +583,15 @@ function wachtEven(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function blokFoutHerstelbaar(err: unknown): boolean {
+export function blokFoutHerstelbaar(err: unknown): boolean {
   const melding = err instanceof Error ? err.message : "";
+  // Onze eigen route verpakt élke Dropbox-fout als een 502, dus daar zegt de
+  // buitenste code niets. Staat de code van Dropbox zelf in de melding, dan
+  // telt die: een 409 ("closed", "incorrect_offset") wordt bij een herhaling
+  // precies hetzelfde antwoord, en dat is twee keer 4MB voor niets op een
+  // verbinding waar het toch al niet vlot ging.
+  const vanDropbox = /failed: (\d{3})/.exec(melding);
+  if (vanDropbox) return /^(429|5\d\d)$/.test(vanDropbox[1]);
   return /Netwerkfout/.test(melding) || /gaf (429|5\d\d)/.test(melding);
 }
 
@@ -663,51 +698,65 @@ async function chunkedDirectPoging(
     setProgress(task.id, uploaded + [...inFlight.values()].reduce((a, b) => a + b, 0), file.size);
   report();
 
+  async function stuurBlok(workerId: number, from: number, to: number, sluit: boolean) {
+    const arg = { cursor: { session_id: sessionId, offset: from }, close: sluit };
+    await metBlokRetry(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "https://content.dropboxapi.com/2/files/upload_session/append_v2");
+          xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+          xhr.setRequestHeader("Content-Type", "application/octet-stream");
+          xhr.setRequestHeader("Dropbox-API-Arg", safeArg(arg));
+          xhr.upload.onprogress = (e) => {
+            if (!e.lengthComputable) return;
+            inFlight.set(workerId, e.loaded);
+            report();
+          };
+          xhr.onload = () => {
+            inFlight.delete(workerId);
+            if (xhr.status >= 200 && xhr.status < 300) return resolve();
+            // Een herkansing op het sluitende blok kan "closed" terugkrijgen:
+            // de vorige poging was dan wél aangekomen en heeft de sessie al
+            // dichtgedaan. Doorgaan naar finish; die controleert de lengte en
+            // klapt alsnog als er echt iets ontbreekt.
+            if (sluit && xhr.status === 409 && /closed/.test(xhr.responseText)) return resolve();
+            reject(new Error(`Dropbox append gaf ${xhr.status}`));
+          };
+          xhr.onerror = () => {
+            inFlight.delete(workerId);
+            reject(new Error("Netwerkfout bij uploaden"));
+          };
+          xhr.send(file.slice(from, to));
+        })
+    );
+    uploaded += to - from;
+    klaar.add(from);
+    // Meteen vastleggen: juist een afgebroken sessie moet dit terugvinden.
+    void bewaarUploadSessie({
+      id: task.id,
+      sessionId,
+      chunkSize: DIRECT_CHUNK_SIZE,
+      klaar: [...klaar],
+    });
+    report();
+  }
+
+  // Het sluitende blok gaat er alleen doorheen, ná de rest — zie afsluitBlok.
+  const { parallel, sluit } = afsluitBlok(file.size, ranges);
+
   async function worker(workerId: number) {
     for (;;) {
       const i = next++;
-      if (i >= ranges.length) return;
-      const [from, to] = ranges[i];
-      // Het blok dat het bestand compleet maakt sluit de sessie af.
-      const arg = { cursor: { session_id: sessionId, offset: from }, close: to === file.size };
-      await metBlokRetry(
-        () =>
-          new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open("POST", "https://content.dropboxapi.com/2/files/upload_session/append_v2");
-            xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-            xhr.setRequestHeader("Content-Type", "application/octet-stream");
-            xhr.setRequestHeader("Dropbox-API-Arg", safeArg(arg));
-            xhr.upload.onprogress = (e) => {
-              if (!e.lengthComputable) return;
-              inFlight.set(workerId, e.loaded);
-              report();
-            };
-            xhr.onload = () => {
-              inFlight.delete(workerId);
-              if (xhr.status >= 200 && xhr.status < 300) resolve();
-              else reject(new Error(`Dropbox append gaf ${xhr.status}`));
-            };
-            xhr.onerror = () => {
-              inFlight.delete(workerId);
-              reject(new Error("Netwerkfout bij uploaden"));
-            };
-            xhr.send(file.slice(from, to));
-          })
-      );
-      uploaded += to - from;
-      klaar.add(from);
-      // Meteen vastleggen: juist een afgebroken sessie moet dit terugvinden.
-      void bewaarUploadSessie({
-        id: task.id,
-        sessionId,
-        chunkSize: DIRECT_CHUNK_SIZE,
-        klaar: [...klaar],
-      });
-      report();
+      if (i >= parallel.length) return;
+      const [from, to] = parallel[i];
+      await stuurBlok(workerId, from, to, false);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(CHUNK_PARALLEL, ranges.length) }, (_, w) => worker(w)));
+  await Promise.all(
+    Array.from({ length: Math.min(CHUNK_PARALLEL, parallel.length) }, (_, w) => worker(w))
+  );
+  if (sluit) await stuurBlok(0, sluit[0], sluit[1], true);
 
   await dbx("upload_session/finish", {
     cursor: { session_id: sessionId, offset: file.size },
@@ -738,40 +787,50 @@ async function uploadChunked(task: UploadTask, file: File, fullPath: string) {
 
   let uploaded = 0;
   let next = 0;
+  async function stuurBlok(from: number, to: number, sluit: boolean) {
+    const chunk = await file.slice(from, to).arrayBuffer();
+    await metBlokRetry(async () => {
+      let res: Response;
+      try {
+        res = await fetch(
+          `/api/dropbox/upload-chunk?action=append&sessionId=${encodeURIComponent(sessionId)}&offset=${from}${
+            sluit ? "&close=1" : ""
+          }`,
+          { method: "POST", body: chunk }
+        );
+      } catch {
+        // fetch gooit een kale TypeError bij een netwerkfout; hernoemen
+        // zodat metBlokRetry 'm als herstelbaar herkent.
+        throw new Error("Netwerkfout bij uploaden");
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        const melding: string = data?.error ?? "";
+        // Zelfde uitzondering als bij de directe weg: een herkansing op het
+        // sluitende blok kan "closed" terugkrijgen omdat de vorige poging al
+        // aankwam. Finish controleert daarna alsnog of alles er staat.
+        if (sluit && res.status === 502 && /closed/.test(melding)) return;
+        // Statuscode altijd in de melding, zodat metBlokRetry netwerk- en
+        // serverfouten kan herkennen als herstelbaar.
+        throw new Error(melding ? `${melding} (gaf ${res.status})` : `Uploaden mislukt — gaf ${res.status}`);
+      }
+    });
+    uploaded += to - from;
+    setProgress(task.id, uploaded, file.size);
+  }
+
+  // Het sluitende blok als laatste en alleen — zie afsluitBlok.
+  const { parallel, sluit } = afsluitBlok(file.size, ranges);
   async function worker() {
     for (;;) {
       const i = next++;
-      if (i >= ranges.length) return;
-      const [from, to] = ranges[i];
-      const chunk = await file.slice(from, to).arrayBuffer();
-      await metBlokRetry(async () => {
-        let res: Response;
-        try {
-          res = await fetch(
-            `/api/dropbox/upload-chunk?action=append&sessionId=${encodeURIComponent(sessionId)}&offset=${from}${
-              to === file.size ? "&close=1" : ""
-            }`,
-            { method: "POST", body: chunk }
-          );
-        } catch {
-          // fetch gooit een kale TypeError bij een netwerkfout; hernoemen
-          // zodat metBlokRetry 'm als herstelbaar herkent.
-          throw new Error("Netwerkfout bij uploaden");
-        }
-        if (!res.ok) {
-          const data = await res.json().catch(() => null);
-          // Statuscode altijd in de melding, zodat metBlokRetry netwerk- en
-          // serverfouten kan herkennen als herstelbaar.
-          throw new Error(
-            data?.error ? `${data.error} (gaf ${res.status})` : `Uploaden mislukt — gaf ${res.status}`
-          );
-        }
-      });
-      uploaded += to - from;
-      setProgress(task.id, uploaded, file.size);
+      if (i >= parallel.length) return;
+      const [from, to] = parallel[i];
+      await stuurBlok(from, to, false);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(CHUNK_PARALLEL, ranges.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(CHUNK_PARALLEL, parallel.length) }, worker));
+  if (sluit) await stuurBlok(sluit[0], sluit[1], true);
 
   const finishRes = await fetch(
     `/api/dropbox/upload-chunk?action=finish&sessionId=${encodeURIComponent(sessionId)}&offset=${
