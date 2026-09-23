@@ -82,7 +82,7 @@ export async function refreshAccessToken(
   clientId: string,
   clientSecret: string,
   refreshToken: string
-): Promise<string> {
+): Promise<{ accessToken: string; geldigSeconden: number }> {
   const res = await fetch(DROPBOX_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -102,8 +102,11 @@ export async function refreshAccessToken(
     );
   }
 
-  const data = (await res.json()) as { access_token: string };
-  return data.access_token;
+  const data = (await res.json()) as { access_token: string; expires_in?: number };
+  // Dropbox geeft er zelf een geldigheidsduur bij (in de praktijk vier uur).
+  // Ontbreekt die, dan houden we een uur aan: te kort is hooguit een extra
+  // rondje, te lang is een token dat halverwege een upload ongeldig wordt.
+  return { accessToken: data.access_token, geldigSeconden: data.expires_in ?? 3600 };
 }
 
 /**
@@ -114,8 +117,12 @@ export async function refreshAccessToken(
  */
 export async function storeRefreshToken(refreshToken: string): Promise<void> {
   const redis = getOptionalRedis();
-  if (!redis) return;
-  await redis.set(REFRESH_TOKEN_KEY, refreshToken);
+  if (redis) await redis.set(REFRESH_TOKEN_KEY, refreshToken);
+  // Pas hierna weggooien: een nieuw refresh-token kan bij een ander account
+  // horen, en het bewaarde toegangstoken slaat dan nergens meer op. In deze
+  // volgorde gebruikt een aanvraag die er net tussendoor komt sowieso het
+  // nieuwe refresh-token.
+  await vergeetToegangstoken();
 }
 
 async function storedRefreshToken(): Promise<string | null> {
@@ -147,10 +154,98 @@ export async function requireDropboxConfig(): Promise<{
   return { clientId, clientSecret, refreshToken };
 }
 
+/**
+ * Het toegangstoken, bewaard tot vlak voor het verloopt.
+ *
+ * Zonder deze cache deed élke Dropbox-aanroep er eerst een volledige
+ * OAuth-ronde overheen. Bij het uploaden van een fotoserie is dat het zwaarst:
+ * per foto een tokenrefresh plus een uploadlink vóórdat er één byte omhoog
+ * gaat, en bij de chunked serverroute zelfs een refresh per blok van 4MB. Dat
+ * kost niet alleen tijd — een burst van twaalf tegelijk is precies waar
+ * Dropbox met 429 op antwoordt, en dan valt de upload terug op een weg die
+ * nóg meer tokens vraagt.
+ *
+ * Twee lagen. In het geheugen van deze instantie, want binnen één aanroep van
+ * de serverless functie is dat de snelste weg. En in Redis, omdat elke
+ * aanroep op een andere instantie kan landen: zonder die tweede laag begint
+ * iedere koude start weer met een refresh.
+ */
+const TOKEN_KEY = "dropbox:access_token";
+/** Marge: een token dat tijdens een lange upload verloopt is erger dan een
+    ronde extra. */
+const TOKEN_MARGE_MS = 10 * 60 * 1000;
+
+interface BewaardToken {
+  token: string;
+  /** Tijdstip (ms) waarop we 'm niet meer gebruiken. */
+  verlooptOp: number;
+}
+
+let tokenInGeheugen: BewaardToken | null = null;
+/** Loopt er al een refresh, dan wachten de anderen daarop: twaalf gelijktijdige
+    uploads horen samen één token op te halen, niet twaalf. */
+let tokenOnderweg: Promise<string> | null = null;
+
+async function vergeetToegangstoken(): Promise<void> {
+  tokenInGeheugen = null;
+  const redis = getOptionalRedis();
+  if (!redis) return;
+  await redis.del(TOKEN_KEY).catch(() => {});
+}
+
+function bruikbaar(bewaard: BewaardToken | null): string | null {
+  return bewaard && bewaard.verlooptOp > Date.now() ? bewaard.token : null;
+}
+
 /** Wisselt het gedeelde refresh-token in voor een kortlevend access-token. */
 export async function getSharedAccessToken(): Promise<string> {
-  const { clientId, clientSecret, refreshToken } = await requireDropboxConfig();
-  return refreshAccessToken(clientId, clientSecret, refreshToken);
+  const uitGeheugen = bruikbaar(tokenInGeheugen);
+  if (uitGeheugen) return uitGeheugen;
+  if (tokenOnderweg) return tokenOnderweg;
+
+  tokenOnderweg = (async () => {
+    const redis = getOptionalRedis();
+    if (redis) {
+      // Een andere instantie kan 'm net opgehaald hebben. Een kapotte of
+      // onverwachte waarde mag hier nooit doorwerken: dan zou één rare regel
+      // in Redis heel Dropbox platleggen tot hij vanzelf verloopt.
+      const uitRedis = await redis
+        .get(TOKEN_KEY)
+        .then((ruw) => (ruw ? (JSON.parse(ruw) as BewaardToken) : null))
+        .catch(() => null);
+      const bruikbaarUitRedis = bruikbaar(uitRedis);
+      if (bruikbaarUitRedis && uitRedis) {
+        tokenInGeheugen = uitRedis;
+        return bruikbaarUitRedis;
+      }
+    }
+
+    const { clientId, clientSecret, refreshToken } = await requireDropboxConfig();
+    const { accessToken, geldigSeconden } = await refreshAccessToken(
+      clientId,
+      clientSecret,
+      refreshToken
+    );
+    const verlooptOp = Date.now() + Math.max(0, geldigSeconden * 1000 - TOKEN_MARGE_MS);
+    tokenInGeheugen = { token: accessToken, verlooptOp };
+    if (redis) {
+      // Dezelfde marge als hierboven, zodat Redis 'm niet langer aanbiedt dan
+      // wij 'm zelf zouden gebruiken.
+      const ttl = Math.max(1, Math.floor((verlooptOp - Date.now()) / 1000));
+      await redis.set(TOKEN_KEY, JSON.stringify(tokenInGeheugen), "EX", ttl).catch(() => {});
+    }
+    return accessToken;
+  })();
+
+  try {
+    return await tokenOnderweg;
+  } catch (err) {
+    // Een mislukte refresh mag de volgende aanvraag niet blokkeren.
+    tokenInGeheugen = null;
+    throw err;
+  } finally {
+    tokenOnderweg = null;
+  }
 }
 
 export function sanitizePathSegment(value: string): string {
@@ -614,14 +709,26 @@ export async function ensureProjectFolder(
     await voegBijlageGToe(accessToken, path);
   }
 
-  // NEN2580 gebruikt "Photo's" i.p.v. "Foto's"; zonder dit onderscheid zou er
-  // een losse extra map in het NEN-sjabloon verschijnen.
-  await addStreetViewPhotos(
-    accessToken,
-    `${path}/${kind === "nen" ? "Photo's" : kind === "media" ? "in/Photo's" : "Foto's"}`,
-    woonplaats,
-    straatEnNummer
-  );
+  /*
+    Automatisch beeldmateriaal hoort bij dossiervorming, niet bij een levering.
+
+    Bij een media-opname ging dit naar "in/Photo's" — precies de map die de
+    opnemer vult en die daarna naar de makelaar gaat. Daar stonden dan vier
+    straat- en luchtfoto's tussen die niemand besteld heeft. Het kostte
+    bovendien de tijd die de opnemer stond te wachten: ophalen én uploaden
+    gebeurt vóórdat de map klaar gemeld wordt.
+
+    NEN2580 gebruikt "Photo's" i.p.v. "Foto's"; zonder dat onderscheid zou er
+    een losse extra map in het NEN-sjabloon verschijnen.
+  */
+  if (kind !== "media") {
+    await addStreetViewPhotos(
+      accessToken,
+      `${path}/${kind === "nen" ? "Photo's" : "Foto's"}`,
+      woonplaats,
+      straatEnNummer
+    );
+  }
   const url = await getOrCreateSharedLink(accessToken, path);
   // De aangemaakte submappen teruggeven, zodat de app kan tonen wat er
   // klaarstaat i.p.v. dat de opnemer in Dropbox moet gaan kijken.

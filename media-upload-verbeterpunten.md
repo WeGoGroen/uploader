@@ -3,6 +3,27 @@
 Doorgenomen: de hele keten van een media-opname, van het kiezen van bestanden tot
 het bestand in Dropbox.
 
+## Wat hiervan inmiddels aangepakt is
+
+De punten hieronder staan zoals ze gevonden zijn — dat blijft de vindplaats. Deze
+tabel zegt wat er daarna mee gedaan is.
+
+| Punt | Staat |
+| --- | --- |
+| 1 · geen timeouts | Opgelost: stilstandbewaking op elke upload, tijdslimiet op elke fetch in het pad |
+| 2 · de `close`-race | Opgelost: datablokken zonder `close`, daarna één lege append die sluit — op beide chunk-wegen |
+| 4 · `Retry-After` genegeerd | Opgelost: header wordt gehonoreerd, exponentieel met jitter, vijf pogingen |
+| 5 · twaalf tegelijk | Opgelost: budget naar zes, gewicht = aantal verbindingen |
+| 11 · knop geblokkeerd tijdens klaarzetten | Opgelost: kiezen kan meteen, de wachtrij wacht zelf op het pad |
+| 12 · Street View in de leveringsmap | Opgelost: automatisch beeldmateriaal slaat media over |
+| — · tokenrefresh per aanroep | Opgelost: toegangstoken gecachet (geheugen + Redis) |
+| — · uploadlink per bestand | Opgelost: links worden per serie in één aanvraag opgehaald |
+| — · sessie weggooien bij een fout | Opgelost: hervatten tenzij de sessie zelf stuk is; verlopen token haalt een vers token |
+| 3, 6–10, 13–21 | Nog open |
+
+Bewust níét gedaan: foto's verkleinen in de media-mappen (dat raakt de levering
+aan de makelaar) en de Vercel-regio verplaatsen.
+
 | Onderdeel | Bestand |
 | --- | --- |
 | Scherm en stappen | `components/MediaFlow.tsx`, `lib/media-folders.ts`, `lib/media-sessie.ts` |

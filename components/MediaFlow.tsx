@@ -929,10 +929,16 @@ export default function MediaFlow() {
             "Volgende" staat op dezelfde pagina en dat is een heel andere
             handeling; twee groene knoppen naast elkaar nodigen uit tot de
             verkeerde tik. */}
+        {/* Bewust niet uitgeschakeld terwijl de map klaargezet wordt. Dat
+            klaarzetten kost tijd — er wordt gezocht of het adres al een map
+            heeft, de submappen worden aangemaakt en er komt een deellink bij —
+            en al die tijd stond de opnemer met zijn telefoon in de hand te
+            wachten tot hij überhaupt bestanden mócht kiezen. Kiezen kan
+            gewoon: kiesBestanden wacht zelf op het pad voordat het de
+            bestanden in de wachtrij zet. */}
         <button
           type="button"
           className="btn-dropbox"
-          disabled={folderBusy}
           onClick={() => inputRef.current?.click()}
         >
           <span className="btn-dropbox-mark" aria-hidden="true">
