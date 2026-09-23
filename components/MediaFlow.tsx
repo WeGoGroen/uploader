@@ -362,6 +362,27 @@ export default function MediaFlow() {
     window.scrollTo(0, 0);
   }
 
+  /**
+   * De slotknop op het klaar-scherm: de opname is gedaan, dus hem afsluiten en
+   * terug naar het adresscherm voor de volgende.
+   *
+   * Nog een keer als afgerond melden: de hartslag loopt door zolang dit scherm
+   * open staat en zet de opname elke vijf minuten terug op "concept". Wie hier
+   * even blijft staan kreeg er anders alsnog een herinnering over.
+   *
+   * De opname alleen uit "Openstaande opnames" halen als er niets meer loopt
+   * of mislukt is. De wachtrij draait buiten dit scherm door, en die lijst is
+   * op de mediapagina de enige weg terug naar een upload die nog onderweg is —
+   * de zwevende melding van UploadResume is hier juist verborgen.
+   */
+  function afronden() {
+    if (melding) meldAfgerond(melding);
+    const onderweg = takenVanOpname.some((t) => t.dropbox === "uploading" || t.dropbox === "error");
+    if (folder && !onderweg) vergeetMediaSessie(folder.path);
+    opnieuwBeginnen();
+    window.scrollTo(0, 0);
+  }
+
   function vorige() {
     const vorig = MEDIA_STAPPEN[stapIndex - 1];
     setStap(vorig ? vorig.key : "adres");
@@ -842,15 +863,14 @@ export default function MediaFlow() {
             })}
           </ul>
 
-          <div className="form-foot" style={{ marginTop: 16 }}>
-            <button className="btn btn-quiet" onClick={opnieuwBeginnen}>
-              Nieuw adres
+          {/* Eén slotknop: afronden brengt je terug naar het adresscherm, dus
+              een aparte "Nieuw adres" ernaast deed hetzelfde. Dropbox blijft
+              bereikbaar via "Openen" in de balk bovenaan — dat scheelt de
+              opnemer een omweg langs de Dropbox-app om hier klaar te zijn. */}
+          <div className="form-foot" style={{ marginTop: 16, justifyContent: "flex-end" }}>
+            <button className="btn btn-primary" onClick={afronden}>
+              Afronden
             </button>
-            {folder && (
-              <a className="btn btn-primary" href={folder.url} target="_blank" rel="noopener noreferrer">
-                Openen in Dropbox
-              </a>
-            )}
           </div>
         </div>
       </>
