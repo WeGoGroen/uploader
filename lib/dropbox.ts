@@ -188,6 +188,8 @@ let tokenOnderweg: Promise<string> | null = null;
 
 async function vergeetToegangstoken(): Promise<void> {
   tokenInGeheugen = null;
+  // Een ander account heeft een ander thuispad op dropbox.com.
+  thuispad = null;
   const redis = getOptionalRedis();
   if (!redis) return;
   await redis.del(TOKEN_KEY).catch(() => {});
@@ -386,6 +388,29 @@ export async function createFolders(accessToken: string, paths: string[]): Promi
   }
   // "complete" met per-map path/conflict-fouten is prima — die mappen
   // bestonden al van een eerdere opname op hetzelfde adres.
+}
+
+/**
+ * Submappen onder een basismap, per diepteniveau aangemaakt: een geneste map
+ * ("In/Raw/Photo's") kan pas als zijn ouder bestaat, en binnen één batch ligt
+ * de volgorde niet vast. Mappen die er al staan zijn geen fout.
+ */
+export async function maakSubmappen(
+  accessToken: string,
+  basis: string,
+  submappen: string[]
+): Promise<void> {
+  const perDiepte = new Map<number, string[]>();
+  for (const naam of submappen) {
+    const diepte = naam.split("/").length;
+    perDiepte.set(diepte, [...(perDiepte.get(diepte) ?? []), naam]);
+  }
+  for (const diepte of [...perDiepte.keys()].sort((a, b) => a - b)) {
+    await createFolders(
+      accessToken,
+      perDiepte.get(diepte)!.map((naam) => `${basis}/${naam}`)
+    );
+  }
 }
 
 export async function createFolder(accessToken: string, path: string): Promise<void> {
@@ -702,19 +727,7 @@ export async function ensureProjectFolder(
         ? MEDIA_PROJECT_SUBFOLDERS
         : PROJECT_SUBFOLDERS;
   await createFolder(accessToken, path);
-  // Per niveau aanmaken: een geneste map ("In/Raw/Photo's") kan pas als zijn
-  // ouder bestaat, en binnen één batch ligt de volgorde niet vast.
-  const perDiepte = new Map<number, string[]>();
-  for (const name of subfolders) {
-    const diepte = name.split("/").length;
-    perDiepte.set(diepte, [...(perDiepte.get(diepte) ?? []), name]);
-  }
-  for (const diepte of [...perDiepte.keys()].sort((a, b) => a - b)) {
-    await createFolders(
-      accessToken,
-      perDiepte.get(diepte)!.map((name) => `${path}/${name}`)
-    );
-  }
+  await maakSubmappen(accessToken, path, subfolders);
   // Bijlage G hoort bij elke energielabel-opname: de adviseur vult erin welke
   // informatie er beschikbaar was. Alleen bij energielabels — NEN2580 en media
   // kennen deze bijlage niet.
@@ -1069,6 +1082,37 @@ export async function getCurrentAccount(
     email: data.email,
     name: data.name.display_name,
   };
+}
+
+/**
+ * Waar de API-paden op dropbox.com te vinden zijn.
+ *
+ * De API ziet de projectmappen als "/Automatie Media/…", maar bij een account
+ * in een teamruimte staat diezelfde map op de website (en in de app) onder de
+ * eigen map van dat account: "/Info GoGroen/Automatie Media/…". Een link die
+ * het API-pad letterlijk overneemt, komt daar op "niet gevonden" uit. Dropbox
+ * geeft dat voorvoegsel zelf mee als `home_path`; bij een account zonder
+ * teamruimte is er geen voorvoegsel.
+ *
+ * Eén keer per instantie opgehaald: het verandert alleen als er een ander
+ * account gekoppeld wordt, en dan wist storeRefreshToken() het.
+ */
+let thuispad: string | null = null;
+
+export async function dropboxThuispad(accessToken: string): Promise<string> {
+  if (thuispad !== null) return thuispad;
+  const res = await fetch(`${DROPBOX_API_BASE}/users/get_current_account`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new DropboxApiError(res.status, `Dropbox get_current_account failed: ${res.status} ${body}`);
+  }
+  const data = (await res.json()) as { root_info?: { ".tag"?: string; home_path?: string } };
+  thuispad = data.root_info?.[".tag"] === "team" ? (data.root_info.home_path ?? "") : "";
+  return thuispad;
 }
 
 /**
@@ -1805,6 +1849,8 @@ export interface MapBestand {
   naam: string;
   grootte: number;
   id: string;
+  /** Wanneer Dropbox het bestand binnenkreeg (ISO), voor zover bekend. */
+  gewijzigd?: string;
 }
 
 export interface MapInhoud {
@@ -1869,6 +1915,7 @@ export async function leesProjectmap(accessToken: string, padOfId: string): Prom
         size?: number;
         path_lower?: string;
         path_display?: string;
+        server_modified?: string;
       }[];
       cursor: string;
       has_more: boolean;
@@ -1888,6 +1935,7 @@ export async function leesProjectmap(accessToken: string, padOfId: string): Prom
           naam: entry.name ?? relatief.split("/").pop() ?? relatief,
           grootte: Number(entry.size) || 0,
           id: entry.id ?? "",
+          gewijzigd: entry.server_modified,
         });
       }
     }

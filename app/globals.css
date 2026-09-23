@@ -1726,6 +1726,21 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
   background: rgba(255, 255, 255, 0.18); font-size: 13.5px; font-weight: 700;
 }
 .btn-dropbox:hover .btn-dropbox-actie { background: rgba(255, 255, 255, 0.28); }
+/* De tweede weg naar Dropbox: bewust ondergeschikt aan de grote blauwe knop
+   (omlijnd, niet gevuld), maar in hetzelfde blauw — het is dezelfde bestemming,
+   alleen een ander vervoermiddel. */
+.btn-dbx-app {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  margin-top: 10px; padding: 11px 14px; border-radius: var(--r-sm);
+  border: 1.5px solid #0061fe; color: #0050d0; background: transparent;
+  text-decoration: none;
+}
+.btn-dbx-app:hover { background: rgba(0, 97, 254, 0.06); }
+.btn-dbx-app-tekst { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.btn-dbx-app-tekst strong { font-size: 14.5px; font-weight: 650; }
+.btn-dbx-app-tekst span { font-size: 12.5px; color: var(--ink-soft); }
+.media-dbx-stand { margin: 12px 0 0; font-size: 13.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.media-dbx-stand strong { color: var(--ink); }
 .media-hint { margin: 10px 0 0; font-size: 13px; color: var(--ink-faint); line-height: 1.45; }
 .media-files { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .media-files li {
