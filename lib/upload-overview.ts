@@ -250,7 +250,22 @@ export function bouwOpenstaand(
       toevallig wel of niet is aangemaakt. De Mediatask-order blijft de
       terugval voor opnames van vóór dat veld.
     */
-    const soort: Soort = d.soort === "nen" || d.heeftMediatask ? "nen" : "energielabel";
+    /*
+      En media is media.
+
+      Deze regel kende maar twee uitkomsten, dus een media-opname belandde
+      onder "Energielabel". Op het dashboard stond dan ENERGIELABEL bij een
+      regel die in werkelijkheid door de fotoserie overeind werd gehouden, en
+      wie die regel weg wilde hebben zocht in het verkeerde formulier. Het
+      soort-veld weet het allang: MediaFlow legt "media" vast bij de eerste
+      hartslag.
+    */
+    const soort: Soort =
+      d.soort === "media"
+        ? "media"
+        : d.soort === "nen" || d.heeftMediatask
+          ? "nen"
+          : "energielabel";
     /*
       En dan hoort de link daar ook heen te wijzen.
 

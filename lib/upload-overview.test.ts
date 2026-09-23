@@ -412,3 +412,39 @@ describe("waarom een regel bleef staan na verwijderen", () => {
     expect(r).toHaveLength(1);
   });
 });
+
+/*
+  Een media-opname is een eigen product.
+
+  De indeling kende maar twee uitkomsten, dus kwam een fotoserie onder
+  "Energielabel" te staan. Dat is precies de regel waar hier weken naar gezocht
+  is: het dashboard zei ENERGIELABEL terwijl het de media-opname was die de
+  regel overeind hield.
+*/
+describe("een media-opname op het dashboard", () => {
+  const media = concept({
+    id: "media-/Automatie Media/Rustenburgerstraat 356-1, Amsterdam",
+    straatnaam: "Rustenburgerstraat 356-1",
+    soort: "media",
+  });
+
+  it("calls itself media, not energielabel", () => {
+    expect(soorten(bouwOpenstaand([], [media])[0])).toEqual(["media"]);
+  });
+
+  it("links back to the media page instead of the energielabel form", () => {
+    const [product] = bouwOpenstaand([], [media])[0].producten;
+    expect(product.href).toBe("/media?addr=Rustenburgerstraat%20356-1");
+  });
+
+  // Op één adres kunnen ze naast elkaar lopen; dan hoort de media-opname het
+  // energielabel niet te overschrijven en andersom ook niet.
+  it("stands next to an energielabel on the same address", () => {
+    const r = bouwOpenstaand(
+      [],
+      [media, concept({ id: "d9", straatnaam: "Rustenburgerstraat 356-1", soort: "energielabel" })]
+    );
+    expect(r).toHaveLength(1);
+    expect(soorten(r[0])).toEqual(["energielabel", "media"]);
+  });
+});

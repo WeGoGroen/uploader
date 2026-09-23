@@ -39,3 +39,21 @@ describe("een id dat een pad is", () => {
     expect(terug).toBe(id);
   });
 });
+
+describe("een media-opname", () => {
+  // Haar id is het pad van de projectmap, geen formulierconcept: de
+  // mediapagina zoekt het adres zelf weer op, net als de NEN-pagina.
+  it("opens the media page on the address", () => {
+    expect(
+      opnameLink({
+        id: "media-/Automatie Media/Rustenburgerstraat 356-1, Amsterdam",
+        soort: "media",
+        straatnaam: "Rustenburgerstraat 356-1",
+      })
+    ).toBe("/media?addr=Rustenburgerstraat%20356-1");
+  });
+
+  it("falls back to the media page without an address", () => {
+    expect(opnameLink({ id: "media-/leeg", soort: "media" })).toBe("/media");
+  });
+});
