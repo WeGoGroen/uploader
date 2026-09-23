@@ -22,11 +22,16 @@ const SKIP_BELOW_BYTES = 600 * 1024;
 const SCAN_FOLDERS = ["Optimized", "RAW", "LAZ"];
 
 export function mayCompressFolder(folder: string): boolean {
-  // De media-flow (mappen onder "in/") is een leveringsproduct: die foto's
-  // gaan naar de makelaar en 360-panorama's naar een viewer — terugschalen
-  // naar 2560px zou de levering zelf beschadigen. Verkleinen is er voor
-  // dossierfoto's (energielabel, NEN-fotomappen), niet voor eindproducten.
-  if (folder.startsWith("in/")) return false;
+  // De media-flow (mappen onder "In/", waaronder "In/Raw") is een
+  // leveringsproduct: die foto's gaan naar de makelaar en 360-panorama's naar
+  // een viewer — terugschalen naar 2560px zou de levering zelf beschadigen.
+  // Verkleinen is er voor dossierfoto's (energielabel, NEN-fotomappen), niet
+  // voor eindproducten.
+  //
+  // Hoofdletterongevoelig, net als Dropbox zelf: de mapnaam is onderweg al een
+  // keer van "in" naar "In" gegaan, en op een schrijfwijze vergelijken zou
+  // betekenen dat zo'n hernoeming de levering stilletjes laat verkleinen.
+  if (/^in\//i.test(folder)) return false;
   return !SCAN_FOLDERS.includes(folder);
 }
 

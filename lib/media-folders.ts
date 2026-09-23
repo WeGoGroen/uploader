@@ -9,7 +9,11 @@ export interface MediaStap {
   key: "photos" | "video" | "360";
   naam: string;
   uitleg: string;
-  /** Submap onder de projectmap; alles wat binnenkomt staat onder "in". */
+  /**
+   * Submap onder de projectmap. Alles wat de opnemer aanlevert gaat onder
+   * "In/Raw"; "OUT" is voor wat de bewerker teruglevert en wordt hier nooit
+   * beschreven.
+   */
   map: string;
   /** Wat de bestandskiezer aanbiedt; leeg = alles toestaan. */
   accept?: string;
@@ -20,21 +24,25 @@ export const MEDIA_STAPPEN: MediaStap[] = [
     key: "photos",
     naam: "Foto's",
     uitleg: "Interieur- en gevelfoto's",
-    map: "in/Photo's",
+    map: "In/Raw/Photo's",
     accept: "image/*",
   },
   {
     key: "video",
     naam: "Video",
     uitleg: "Rondleidingen en drone-beelden",
-    map: "in/Video",
-    accept: "video/*",
+    map: "In/Raw/Video",
+    // De extensies staan er expliciet bij naast "video/*". Een iPad beoordeelt
+    // een bestand in de Bestanden-app op zijn type-aanduiding, en die kent hij
+    // van drone- en camerabestanden lang niet altijd — dan staat de video grijs
+    // en valt hij niet te kiezen. Met de extensies erbij mag hij wél.
+    accept: "video/*,.mov,.mp4,.m4v,.avi,.mts,.m2ts,.mkv,.insv,.lrv,.lrf,.3gp,.mpg,.mpeg,.wmv",
   },
   {
     key: "360",
     naam: "360 graden",
     uitleg: "Panorama's en 360-opnames",
-    map: "in/360",
+    map: "In/Raw/360",
     // Geen filter: 360-camera's leveren naast JPG ook eigen formaten (INSP,
     // INSV) die de browser niet als afbeelding of video herkent en die anders
     // niet te kiezen zouden zijn.
