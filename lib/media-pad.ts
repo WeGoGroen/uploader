@@ -44,9 +44,19 @@ const BEELD = /\.(jpe?g|png|tiff?|webp|insp|heic|heif)$/i;
 export function isMediaProjectmap(pad: string): boolean {
   if (!pad.startsWith(`/${MEDIA_HOOFDMAP}/`) || pad.includes("..") || pad.endsWith("/")) return false;
   const delen = pad.split("/").filter(Boolean);
+  /*
+    Hoofdletterongevoelig vergelijken, want Dropbox is dat ook.
+
+    Dit stond precies omgekeerd. "/Automatie Media/afgerond" werd als adresmap
+    geaccepteerd — het archief zelf, waar nooit iets in hoort te ontstaan —
+    terwijl "/Automatie Media/afgerond/Dam 5" werd geweigerd, een echt
+    gearchiveerd adres. Beide keren omdat de vergelijking op de schrijfwijze
+    lette en Dropbox dat niet doet: voor Dropbox is "afgerond" diezelfde map.
+  */
+  const archief = (deel: string) => deel.toLowerCase() === ARCHIEF_MAP.toLowerCase();
   // ["Automatie Media", "<adres>"] of ["Automatie Media", "Afgerond", "<adres>"]
-  if (delen.length === 2) return delen[1] !== ARCHIEF_MAP;
-  if (delen.length === 3) return delen[1] === ARCHIEF_MAP;
+  if (delen.length === 2) return !archief(delen[1]);
+  if (delen.length === 3) return archief(delen[1]);
   return false;
 }
 
