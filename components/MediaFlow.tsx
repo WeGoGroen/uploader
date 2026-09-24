@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { useIkBen } from "@/components/RechtenProvider";
 import { enqueue, getServerSnapshot, getSnapshot, subscribe } from "@/lib/upload-queue";
 import { MEDIA_STAPPEN, type MediaStap } from "@/lib/media-folders";
+import { leesbareOmvang, type StapInhoud } from "@/lib/media-inhoud";
+import { relatieveTijd } from "@/lib/relatieve-tijd";
+import { tijdslimiet } from "@/lib/tijdslimiet";
 import TodayAppointments from "@/components/TodayAppointments";
 import type { AddressDetails, AddressSuggestion, NearbyAddress } from "@/lib/pdok";
 import { meldAfgerond, meldGestart, startHartslag, type OpnameMelding } from "@/lib/opname-melden";
@@ -30,6 +33,105 @@ function houseNumber(a: {
 }
 
 type Stap = "adres" | "photos" | "video" | "360" | "klaar";
+
+/** Zo vaak kijken we in Dropbox zolang de pagina in beeld is. */
+const DROPBOX_KIJK_MS = 15_000;
+/** Kwam er in deze periode nog iets binnen, dan loopt er vermoedelijk nog een
+    upload via de Dropbox-app. */
+const NOG_BINNEN_MS = 2 * 60_000;
+
+type DropboxStap = StapInhoud & { webUrl: string | null };
+
+interface DropboxStand {
+  stappen: Record<MediaStap["key"], DropboxStap>;
+  /** Wanneer dit is opgehaald. Bewaard bij het ophalen, zodat "komt er nog
+      binnen" niet tijdens het tekenen naar de klok hoeft te kijken. */
+  opgehaaldOp: number;
+}
+
+/**
+ * Wat er voor deze opname in Dropbox staat, bijgehouden zolang de pagina in
+ * beeld is.
+ *
+ * De wachtrij weet alleen wat er vanaf dít apparaat via de uploader omhoog
+ * ging. Wie via de Dropbox-app aanlevert — die uploadt door op de achtergrond,
+ * met het scherm uit, wat een webpagina niet kan — was voor deze pagina
+ * onzichtbaar: de stappen stonden op "leeg" terwijl de map volliep.
+ *
+ * Periodiek, omdat die bestanden binnenkomen terwijl de pagina openstaat en
+ * de tellingen moeten meelopen zonder te verversen. Niet als de pagina uit
+ * beeld is — dan kijkt niemand, en elke ronde is een Dropbox-aanroep voor
+ * niets. Terug in beeld (bijvoorbeeld uit de Dropbox-app) kijkt hij meteen.
+ */
+function useDropboxInhoud(projectmap: string | null): { stand: DropboxStand | null; fout: boolean } {
+  const [stand, setStand] = useState<{ voor: string; stand: DropboxStand | null; fout: boolean } | null>(
+    null
+  );
+
+  useEffect(() => {
+    if (!projectmap) return;
+    let weg = false;
+    let bezig = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const kijk = async () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      // Uit beeld: niet opnieuw plannen. weerInBeeld() start het weer.
+      if (weg || bezig || document.visibilityState !== "visible") return;
+      bezig = true;
+      try {
+        const res = await fetch("/api/dropbox/media-inhoud", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectmap }),
+          signal: tijdslimiet(20_000),
+        });
+        if (!res.ok) throw new Error(`media-inhoud gaf ${res.status}`);
+        const data = (await res.json()) as { stappen: DropboxStand["stappen"] };
+        if (!weg) {
+          setStand({
+            voor: projectmap,
+            stand: { stappen: data.stappen, opgehaaldOp: Date.now() },
+            fout: false,
+          });
+        }
+      } catch {
+        // Een hapering mag de laatst bekende stand niet wissen — die klopt
+        // vrijwel zeker nog. Alleen zonder eerdere stand is er niets te tonen,
+        // en dan moet het scherm dat ook kunnen zeggen i.p.v. te blijven
+        // wachten. De volgende ronde probeert het gewoon opnieuw.
+        if (!weg) {
+          setStand((vorige) =>
+            vorige?.voor === projectmap && vorige.stand
+              ? { ...vorige, fout: true }
+              : { voor: projectmap, stand: null, fout: true }
+          );
+        }
+      } finally {
+        bezig = false;
+      }
+      if (!weg) timer = setTimeout(() => void kijk(), DROPBOX_KIJK_MS);
+    };
+
+    const weerInBeeld = () => {
+      if (document.visibilityState === "visible") void kijk();
+    };
+
+    void kijk();
+    document.addEventListener("visibilitychange", weerInBeeld);
+    return () => {
+      weg = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", weerInBeeld);
+    };
+  }, [projectmap]);
+
+  // Een stand van een vorige opname hoort niet bij deze.
+  return stand && stand.voor === projectmap
+    ? { stand: stand.stand, fout: stand.fout }
+    : { stand: null, fout: false };
+}
 
 /**
  * Media-opname als één doorlopende flow: eerst het adres (met de afspraken van
@@ -97,6 +199,27 @@ export default function MediaFlow() {
     () => (huidige ? takenVanOpname.filter((t) => t.folder === huidige.map) : []),
     [takenVanOpname, huidige]
   );
+
+  const { stand: dropbox, fout: dropboxFout } = useDropboxInhoud(folder?.path ?? null);
+
+  /**
+   * Hoeveel bestanden er voor een stap staan.
+   *
+   * Dropbox is de bron: daar staat ook wat via de Dropbox-app binnenkwam. Wat
+   * deze iPad zelf net afrondde telt als ondergrens, want Dropbox wordt maar
+   * eens per vijftien seconden bekeken — zonder die ondergrens zou een zojuist
+   * geüploade foto even niet meetellen.
+   */
+  function aantalVoor(st: MediaStap): number {
+    const lokaal = takenVanOpname.filter((t) => t.folder === st.map && t.dropbox === "done").length;
+    return Math.max(dropbox?.stappen[st.key]?.aantal ?? 0, lokaal);
+  }
+
+  /** Kwam er voor deze stap kort geleden nog iets binnen? */
+  function komtNogBinnen(st: MediaStap): boolean {
+    const laatste = dropbox?.stappen[st.key]?.laatste;
+    return !!dropbox && !!laatste && dropbox.opgehaaldOp - Date.parse(laatste) < NOG_BINNEN_MS;
+  }
 
   // Vanuit het dashboard via /media?addr=<adres>: meteen doorzoeken en
   // selecteren, zodat je niet opnieuw hoeft te zoeken naar een adres dat je
@@ -390,6 +513,9 @@ export default function MediaFlow() {
   }
 
   const bezigTotaal = takenVanOpname.filter((t) => t.dropbox === "uploading").length;
+  // Voor het slotscherm: alles wat er voor deze opname in Dropbox staat.
+  const totaalInDropbox = MEDIA_STAPPEN.reduce((som, s) => som + aantalVoor(s), 0);
+  const bytesInDropbox = MEDIA_STAPPEN.reduce((som, s) => som + (dropbox?.stappen[s.key]?.bytes ?? 0), 0);
 
   /**
    * Scherm wakker houden zolang er iets omhoog gaat. Een webpagina kan niet
@@ -521,9 +647,7 @@ export default function MediaFlow() {
           <div className="dbx-strip-docs">
             {mediaSubmappen.map((naam) => {
               const stapVanMap = MEDIA_STAPPEN.find((st) => st.map === naam);
-              const aantal = takenVanOpname.filter(
-                (t) => t.folder === naam && t.dropbox === "done"
-              ).length;
+              const aantal = stapVanMap ? aantalVoor(stapVanMap) : 0;
               const actief = stapVanMap && huidige && stapVanMap.key === huidige.key;
               return (
                 <div key={naam} className={`dbx-strip-doc-row${aantal > 0 ? " is-done" : ""}`}>
@@ -543,6 +667,9 @@ export default function MediaFlow() {
                   </span>
                   <span className="dbx-strip-doc-status">
                     {aantal > 0 ? `${aantal} bestand${aantal === 1 ? "" : "en"}` : "leeg"}
+                    {stapVanMap && (dropbox?.stappen[stapVanMap.key]?.bytes ?? 0) > 0
+                      ? ` · ${leesbareOmvang(dropbox!.stappen[stapVanMap.key].bytes)}`
+                      : ""}
                   </span>
                 </div>
               );
@@ -610,7 +737,7 @@ export default function MediaFlow() {
         {MEDIA_STAPPEN.map((s, i) => {
           const gedaan = stap === "klaar" || i < stapIndex;
           const nu = s.key === stap;
-          const aantal = takenVanOpname.filter((t) => t.folder === s.map && t.dropbox === "done").length;
+          const aantal = aantalVoor(s);
           return (
             <li key={s.key} className={`media-step${nu ? " is-now" : ""}${gedaan ? " is-done" : ""}`}>
               <span className="media-step-nr" aria-hidden="true">
@@ -844,25 +971,36 @@ export default function MediaFlow() {
           <p className="lede">
             {bezigTotaal > 0
               ? `Nog ${bezigTotaal} bestand${bezigTotaal === 1 ? "" : "en"} onderweg naar Dropbox — dat loopt door, ook als je dit scherm verlaat.`
-              : takenVanOpname.length === 0
-                ? // Niets gekozen: dan is "alles staat in Dropbox" een loze
-                  // bevestiging van werk dat niet gedaan is.
-                  "Er is niets geüpload voor dit adres. Ga terug om alsnog bestanden te kiezen."
-                : "Alles staat in Dropbox."}
+              : !dropbox && takenVanOpname.length === 0
+                ? // Zonder blik in Dropbox is "niets geüpload" een gok: via de
+                  // Dropbox-app kan de map allang vol staan.
+                  dropboxFout
+                  ? "Dropbox kon niet worden bekeken. Via “Openen” bovenaan zie je wat er staat."
+                  : "Even kijken wat er in Dropbox staat…"
+                : totaalInDropbox === 0
+                  ? // Niets aangeleverd: dan is "alles staat in Dropbox" een loze
+                    // bevestiging van werk dat niet gedaan is.
+                    "Er is niets geüpload voor dit adres. Ga terug om alsnog bestanden te kiezen."
+                  : `${totaalInDropbox} bestand${totaalInDropbox === 1 ? "" : "en"} in Dropbox${
+                      bytesInDropbox > 0 ? ` (${leesbareOmvang(bytesInDropbox)})` : ""
+                    }${
+                      // Via de Dropbox-app kan het nog doorlopen; dat eerlijk
+                      // zeggen i.p.v. "alles staat erin".
+                      MEDIA_STAPPEN.some(komtNogBinnen) ? " — er komt nog binnen via de Dropbox-app." : "."
+                    }`}
           </p>
 
           <ul className="media-files">
             {MEDIA_STAPPEN.map((s) => {
-              const eigen = takenVanOpname.filter((t) => t.folder === s.map);
-              const klaar = eigen.filter((t) => t.dropbox === "done").length;
-              const mislukt = eigen.filter((t) => t.dropbox === "error").length;
+              const aantal = aantalVoor(s);
+              const bytes = dropbox?.stappen[s.key]?.bytes ?? 0;
+              const mislukt = takenVanOpname.filter((t) => t.folder === s.map && t.dropbox === "error").length;
               return (
                 <li key={s.key}>
                   <span className="media-file-name">{s.naam}</span>
                   <span className="media-file-state">
-                    {eigen.length === 0
-                      ? "niets"
-                      : `${klaar}/${eigen.length}${mislukt > 0 ? ` · ${mislukt} mislukt` : ""}`}
+                    {aantal === 0 ? "niets" : `${aantal}${bytes > 0 ? ` · ${leesbareOmvang(bytes)}` : ""}`}
+                    {mislukt > 0 ? ` · ${mislukt} mislukt` : ""}
                   </span>
                 </li>
               );
@@ -885,6 +1023,7 @@ export default function MediaFlow() {
 
   // ---------- Stap 2/3/4: per soort uploaden ----------
   const soort = huidige!;
+  const stapInDropbox = dropbox?.stappen[soort.key] ?? null;
   const klaar = taken.filter((t) => t.dropbox === "done").length;
   const mislukt = taken.filter((t) => t.dropbox === "error").length;
   const laatste = stapIndex === MEDIA_STAPPEN.length - 1;
@@ -972,9 +1111,38 @@ export default function MediaFlow() {
             Uploaden
           </span>
         </button>
+
+        {/* De tweede weg: de Dropbox-app. Die uploadt door met het scherm uit
+            of de iPad in de tas — een webpagina wordt dan door iOS stilgezet.
+            De link opent precies deze submap; wat er binnenkomt verschijnt
+            hieronder vanzelf, want die stand komt uit Dropbox zelf. */}
+        {stapInDropbox?.webUrl && (
+          <a className="btn-dbx-app" href={stapInDropbox.webUrl} target="_blank" rel="noopener noreferrer">
+            <span className="btn-dbx-app-tekst">
+              <strong>Via de Dropbox-app aanleveren</strong>
+              <span>Uploadt door op de achtergrond, ook als het scherm uitgaat.</span>
+            </span>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M6 4h6v6M12 4 4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </a>
+        )}
+
+        {/* Wat er echt staat, ongeacht langs welke weg het kwam. */}
+        {stapInDropbox && (
+          <p className="media-dbx-stand">
+            In Dropbox:{" "}
+            <strong>
+              {aantalVoor(soort)} bestand{aantalVoor(soort) === 1 ? "" : "en"}
+            </strong>
+            {stapInDropbox.bytes > 0 && ` · ${leesbareOmvang(stapInDropbox.bytes)}`}
+            {stapInDropbox.laatste && ` · laatste binnen: ${relatieveTijd(Date.parse(stapInDropbox.laatste))}`}
+          </p>
+        )}
+
         {taken.length > 0 && (
           <p className="media-hint">
-            {klaar}/{taken.length} geüpload{mislukt > 0 ? ` · ${mislukt} mislukt` : ""}
+            Vanaf dit apparaat: {klaar}/{taken.length} geüpload{mislukt > 0 ? ` · ${mislukt} mislukt` : ""}
           </p>
         )}
 
