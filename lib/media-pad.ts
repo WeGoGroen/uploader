@@ -20,12 +20,16 @@ export const MEDIA_HOOFDMAP = "Automatie Media";
  * willekeurig pad de projectmap uit lopen, en dan controleert de route wel
  * wélk adres maar niet meer wáár binnen dat adres.
  *
+ * "out/Omgevingsfoto's" is voor de omgevingsfoto's die het control center bij
+ * een adres zet: kopieën uit de Master B-roll Library, al bewerkt, dus bij de
+ * oplevering en niet bij de bewerker.
+ *
  * Alles onder "out": dat is in deze mappenstructuur de afgesproken scheiding
  * tussen wat de opnemer aanlevert ("in") en wat de bewerking oplevert. De agent
  * mag nooit in "in" schrijven — daar staan de originelen, en die moeten
  * overleven zodat een patch die tegenvalt opnieuw te maken is.
  */
-export const MEDIA_SUBMAPPEN = ["out/360", "out/360/review"] as const;
+export const MEDIA_SUBMAPPEN = ["out/360", "out/360/review", "out/Omgevingsfoto's"] as const;
 
 export type MediaSubmap = (typeof MEDIA_SUBMAPPEN)[number];
 
