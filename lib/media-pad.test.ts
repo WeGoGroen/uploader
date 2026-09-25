@@ -62,6 +62,13 @@ describe("isMediaSubmap", () => {
     for (const s of MEDIA_SUBMAPPEN) expect(isMediaSubmap(s)).toBe(true);
   });
 
+  it("laat omgevingsfoto's toe naast de oplevering", () => {
+    expect(isMediaSubmap("out/Omgevingsfoto's")).toBe(true);
+    expect(mediaDoelPad("/Automatie Media/Dam 5, Amsterdam", "out/Omgevingsfoto's", "Javastraat 02.jpg")).toBe(
+      "/Automatie Media/Dam 5, Amsterdam/out/Omgevingsfoto's/Javastraat 02.jpg"
+    );
+  });
+
   it("weigert de invoermap — daar staan de originelen", () => {
     expect(isMediaSubmap("in/360")).toBe(false);
     expect(isMediaSubmap("in")).toBe(false);
