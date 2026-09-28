@@ -62,6 +62,21 @@ describe("isMediaSubmap", () => {
     for (const s of MEDIA_SUBMAPPEN) expect(isMediaSubmap(s)).toBe(true);
   });
 
+  it("let niet op de schrijfwijze, net als Dropbox", () => {
+    /*
+      De mappen heten sinds kort OUT in plaats van out, en de twee kanten — het
+      control center en deze route — rollen niet op hetzelfde moment uit. Op de
+      letter vergelijken zou betekenen dat er tussen die twee uitrollen in
+      bestanden geweigerd worden die gewoon naar de goede map hadden gemoeten.
+    */
+    expect(isMediaSubmap("out/360")).toBe(true);
+    expect(isMediaSubmap("OUT/360")).toBe(true);
+    expect(isMediaSubmap("Out/360/Review")).toBe(true);
+    // Maar een map die er niet op staat blijft geweigerd, in welke schrijfwijze ook.
+    expect(isMediaSubmap("IN/360")).toBe(false);
+    expect(isMediaSubmap("out/geheim")).toBe(false);
+  });
+
   it("laat omgevingsfoto's toe naast de oplevering", () => {
     expect(isMediaSubmap("out/Omgevingsfoto's")).toBe(true);
     expect(mediaDoelPad("/Automatie Media/Dam 5, Amsterdam", "out/Omgevingsfoto's", "Javastraat 02.jpg")).toBe(

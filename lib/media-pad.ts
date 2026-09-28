@@ -24,12 +24,13 @@ export const MEDIA_HOOFDMAP = "Automatie Media";
  * een adres zet: kopieën uit de Master B-roll Library, al bewerkt, dus bij de
  * oplevering en niet bij de bewerker.
  *
- * Alles onder "out": dat is in deze mappenstructuur de afgesproken scheiding
- * tussen wat de opnemer aanlevert ("in") en wat de bewerking oplevert. De agent
- * mag nooit in "in" schrijven — daar staan de originelen, en die moeten
- * overleven zodat een patch die tegenvalt opnieuw te maken is.
+ * Alles onder de uitvoermap: dat is in deze mappenstructuur de afgesproken
+ * scheiding tussen wat de opnemer aanlevert (In/Raw) en wat de bewerking
+ * oplevert (OUT). De agent mag nooit in de invoermap schrijven — daar staan de
+ * originelen, en die moeten overleven zodat een patch die tegenvalt opnieuw te
+ * maken is.
  */
-export const MEDIA_SUBMAPPEN = ["out/360", "out/360/review", "out/Omgevingsfoto's"] as const;
+export const MEDIA_SUBMAPPEN = ["OUT/360", "OUT/360/review", "out/Omgevingsfoto's"] as const;
 
 export type MediaSubmap = (typeof MEDIA_SUBMAPPEN)[number];
 
@@ -64,8 +65,20 @@ export function isMediaProjectmap(pad: string): boolean {
   return false;
 }
 
+/**
+ * Hoofdletterongevoelig, om dezelfde reden als bij de archiefmap hierboven:
+ * voor Dropbox zijn "out/360" en "OUT/360" dezelfde map.
+ *
+ * Dat is hier meer dan netjes zijn. De schrijfwijze van deze mappen is net
+ * veranderd, en de twee kanten — het control center en deze route — rollen
+ * niet op hetzelfde moment uit. Op de letter vergelijken zou betekenen dat er
+ * tussen die twee uitrollen in bestanden geweigerd worden die gewoon naar de
+ * goede map hadden gemoeten.
+ */
 export function isMediaSubmap(submap: string): submap is MediaSubmap {
-  return (MEDIA_SUBMAPPEN as readonly string[]).includes(submap);
+  return (MEDIA_SUBMAPPEN as readonly string[]).some(
+    (m) => m.toLowerCase() === submap.toLowerCase()
+  );
 }
 
 /**
