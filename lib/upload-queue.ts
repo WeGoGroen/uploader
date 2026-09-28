@@ -85,15 +85,23 @@ const GEWICHT_GROOT = CHUNK_PARALLEL;
  */
 const DIRECT_CHUNK_MAX = 16 * 1024 * 1024;
 /**
- * Vanaf deze grootte gaat een bestand in parallelle blokken omhoog i.p.v. als
- * één stroom. Eén verbinding trekt op 4G/5G de uplink zelden vol, dus hoe
- * eerder blokken beginnen hoe beter — maar onder de drie blokken weegt het
- * opzetten van een sessie (start + close + finish) niet op tegen de winst.
- * Drie blokken van 4MB is dus de ondergrens.
+ * Vanaf deze grootte gaat een bestand in parallelle blokken omhoog; daaronder
+ * in één keer, en dan gaan er zes tegelijk.
  *
- * Stond op 24MB, waardoor een 360-panorama van 20MB als één lange POST ging.
+ * Stond op 12MB. Daarmee telde elke RAW-foto (35–40MB bij de A7 IV) als groot
+ * bestand en woog hij 4 van de 6. Een hele fotoserie ging dus één voor één,
+ * en per foto kwamen er rondes bij: een sessie openen, het laatste blok
+ * apart en daarna afronden. Tussen die rondes stond de uplink stil. Gemeten
+ * bij Ponserstraat 12: elke 13 seconden kwam er één foto binnen, nooit twee
+ * tegelijk. Zes foto's naast elkaar houden de uplink vol zonder die rondes.
+ * Blokken winnen alleen bij één groot bestand dat alleen omhoog gaat, en dat
+ * is een video, geen fotoserie.
+ *
+ * Daarboven blijven het blokken. De videoclips (vanaf ±67MB) zijn groot
+ * genoeg dat het opzetten van een sessie wegvalt tegen de winst, en een
+ * afgebroken clip hoeft dan niet helemaal opnieuw.
  */
-const PARALLEL_VANAF = 3 * CHUNK_SIZE;
+const PARALLEL_VANAF = 64 * 1024 * 1024;
 
 /**
  * De blokgrootte voor dit bestand.
@@ -395,8 +403,13 @@ export function forgetTasks(ids: string[]) {
   emit();
 }
 
-function gewicht(file: File): number {
-  return file.size >= PARALLEL_VANAF ? GEWICHT_GROOT : 1;
+/**
+ * Hoeveel van het budget een bestand inneemt. Dat is het aantal verbindingen
+ * dat het openzet. Geëxporteerd voor de test: een verkeerde grens hier liet
+ * al eens een hele fotoserie één voor één gaan.
+ */
+export function gewicht(grootte: number): number {
+  return grootte >= PARALLEL_VANAF ? GEWICHT_GROOT : 1;
 }
 
 function pump() {
@@ -404,7 +417,7 @@ function pump() {
     if (pending.length === 0) return;
     // Het eerste bestand dat nog in het budget past. Een grote video vooraan
     // mag de foto's erachter niet laten wachten — die passen er wél naast.
-    let idx = pending.findIndex((p) => runningWeight + gewicht(p.file) <= PARALLEL_BUDGET);
+    let idx = pending.findIndex((p) => runningWeight + gewicht(p.file.size) <= PARALLEL_BUDGET);
     if (idx === -1) {
       // Niets past meer; staat er helemaal niets te lopen, dan toch de
       // eerste nemen — er moet altijd íéts kunnen starten.
@@ -412,7 +425,7 @@ function pump() {
       idx = 0;
     }
     const next = pending.splice(idx, 1)[0];
-    const w = gewicht(next.file);
+    const w = gewicht(next.file.size);
     runningWeight += w;
     void runTask(next.task, next.file).finally(() => {
       runningWeight -= w;
@@ -427,12 +440,12 @@ async function runTask(task: UploadTask, file: File) {
   startedAt.set(task.id, Date.now());
   try {
     if (file.size < PARALLEL_VANAF) {
-      // Klein genoeg om in één keer te sturen; blokken opzetten zou hier
-      // alleen maar extra rondjes kosten.
+      // Foto's, RAW inbegrepen: in één keer. Blokken opzetten kost hier alleen
+      // extra rondes, en de parallelle winst komt van de foto's ernaast.
       await uploadDirect(task, file, fullPath);
     } else if (file.size <= DIRECT_UPLOAD_MAX) {
-      // Video's en grote foto's: parallelle blokken, met de enkele stroom als
-      // terugval zodat een geblokkeerde sessie de upload niet onmogelijk maakt.
+      // Video's: parallelle blokken, met de enkele stroom als terugval zodat
+      // een geblokkeerde sessie de upload niet onmogelijk maakt.
       try {
         await uploadChunkedDirect(task, file, fullPath);
       } catch {
@@ -470,22 +483,30 @@ async function runTask(task: UploadTask, file: File) {
 /** Rechtstreeks naar Dropbox — de snelle weg. */
 async function uploadDirect(task: UploadTask, file: File, fullPath: string) {
   // Eén link per bestand, maar wel per serie opgehaald: zie lib/upload-links.ts.
-  const link = await vraagUploadLink(fullPath);
-  if (!link) {
+  const eerste = await vraagUploadLink(fullPath);
+  if (!eerste) {
     // Geen link te krijgen: via de server proberen zodat de opname doorgaat.
     await uploadViaServer(task, file);
     return;
   }
 
-  await metBlokRetry(() =>
-    verstuurXhr({
+  let link = eerste;
+  let poging = 0;
+  await metBlokRetry(async () => {
+    // Een uploadlink is voor één keer ("consumed" → 410). Breekt een poging
+    // halverwege af, dan weten we niet of Dropbox hem al als gebruikt ziet,
+    // en een herkansing op een verbruikte link is een RAW van 40MB voor
+    // niets. Daarom krijgt elke herkansing een verse link. Komt die er niet,
+    // dan proberen we het toch met de oude.
+    if (poging++ > 0) link = (await vraagUploadLink(fullPath)) ?? link;
+    return verstuurXhr({
       url: link,
       body: file,
       headers: { "Content-Type": "application/octet-stream" },
       onProgress: (verzonden, totaal) => setProgress(task.id, verzonden, totaal),
       melding: (status) => `Dropbox weigerde het bestand (gaf ${status})`,
-    })
-  );
+    });
+  });
 }
 
 /** Terugval: via onze server (geldt ook voor bestanden > 4MB via chunks). */

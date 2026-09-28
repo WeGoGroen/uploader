@@ -3,6 +3,7 @@ import {
   NetwerkFout,
   UploadFout,
   blokGrootte,
+  gewicht,
   magOpnieuw,
   sessieOnbruikbaar,
   wachttijd,
@@ -37,6 +38,30 @@ describe("blokGrootte", () => {
   it("caps the block size so one hiccup does not cost a lot of work", () => {
     expect(blokGrootte(2048 * MB)).toBe(16 * MB);
     expect(blokGrootte(100 * MB)).toBe(16 * MB);
+  });
+});
+
+/**
+ * Hoeveel van de zes verbindingen een bestand inneemt. Met de grens op 12MB
+ * woog een RAW-foto 4 en ging een hele serie één voor één: bij Ponserstraat
+ * 12 kwam er elke 13 seconden één foto binnen, nooit twee tegelijk.
+ */
+describe("gewicht", () => {
+  it("lets a series of RAW photos go up six at a time", () => {
+    // De grootste en kleinste RAW van Ponserstraat 12, in bytes.
+    expect(gewicht(37_896_192)).toBe(1);
+    expect(gewicht(35_020_800)).toBe(1);
+  });
+
+  it("counts small photos and 360 panoramas as one connection", () => {
+    expect(gewicht(2.5 * MB)).toBe(1);
+    expect(gewicht(20 * MB)).toBe(1);
+  });
+
+  it("still sends video clips in parallel blocks", () => {
+    // Een lange clip van Gillis van Ledenberchstraat 44-1, en een video van 2GB.
+    expect(gewicht(134_362_027)).toBe(4);
+    expect(gewicht(2048 * MB)).toBe(4);
   });
 });
 
