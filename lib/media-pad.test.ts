@@ -77,6 +77,30 @@ describe("isMediaSubmap", () => {
     expect(isMediaSubmap("out/geheim")).toBe(false);
   });
 
+  it("laat de fotografie-uitvoermap toe, met de apostrof erin", () => {
+    /*
+      Hier liep de Foto Edit Agent op vast: negen bewerkte foto's stonden klaar
+      bij Imagen en mochten de map niet in, met "submap moet een van OUT/360,
+      OUT/360/review, out/Omgevingsfoto's zijn — kreeg submap OUT/Photo's".
+
+      De schrijfwijze doet er niet toe (Dropbox kijkt er ook niet naar), maar de
+      apostrof wél: de map heet Photo's, niet Photos.
+    */
+    expect(isMediaSubmap("OUT/Photo's")).toBe(true);
+    expect(isMediaSubmap("out/photo's")).toBe(true);
+    expect(isMediaSubmap("OUT/Photos")).toBe(false);
+    expect(
+      mediaDoelPad("/Automatie Media/Dam 5, Amsterdam", "OUT/Photo's", "DSC01199-HDR.jpg")
+    ).toBe("/Automatie Media/Dam 5, Amsterdam/OUT/Photo's/DSC01199-HDR.jpg");
+  });
+
+  it("laat de invoermap van de fotografie niet toe", () => {
+    // De originelen moeten overleven; een agent die daar mag schrijven kan een
+    // RAW overschrijven met zijn eigen uitvoer.
+    expect(isMediaSubmap("In/Raw/Photo's")).toBe(false);
+    expect(isMediaSubmap("in/Photo's")).toBe(false);
+  });
+
   it("laat omgevingsfoto's toe naast de oplevering", () => {
     expect(isMediaSubmap("out/Omgevingsfoto's")).toBe(true);
     expect(mediaDoelPad("/Automatie Media/Dam 5, Amsterdam", "out/Omgevingsfoto's", "Javastraat 02.jpg")).toBe(

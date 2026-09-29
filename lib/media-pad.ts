@@ -24,13 +24,26 @@ export const MEDIA_HOOFDMAP = "Automatie Media";
  * een adres zet: kopieën uit de Master B-roll Library, al bewerkt, dus bij de
  * oplevering en niet bij de bewerker.
  *
+ * "OUT/Photo's" is de tegenhanger van OUT/360 voor de fotografie: de Foto Edit
+ * Agent in het control center stuurt elke shoot door Imagen AI en zet de
+ * bewerkte JPEG's daar neer. Let op de schrijfwijze — Photo's, met Ph — want zo
+ * heet de map die de uploader zelf aanmaakt naast In/Raw/Photo's. Zonder deze
+ * regel liep die keten helemaal door tot de laatste meter en bleven negen
+ * bewerkte foto's bij Imagen staan met "submap moet een van OUT/360,
+ * OUT/360/review, out/Omgevingsfoto's zijn".
+ *
  * Alles onder de uitvoermap: dat is in deze mappenstructuur de afgesproken
  * scheiding tussen wat de opnemer aanlevert (In/Raw) en wat de bewerking
  * oplevert (OUT). De agent mag nooit in de invoermap schrijven — daar staan de
  * originelen, en die moeten overleven zodat een patch die tegenvalt opnieuw te
  * maken is.
  */
-export const MEDIA_SUBMAPPEN = ["OUT/360", "OUT/360/review", "out/Omgevingsfoto's"] as const;
+export const MEDIA_SUBMAPPEN = [
+  "OUT/360",
+  "OUT/360/review",
+  "OUT/Photo's",
+  "out/Omgevingsfoto's",
+] as const;
 
 export type MediaSubmap = (typeof MEDIA_SUBMAPPEN)[number];
 
