@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
 import { createTemporaryUploadLink, folderExists, getSharedAccessToken } from "@/lib/dropbox";
-import { MEDIA_SUBMAPPEN, isMediaProjectmap, mediaDoelPad } from "@/lib/media-pad";
+import {
+  AANLEVER_SUBMAPPEN,
+  MEDIA_SUBMAPPEN,
+  isMediaProjectmap,
+  mediaDoelPad,
+  type Schrijfsoort,
+} from "@/lib/media-pad";
 
 export const maxDuration = 30;
 
@@ -41,11 +47,22 @@ export async function POST(request: Request) {
     projectmap?: string;
     submap?: string;
     bestandsnaam?: string;
+    soort?: string;
   } | null;
 
   const projectmap = body?.projectmap?.trim() ?? "";
   const submap = body?.submap?.trim() ?? "";
-  const pad = mediaDoelPad(projectmap, submap, body?.bestandsnaam ?? "");
+  /*
+    Aanleveren moet je vrágen; opleveren is de standaard.
+
+    Zonder dit veld gedraagt de route zich precies zoals hiervoor, en dat is de
+    bedoeling: de nadir-agent stuurt geen `soort` mee en houdt dus zijn oude,
+    smalle schrijfrecht op alleen de uitvoermappen. Alleen wie expliciet
+    "aanlevering" zegt komt bij de invoermap uit.
+  */
+  const soort: Schrijfsoort = body?.soort === "aanlevering" ? "aanlevering" : "oplevering";
+  const toegestaan = soort === "aanlevering" ? AANLEVER_SUBMAPPEN : MEDIA_SUBMAPPEN;
+  const pad = mediaDoelPad(projectmap, submap, body?.bestandsnaam ?? "", soort);
 
   /*
     De drie afwijzingen apart benoemen, en niet één "ongeldig verzoek".
@@ -64,7 +81,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          `submap moet een van ${MEDIA_SUBMAPPEN.join(", ")} zijn en de bestandsnaam ` +
+          `submap moet bij ${soort} een van ${toegestaan.join(", ")} zijn en de bestandsnaam ` +
           `een gewone beeldnaam — kreeg submap "${submap}"`,
       },
       { status: 400 }

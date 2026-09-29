@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
-import { ensureProjectFolder } from "@/lib/dropbox";
+import {
+  MEDIA_PROJECT_SUBFOLDERS,
+  createFolder,
+  ensureProjectFolder,
+  folderExists,
+  getSharedAccessToken,
+  maakSubmappen,
+  sanitizePathSegment,
+} from "@/lib/dropbox";
+import { MEDIA_HOOFDMAP } from "@/lib/media-pad";
 
 export const maxDuration = 60;
 
@@ -24,9 +33,44 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     woonplaats?: string;
     straatEnNummer?: string;
+    titel?: string;
   } | null;
   const woonplaats = body?.woonplaats?.trim() ?? "";
   const straatEnNummer = body?.straatEnNummer?.trim() ?? "";
+  const titel = body?.titel?.trim() ?? "";
+
+  /*
+    Een vrije titel, naast de adresweg.
+
+    Gevraagd voor het aanleverscherm op het portaal, waar iemand een shoot
+    binnenbrengt die nog geen adres in het systeem heeft. Bewust een tweede
+    ingang en geen vervanging: de adresweg vindt een bestaande map terug onder
+    elke schrijfwijze en zelfs in het archief, en dat kan deze niet. Wat hij wél
+    doet is een map met exact dezelfde naam hergebruiken in plaats van er een
+    tweede naast te zetten — de helft van dezelfde bescherming, en dat is wat er
+    zonder adres te halen valt.
+  */
+  if (titel && !woonplaats && !straatEnNummer) {
+    const naam = sanitizePathSegment(titel);
+    if (naam.length < 2 || naam.length > 120) {
+      return NextResponse.json({ error: "titel moet tussen 2 en 120 tekens zijn" }, { status: 400 });
+    }
+    const pad = `/${MEDIA_HOOFDMAP}/${naam}`;
+    try {
+      const token = await getSharedAccessToken();
+      const bestond = await folderExists(token, pad).catch(() => false);
+      // createFolder en maakSubmappen zijn allebei onverstoorbaar bij een map
+      // die er al is; dit repareert dus ook een half aangemaakte map.
+      await createFolder(token, pad);
+      await maakSubmappen(token, pad, MEDIA_PROJECT_SUBFOLDERS);
+      return NextResponse.json({ ok: true, pad, naam, bestond });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message.slice(0, 200) : "map aanmaken mislukt" },
+        { status: 502 }
+      );
+    }
+  }
   // Een huisnummer is verplicht: zonder wordt het een map per straat, en daar
   // hoort geen opname in.
   if (!woonplaats || !/\d/.test(straatEnNummer)) {
