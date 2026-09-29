@@ -47,6 +47,28 @@ export const MEDIA_SUBMAPPEN = [
 
 export type MediaSubmap = (typeof MEDIA_SUBMAPPEN)[number];
 
+/**
+ * Waar ruw materiaal heen mag — een aparte lijst, met opzet.
+ *
+ * De regel hierboven zegt: de agent mag nooit in de invoermap schrijven, want
+ * daar staan de originelen en die moeten een tegenvallende patch overleven.
+ * Die regel blijft staan. Wat erbij komt is een andere actor: een mens die op
+ * het portaal een shoot aanlevert. Die zet juist originelen neer, en heeft
+ * daarvoor de invoermap nodig.
+ *
+ * Twee lijsten en niet één ruimere, omdat het verschil tussen die twee actoren
+ * het hele punt is. Zou "In/Raw/360" bij MEDIA_SUBMAPPEN komen, dan mag de
+ * nadir-agent er vanaf dat moment ook in, en dan is de bescherming van de
+ * originelen stilletjes weg — precies het soort verruiming waar niemand een
+ * melding van krijgt.
+ */
+export const AANLEVER_SUBMAPPEN = ["In/Raw/360"] as const;
+
+export type AanleverSubmap = (typeof AANLEVER_SUBMAPPEN)[number];
+
+/** Wie er schrijft, en dus welke lijst geldt. */
+export type Schrijfsoort = "oplevering" | "aanlevering";
+
 /** Wat de nadirmodule kan opleveren. Bewust dezelfde lijst als de leeskant
     daar: schrijft hij iets anders weg, dan klopt er iets niet en is weigeren
     beter dan het ergens neerzetten. */
@@ -94,6 +116,14 @@ export function isMediaSubmap(submap: string): submap is MediaSubmap {
   );
 }
 
+/** Hetzelfde, voor de aanleverkant. Zie AANLEVER_SUBMAPPEN voor waarom dit een
+    eigen functie is en geen tweede tak in de bovenstaande. */
+export function isAanleverSubmap(submap: string): submap is AanleverSubmap {
+  return (AANLEVER_SUBMAPPEN as readonly string[]).some(
+    (m) => m.toLowerCase() === submap.toLowerCase()
+  );
+}
+
 /**
  * De bestandsnaam zoals hij in Dropbox komt te staan, of null als hij niet mag.
  *
@@ -109,8 +139,17 @@ export function mediaBestandsnaam(ruw: string): string | null {
 }
 
 /** Het volledige pad, of null als een van de drie delen niet deugt. */
-export function mediaDoelPad(projectmap: string, submap: string, bestandsnaam: string): string | null {
-  if (!isMediaProjectmap(projectmap) || !isMediaSubmap(submap)) return null;
+export function mediaDoelPad(
+  projectmap: string,
+  submap: string,
+  bestandsnaam: string,
+  soort: Schrijfsoort = "oplevering"
+): string | null {
+  // "oplevering" als standaard, zodat elke bestaande aanroep precies blijft
+  // doen wat hij deed. Wie ruw materiaal wil neerzetten moet dat expliciet
+  // zeggen — dat is geen formaliteit maar de plek waar die keuze zichtbaar is.
+  const mag = soort === "aanlevering" ? isAanleverSubmap(submap) : isMediaSubmap(submap);
+  if (!isMediaProjectmap(projectmap) || !mag) return null;
   const naam = mediaBestandsnaam(bestandsnaam);
   if (!naam) return null;
   return `${projectmap}/${submap}/${naam}`;

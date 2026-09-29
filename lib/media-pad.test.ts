@@ -162,3 +162,46 @@ describe("mediaDoelPad", () => {
     expect(mediaDoelPad("/Automatie Media/Dam 5, Amsterdam", "out/360", "a.pdf")).toBeNull();
   });
 });
+
+describe("de aanlevermap", () => {
+  /*
+    Twee lijsten, en dat is het hele punt van deze reeks.
+
+    De nadir-agent mag alleen naar de uitvoermappen schrijven: daar staat de
+    bewerking, en de originelen in In/Raw moeten een tegenvallende patch
+    overleven. Een mens die op het portaal een shoot aanlevert is een andere
+    actor met de omgekeerde behoefte — die zet juist originelen neer.
+
+    Zou "In/Raw/360" bij MEDIA_SUBMAPPEN komen, dan mag de agent er vanaf dat
+    moment ook in en is die bescherming stilletjes weg. Vandaar de scheiding, en
+    vandaar deze tests.
+  */
+  it("weigert de invoermap zolang er niet om aanlevering gevraagd wordt", () => {
+    expect(mediaDoelPad("/Automatie Media/Dam 5", "In/Raw/360", "pano.jpg")).toBeNull();
+  });
+
+  it("laat de invoermap toe bij een aanlevering", () => {
+    expect(mediaDoelPad("/Automatie Media/Dam 5", "In/Raw/360", "pano.jpg", "aanlevering")).toBe(
+      "/Automatie Media/Dam 5/In/Raw/360/pano.jpg"
+    );
+  });
+
+  it("laat een aanlevering niet in de uitvoermap schrijven", () => {
+    // Andersom moet net zo dicht zitten: het aanleverscherm hoort niet in de
+    // map te kunnen die naar de klant gaat.
+    expect(mediaDoelPad("/Automatie Media/Dam 5", "OUT/360", "pano.jpg", "aanlevering")).toBeNull();
+  });
+
+  it("blijft hoofdletterongevoelig, want Dropbox is dat ook", () => {
+    expect(mediaDoelPad("/Automatie Media/Dam 5", "in/raw/360", "pano.jpg", "aanlevering")).toBe(
+      "/Automatie Media/Dam 5/in/raw/360/pano.jpg"
+    );
+  });
+
+  it("houdt de projectmapgrens ook bij een aanlevering", () => {
+    expect(mediaDoelPad("/Automatie Media", "In/Raw/360", "pano.jpg", "aanlevering")).toBeNull();
+    expect(
+      mediaDoelPad("/Automatie Energielabels/Dam 5", "In/Raw/360", "pano.jpg", "aanlevering")
+    ).toBeNull();
+  });
+});
