@@ -11,6 +11,11 @@ Ook gedraaid: `npm test` (36 bestanden, 376 tests groen, 3 overgeslagen),
 Elke bevinding hieronder is in de code nagelopen; regelnummers verwijzen naar de
 stand van `main` op 29 september 2026 (commit `26468ba`).
 
+**Inmiddels verwerkt:** U1 t/m U4 (mislukt-knop op /media, automatisch herstel,
+wake lock, herkansingslink), plus een fout die daarbij boven kwam: de
+hervat-melding stond in de layout buiten de rechten-provider en verscheen
+daardoor nooit.
+
 ---
 
 ## Stand van zaken t.o.v. `media-upload-verbeterpunten.md`
@@ -20,9 +25,9 @@ op één na:
 
 | Punt | Staat nu |
 | --- | --- |
-| 6 · mislukte upload op /media doodlopend | Open — `MediaFlow.tsx:1164` toont nog alleen "mislukt", geen reden, geen knop |
-| 7 · wake lock | Open — `MediaFlow.tsx:527-547`, nog op aantal i.p.v. boolean, geen `visibilitychange` |
-| 8 · herstel bij `online`/terug in beeld | Open — geen listener in `lib/upload-queue.ts` |
+| 6 · mislukte upload op /media doodlopend | Verwerkt (U1) |
+| 7 · wake lock | Verwerkt (U3) |
+| 8 · herstel bij `online`/terug in beeld | Verwerkt (U2) |
 | 9 · verkleinen lijkt stilstand | Open — verkleinrij staat op `uploading` 0% |
 | 10 · geen ETA op /media | Open — `etaSeconds` wordt berekend maar niet getoond; ETA na hervatten klopt niet (`uploaded = alGedaan`, `startedAt` = nu) |
 | 13 · gelijke namen overschrijven stil | Open — `mode: "overwrite"` overal |
