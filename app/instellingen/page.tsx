@@ -759,8 +759,10 @@ export default function Instellingen() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // Ophalen zonder vooraf iets te zetten, zodat het laad-effect geen extra
+  // render uitlokt. "Bezig" bij het openen komt uit de beginwaarde van
+  // loading; bij verversen zet load() hem zelf aan.
+  const haalStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/connections/status", { cache: "no-store" });
       const data: StatusResponse = await res.json();
@@ -770,9 +772,14 @@ export default function Instellingen() {
     }
   }, []);
 
+  const load = useCallback(async () => {
+    setLoading(true);
+    await haalStatus();
+  }, [haalStatus]);
+
   useEffect(() => {
-    load();
-  }, [load]);
+    void haalStatus();
+  }, [haalStatus]);
 
   // Eén regel die de hele pagina samenvat, zodat je in één oogopslag ziet of
   // er iets aandacht vraagt zonder zeven kaarten langs te hoeven lopen.

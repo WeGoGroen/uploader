@@ -716,9 +716,13 @@ export async function ensureProjectFolder(
   // met een statusbolletje ervoor. Zonder deze stap bouwde deze functie blind
   // het canonieke pad en kwam er een tweede map naast te staan: de foto's in
   // de ene, het label in de andere, en niemand die dat merkt.
-  const bestaand = await findProjectFolder(accessToken, kind, woonplaats, straatEnNummer).catch(
-    () => null
-  );
+  //
+  // Een fout bij het zoeken is geen "niet gevonden". Dat stond hier wel zo
+  // (.catch(() => null)), en dan maakte een 429 of een time-out precies de
+  // tweede map waar deze stap voor bedoeld is. findProjectFolder probeert het
+  // zelf nog een keer; lukt het dan nog niet, dan liever een foutmelding en
+  // opnieuw proberen dan een dubbele map.
+  const bestaand = await findProjectFolder(accessToken, kind, woonplaats, straatEnNummer);
   const path = bestaand?.path ?? projectFolderPath(kind, woonplaats, straatEnNummer);
   const subfolders =
     kind === "nen"
@@ -845,30 +849,50 @@ export async function listFolderFiles(
   accessToken: string,
   path: string
 ): Promise<DropboxFileEntry[]> {
-  const res = await fetch(`${DROPBOX_API_BASE}/files/list_folder`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ path, recursive: false }),
-  });
+  /*
+    Alle pagina's, niet alleen de eerste.
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    // Map bestaat (nog) niet — gewoon een lege lijst, geen harde fout: dat
-    // kan gebeuren bij een nieuw adres waar de map net is aangemaakt.
-    if (res.status === 409 && body.includes("path/not_found")) return [];
-    throw new DropboxApiError(res.status, `Dropbox list_folder failed: ${res.status} ${body}`);
+    Dropbox geeft een map in delen terug (has_more + cursor). Dit las alleen
+    het eerste deel. In een volle fotomap ontbraken dan bestanden, en op één
+    plek was dat meer dan een telfout: voegBijlageGToe kijkt hiermee of de
+    bijlage er al ligt en uploadt anders met "overwrite". Stond de ingevulde
+    bijlage van de adviseur op een latere pagina, dan werd hij overschreven
+    door het lege sjabloon.
+  */
+  const bestanden: DropboxFileEntry[] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const res: Response = await fetch(
+      `${DROPBOX_API_BASE}/files/list_folder${cursor ? "/continue" : ""}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(cursor ? { cursor } : { path, recursive: false }),
+      }
+    );
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      // Map bestaat (nog) niet — gewoon een lege lijst, geen harde fout: dat
+      // kan gebeuren bij een nieuw adres waar de map net is aangemaakt.
+      if (!cursor && res.status === 409 && body.includes("path/not_found")) return [];
+      throw new DropboxApiError(res.status, `Dropbox list_folder failed: ${res.status} ${body}`);
+    }
+
+    const data = (await res.json()) as {
+      entries: { ".tag": string; name: string; size?: number }[];
+      cursor: string;
+      has_more: boolean;
+    };
+    for (const e of data.entries) {
+      if (e[".tag"] === "file") bestanden.push({ name: e.name, size: e.size ?? 0 });
+    }
+    if (!data.has_more) return bestanden;
+    cursor = data.cursor;
   }
-
-  const data = (await res.json()) as {
-    entries: { ".tag": string; name: string; size?: number }[];
-  };
-
-  return data.entries
-    .filter((e) => e[".tag"] === "file")
-    .map((e) => ({ name: e.name, size: e.size ?? 0 }));
 }
 
 /**
@@ -1322,10 +1346,33 @@ export async function findProjectFolder(
 
   // Eerst waar het werk staat, dan het archief. In die volgorde, want een
   // lopende opname hoort zwaarder te wegen dan een afgeronde met dezelfde naam.
-  return (
-    (await zoekInEenMap(accessToken, root, naam)) ??
-    (await zoekInEenMap(accessToken, `${root}/${ARCHIEF_MAP}`, naam))
+  return metHerkansing(
+    async () =>
+      (await zoekInEenMap(accessToken, root, naam)) ??
+      (await zoekInEenMap(accessToken, `${root}/${ARCHIEF_MAP}`, naam))
   );
+}
+
+/**
+ * Is dit een fout waar even wachten iets aan verandert? Een 429 (te veel
+ * aanvragen), een storing aan de kant van Dropbox (5xx) of een verbinding die
+ * wegviel. Een 409 of 401 blijft bij een herhaling precies hetzelfde.
+ */
+export function isTijdelijkeDropboxFout(err: unknown): boolean {
+  if (err instanceof DropboxApiError) return err.status === 429 || err.status >= 500;
+  // fetch gooit een kale TypeError bij een netwerkfout.
+  return err instanceof TypeError;
+}
+
+/** Eén herkansing na een tijdelijke fout; elke andere fout gaat meteen door. */
+async function metHerkansing<T>(doe: () => Promise<T>, wachtMs = 1500): Promise<T> {
+  try {
+    return await doe();
+  } catch (err) {
+    if (!isTijdelijkeDropboxFout(err)) throw err;
+    await new Promise((r) => setTimeout(r, wachtMs));
+    return doe();
+  }
 }
 
 /** Eén map afzoeken op een projectmap die bij dit adres hoort. */

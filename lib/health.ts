@@ -1,10 +1,13 @@
 import {
   getSharedAccessToken,
   createTemporaryUploadLink,
+  getFolderStatuses,
   listFolderFiles,
   statusFromName,
+  statusVeld,
   stripStatusMarker,
   summarizeProjectFolders,
+  type FolderStatus,
 } from "@/lib/dropbox";
 import {
   getDefaultDriveId,
@@ -268,20 +271,20 @@ async function werkControles(): Promise<Controle[]> {
     }),
 
     /**
-     * De uitkomst van de overdrachten zelf, af te lezen aan het bolletje voor
-     * elke projectmap. Rood betekent: er is iets misgegaan en het blijft
-     * liggen tot iemand kijkt. Oranje om half zes 's ochtends betekent
-     * hetzelfde — een overdracht duurt seconden, geen uren.
+     * De uitkomst van de overdrachten zelf, per projectmap. Rood betekent: er
+     * is iets misgegaan en het blijft liggen tot iemand kijkt. Oranje om half
+     * zes 's ochtends betekent hetzelfde — een overdracht duurt seconden,
+     * geen uren.
      */
     meet("SharePoint-overdracht", async () => {
       const t = await getSharedAccessToken();
-      const { folders, volledig } = await summarizeProjectFolders(t, "/Automatie Energielabels");
+      const root = "/Automatie Energielabels";
+      const [{ folders, volledig }, statussen] = await Promise.all([
+        summarizeProjectFolders(t, root),
+        getFolderStatuses(),
+      ]);
 
-      const perStatus = { compleet: [] as string[], bezig: [] as string[], ontbreekt: [] as string[] };
-      for (const f of folders) {
-        const status = statusFromName(f.name);
-        if (status) perStatus[status].push(stripStatusMarker(f.name));
-      }
+      const perStatus = telOverdrachten(root, folders, statussen);
 
       const gemarkeerd =
         perStatus.compleet.length + perStatus.bezig.length + perStatus.ontbreekt.length;
@@ -483,4 +486,28 @@ export async function laatsteRapport(): Promise<Gezondheidsrapport | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Hoeveel projectmappen per overdrachtsstatus, met hun namen.
+ *
+ * De status staat sinds de bolletjes-opruiming in Redis en niet meer in de
+ * mapnaam. Deze controle las nog alleen de mapnaam, dus na de opruiming zag
+ * hij nergens meer een status: elke ochtend "nog geen overdrachten gedaan",
+ * ook als er mappen op rood stonden. Redis gaat nu voor; een bolletje in de
+ * naam telt alleen nog voor een map die de opruiming gemist heeft.
+ */
+export function telOverdrachten(
+  root: string,
+  folders: { name: string }[],
+  statussen: Record<string, string>
+): Record<FolderStatus, string[]> {
+  const perStatus: Record<FolderStatus, string[]> = { compleet: [], bezig: [], ontbreekt: [] };
+  for (const f of folders) {
+    const uitRedis = statussen[statusVeld(root, f.name)];
+    const status: FolderStatus | null =
+      uitRedis && uitRedis in perStatus ? (uitRedis as FolderStatus) : statusFromName(f.name);
+    if (status) perStatus[status].push(stripStatusMarker(f.name));
+  }
+  return perStatus;
 }

@@ -11,10 +11,20 @@ Ook gedraaid: `npm test` (36 bestanden, 376 tests groen, 3 overgeslagen),
 Elke bevinding hieronder is in de code nagelopen; regelnummers verwijzen naar de
 stand van `main` op 29 september 2026 (commit `26468ba`).
 
-**Inmiddels verwerkt:** U1 t/m U4 (mislukt-knop op /media, automatisch herstel,
-wake lock, herkansingslink), plus een fout die daarbij boven kwam: de
-hervat-melding stond in de layout buiten de rechten-provider en verscheen
-daardoor nooit.
+**Inmiddels verwerkt:**
+
+- U1 t/m U4 (mislukt-knop op /media, automatisch herstel, wake lock,
+  herkansingslink), plus een fout die daarbij boven kwam: de hervat-melding
+  stond in de layout buiten de rechten-provider en verscheen daardoor nooit.
+- S1 (bestandslijst leest alle pagina's), S2 (zoekfout geeft geen tweede
+  projectmap meer, ook niet in de SharePoint-overdracht), F1 (bevestiging bij
+  verwijderen, met het aantal bestanden dat verloren gaat) en F2 (ander adres
+  kiezen overschrijft geen hervat concept meer).
+- B11 (sessiecontrole op de cron-routes, cron-geheim in constante tijd), S3
+  (bestandsnamen met spaties in Mediatask-links) en S4 (ochtendcontrole leest
+  de SharePoint-status uit Redis).
+- Onderhoud: de 10 lint-fouten zijn weg en lint is blokkerend in CI; er is een
+  `.env.example` met alle variabelen.
 
 ---
 

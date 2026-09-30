@@ -1346,6 +1346,9 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
 .doc-file-yes { border: 0; background: var(--bad); color: #fff; }
 .doc-file-yes:disabled { opacity: 0.6; cursor: default; }
 .doc-file-no { border: 1px solid var(--rule-strong); background: var(--paper); color: var(--ink); }
+/* Op de opnamelijst: grotere knoppen, het gaat om meer dan één bestand. */
+.opname-confirm { flex-basis: 100%; font-size: 13px; }
+.opname-confirm .doc-file-yes, .opname-confirm .doc-file-no { min-height: 40px; padding: 0 14px; font-size: 13px; }
 
 /* ---- groter, zoombaar bovenaanzicht ---- */
 .scan-modal.is-wide { max-width: 1400px; }

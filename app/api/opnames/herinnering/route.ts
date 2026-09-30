@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, authConfig, isValidSession } from "@/lib/auth";
+import { SESSION_COOKIE, magAchtergrondtaakDraaien } from "@/lib/auth";
 import { listDrafts } from "@/lib/drafts";
 import { getClickUpAccounts, getListMembers, requireClickUpConfig } from "@/lib/clickup";
 import { getOptionalRedis } from "@/lib/redis";
@@ -56,11 +56,10 @@ function opmaak(h: Herinnering): string {
  * te bezorgen.
  */
 export async function GET(request: Request) {
-  const { secret } = authConfig();
-  const cronSecret = process.env.CRON_SECRET;
-  const auth = request.headers.get("authorization");
-  const viaCron = !!cronSecret && auth === `Bearer ${cronSecret}`;
-  const viaSessie = await isValidSession(secret, (await cookies()).get(SESSION_COOKIE)?.value);
+  const { viaCron, viaSessie } = await magAchtergrondtaakDraaien(
+    request,
+    (await cookies()).get(SESSION_COOKIE)?.value
+  );
   if (!viaCron && !viaSessie) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }

@@ -159,6 +159,11 @@ export default function MediaFlow() {
   // localStorage gelezen tijdens het renderen: opslag is geen React-bron, dus
   // een wijziging zou anders pas bij een toevallige hertekening zichtbaar zijn.
   const [sessies, setSessies] = useState<MediaSessie[]>([]);
+  // Na het hydrateren inlezen, niet in de beginwaarde van useState: op de
+  // server bestaat localStorage niet, en een andere eerste render dan de
+  // server gaf, geeft een hydration-fout. Eén keer bij het openen is precies
+  // het "synchroniseren met een extern systeem" waar een effect voor is.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setSessies(alleMediaSessies()), []);
 
   const [query, setQuery] = useState("");
@@ -331,30 +336,38 @@ export default function MediaFlow() {
   }, [address, folder, huidige]);
 
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /*
+    Zoeken terwijl je typt. Een te korte zoekterm wist de lijst niet meer via
+    state maar valt weg in wat er getoond wordt (zoekresultaten hieronder):
+    state zetten in de body van een effect geeft een extra render per
+    toetsaanslag. En een antwoord dat binnenkomt nadat je al verder typte,
+    overschrijft de nieuwere resultaten niet meer.
+  */
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
     // Ook stoppen zodra er een adres gekozen is: setQuery(label) zet anders
     // meteen een nieuwe zoekopdracht in gang en knippert de lijst terug.
-    if (query.trim().length < 3 || address || loadingAddress) {
-      setSuggestions([]);
-      return;
-    }
+    if (query.trim().length < 3 || address || loadingAddress) return;
+    let actueel = true;
     debounce.current = setTimeout(async () => {
       setSearching(true);
       try {
         const res = await fetch(`/api/address/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
-        setSuggestions(data.suggestions ?? []);
+        if (actueel) setSuggestions(data.suggestions ?? []);
       } catch {
-        setSuggestions([]);
+        if (actueel) setSuggestions([]);
       } finally {
         setSearching(false);
       }
     }, 300);
     return () => {
+      actueel = false;
       if (debounce.current) clearTimeout(debounce.current);
     };
   }, [query, address, loadingAddress]);
+
+  const zoekresultaten = query.trim().length >= 3 && !address && !loadingAddress ? suggestions : [];
 
   function startNearbySearch() {
     setLocationError(null);
@@ -899,16 +912,16 @@ export default function MediaFlow() {
 
               {nearby && nearby.length === 0 && <p className="note">Geen adressen gevonden in de buurt.</p>}
 
-              {((nearby && nearby.length > 0) || (showManualSearch && suggestions.length > 0)) && (
+              {((nearby && nearby.length > 0) || (showManualSearch && zoekresultaten.length > 0)) && (
                 <div>
                   <div className="list-head">
                     <span className="eyebrow">
-                      {showManualSearch && suggestions.length > 0 ? "Zoekresultaten" : "Dichtstbijzijnde adressen"}
+                      {showManualSearch && zoekresultaten.length > 0 ? "Zoekresultaten" : "Dichtstbijzijnde adressen"}
                     </span>
                   </div>
                   <ul className="rows">
-                    {(showManualSearch && suggestions.length > 0
-                      ? suggestions.map((a) => ({ ...a, distanceMeters: null as number | null }))
+                    {(showManualSearch && zoekresultaten.length > 0
+                      ? zoekresultaten.map((a) => ({ ...a, distanceMeters: null as number | null }))
                       : (nearby ?? []).map((a) => ({ ...a, distanceMeters: a.distanceMeters as number | null }))
                     ).map((a) => (
                       <li key={a.id}>

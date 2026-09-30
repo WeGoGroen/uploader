@@ -137,26 +137,36 @@ export default function UploadNen() {
     resizeObserverRef.current = ro;
   };
 
+  /*
+    Zoeken terwijl je typt. Een te korte zoekterm wist de lijst niet meer via
+    state maar valt weg in wat er getoond wordt (zoekresultaten hieronder):
+    state zetten in de body van een effect geeft een extra render per
+    toetsaanslag. En een antwoord dat binnenkomt nadat je al verder typte,
+    overschrijft de nieuwere resultaten niet meer.
+  */
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (query.trim().length < 3) {
-      setSuggestions([]);
-      return;
-    }
+    if (query.trim().length < 3) return;
+    let actueel = true;
     debounceRef.current = setTimeout(async () => {
       setSearching(true);
       try {
         const res = await fetch(`/api/address/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
-        setSuggestions(data.suggestions ?? []);
+        if (actueel) setSuggestions(data.suggestions ?? []);
+      } catch {
+        // Geen verbinding: de oude lijst laten staan, de volgende toets probeert opnieuw.
       } finally {
         setSearching(false);
       }
     }, 300);
     return () => {
+      actueel = false;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query]);
+
+  const zoekresultaten = query.trim().length >= 3 ? suggestions : [];
 
   function startNearbySearch() {
     setLocationError(null);
@@ -263,6 +273,9 @@ export default function UploadNen() {
     const addr = params.get("addr");
     if (!addr) return;
     const m2 = params.get("m2");
+    // Eén keer bij het openen, uit de URL van de browser: die bestaat pas na
+    // het hydrateren, dus een effect is hier de plek.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void pickFromAppointment(addr, params.get("klant"), m2 ? Number(m2) : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -421,8 +434,8 @@ export default function UploadNen() {
 
   const [fileCounts, setFileCounts] = useState<Record<(typeof NEN_DOC_FOLDERS)[number], number> | null>(null);
   const [filesLoading, setFilesLoading] = useState(false);
-  const [docFiles, setDocFiles] = useState<Record<string, { name: string; size: number }[]>>({});
-  const [docFolderUrls, setDocFolderUrls] = useState<Record<string, string | null>>({});
+  const [, setDocFiles] = useState<Record<string, { name: string; size: number }[]>>({});
+  const [, setDocFolderUrls] = useState<Record<string, string | null>>({});
   // De Mediatask-order-sectie staat standaard ingeklapt — die gegevens staan
   // al als vinklijst in de adreskaart, het volledige formulier is alleen
   // nodig als je iets wilt aanpassen.
@@ -1072,16 +1085,16 @@ export default function UploadNen() {
 
             {nearby && nearby.length === 0 && <p className="note">Geen adressen gevonden in de buurt.</p>}
 
-            {((nearby && nearby.length > 0) || (showManualSearch && suggestions.length > 0)) && (
+            {((nearby && nearby.length > 0) || (showManualSearch && zoekresultaten.length > 0)) && (
               <div>
                 <div className="list-head">
                   <span className="eyebrow">
-                    {showManualSearch && suggestions.length > 0 ? "Zoekresultaten" : "Dichtstbijzijnde adressen"}
+                    {showManualSearch && zoekresultaten.length > 0 ? "Zoekresultaten" : "Dichtstbijzijnde adressen"}
                   </span>
                 </div>
                 <ul className="rows">
-                  {(showManualSearch && suggestions.length > 0
-                    ? suggestions.map((a) => ({ ...a, distanceMeters: null as number | null }))
+                  {(showManualSearch && zoekresultaten.length > 0
+                    ? zoekresultaten.map((a) => ({ ...a, distanceMeters: null as number | null }))
                     : (nearby ?? []).map((a) => ({ ...a, distanceMeters: a.distanceMeters as number | null }))
                   ).map((a) => (
                     <li key={a.id}>

@@ -153,8 +153,10 @@ export default function Dashboard() {
   // met dát adres verder i.p.v. met het niet-bestaande agenda-adres.
   const [chosenAddress, setChosenAddress] = useState<Record<string, string>>({});
 
+  // De foutmelding van de agenda wordt pas na het antwoord gezet of gewist,
+  // niet vooraf: zo zet deze functie niets synchroon als hij vanuit een effect
+  // draait, en knippert de melding niet weg en terug bij elke verversing.
   const load = useCallback(async () => {
-    setCalendarError(null);
     const [evts, drafts, orders, taskNames, klaarGemeld] = await Promise.all([
       fetch("/api/calendar/today", { cache: "no-store" })
         .then(async (res) => {
@@ -163,6 +165,7 @@ export default function Dashboard() {
             setCalendarError(data?.error ?? "Google Agenda is niet gekoppeld.");
             return [] as CalendarEvent[];
           }
+          setCalendarError(null);
           const data = await res.json();
           return (data.events ?? []) as CalendarEvent[];
         })
@@ -209,7 +212,17 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    load().finally(() => setLoading(false));
+    let weg = false;
+    void (async () => {
+      try {
+        await load();
+      } finally {
+        if (!weg) setLoading(false);
+      }
+    })();
+    return () => {
+      weg = true;
+    };
   }, [load]);
 
 
