@@ -34,7 +34,7 @@ export const maxDuration = 30;
  *  2. De projectmap moet al bestaan. Deze route maakt er nooit een aan: geen
  *     map betekent dat een adres anders gespeld staat, en een tweede map naast
  *     de echte verspreidt de stukken zonder dat iemand het merkt.
- *  3. Alleen beeld, en alleen in een submap uit een vaste lijst — zie
+ *  3. Alleen beeld (en in OUT/Video alleen video), en alleen in een submap uit een vaste lijst — zie
  *     lib/media-pad.ts. Die submap mag wel ontstaan, zoals "EP-Online" bij de
  *     andere route ook binnen de projectmap ontstaat.
  */
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
       {
         error:
           `submap moet bij ${soort} een van ${toegestaan.join(", ")} zijn en de bestandsnaam ` +
-          `een gewone beeldnaam — kreeg submap "${submap}"`,
+          `een gewone beeldnaam (in OUT/Video: een .mp4 of .mov) — kreeg submap "${submap}"`,
       },
       { status: 400 }
     );

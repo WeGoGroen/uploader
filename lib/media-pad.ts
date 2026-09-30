@@ -32,6 +32,11 @@ export const MEDIA_HOOFDMAP = "Automatie Media";
  * bewerkte foto's bij Imagen staan met "submap moet een van OUT/360,
  * OUT/360/review, out/Omgevingsfoto's zijn".
  *
+ * "OUT/Video" is de uitvoermap van de Video Edit Agent in het control center:
+ * die monteert de clips uit In/Raw/Video automatisch en zet de video hier neer.
+ * Het is de enige submap waar een video in mag, en er mag daar niets anders in
+ * — zie `magInSubmap` hieronder.
+ *
  * Alles onder de uitvoermap: dat is in deze mappenstructuur de afgesproken
  * scheiding tussen wat de opnemer aanlevert (In/Raw) en wat de bewerking
  * oplevert (OUT). De agent mag nooit in de invoermap schrijven — daar staan de
@@ -42,6 +47,7 @@ export const MEDIA_SUBMAPPEN = [
   "OUT/360",
   "OUT/360/review",
   "OUT/Photo's",
+  "OUT/Video",
   "out/Omgevingsfoto's",
 ] as const;
 
@@ -73,6 +79,12 @@ export type Schrijfsoort = "oplevering" | "aanlevering";
     daar: schrijft hij iets anders weg, dan klopt er iets niet en is weigeren
     beter dan het ergens neerzetten. */
 const BEELD = /\.(jpe?g|png|tiff?|webp|insp|heic|heif)$/i;
+
+/** Wat de videomontage oplevert. Alleen in OUT/Video — zie magInSubmap. */
+const VIDEO = /\.(mp4|mov)$/i;
+
+/** De ene submap waar video in hoort. */
+const VIDEO_SUBMAP = "out/video";
 
 /**
  * Is dit een projectmap onder de mediahoofdmap?
@@ -131,11 +143,24 @@ export function isAanleverSubmap(submap: string): submap is AanleverSubmap {
  * "vloer.jpg/../geheim.pdf" door de extensiecontrole glippen op de ".pdf" die
  * er na het opschonen niet eens meer staat.
  */
-export function mediaBestandsnaam(ruw: string): string | null {
+export function mediaBestandsnaam(ruw: string, submap = ""): string | null {
   const naam = sanitizePathSegment(ruw);
   if (naam.length < 5 || naam.length > 180) return null;
-  if (!BEELD.test(naam)) return null;
+  if (!magInSubmap(naam, submap)) return null;
   return naam;
+}
+
+/**
+ * Beeld waar beeld hoort, video waar video hoort.
+ *
+ * Twee lijsten in plaats van één ruimere: kwam .mp4 gewoon bij BEELD, dan kon
+ * de nadir-agent vanaf dat moment ook een video in OUT/360 zetten, en de
+ * montage een foto in OUT/Video. Geen van beide is ooit de bedoeling, en een
+ * verruiming die niemand opmerkt is precies wat deze grenzen moeten voorkomen.
+ */
+export function magInSubmap(naam: string, submap: string): boolean {
+  const isVideomap = submap.toLowerCase() === VIDEO_SUBMAP;
+  return isVideomap ? VIDEO.test(naam) : BEELD.test(naam);
 }
 
 /** Het volledige pad, of null als een van de drie delen niet deugt. */
@@ -150,7 +175,7 @@ export function mediaDoelPad(
   // zeggen — dat is geen formaliteit maar de plek waar die keuze zichtbaar is.
   const mag = soort === "aanlevering" ? isAanleverSubmap(submap) : isMediaSubmap(submap);
   if (!isMediaProjectmap(projectmap) || !mag) return null;
-  const naam = mediaBestandsnaam(bestandsnaam);
+  const naam = mediaBestandsnaam(bestandsnaam, submap);
   if (!naam) return null;
   return `${projectmap}/${submap}/${naam}`;
 }
