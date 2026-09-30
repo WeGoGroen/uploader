@@ -520,7 +520,9 @@ function MediataskCard({ status, onSaved }: { status: ConnectionStatus; onSaved:
             ? "Mediatask wijst dit token/deze URL af. Controleer beide velden."
             : data?.error === "unreachable"
               ? "Kon de basis-URL niet bereiken. Controleer of hij klopt (bv. https://wegogroen.apitome.io)."
-              : "Opslaan is mislukt. Probeer het opnieuw."
+              : data?.error === "invalid_base_url"
+                ? "Dit is geen Mediatask-adres. Gebruik het https-adres van Mediatask (bv. https://wegogroen.apitome.io)."
+                : "Opslaan is mislukt. Probeer het opnieuw."
         );
         return;
       }

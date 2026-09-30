@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { exchangeCodeForTokens, getCurrentAccount, storeRefreshToken } from "@/lib/dropbox";
 import { getOptionalRedis } from "@/lib/redis";
+import { escapeHtml, oauthStateKlopt, wisOAuthState } from "@/lib/oauth-state";
 
 /**
  * OAuth-callback: wisselt de code in voor een refresh-token en slaat die
@@ -23,16 +24,28 @@ function resultPage(body: string): NextResponse {
   );
 }
 
+function resultaat(body: string): NextResponse {
+  return wisOAuthState("dropbox", resultPage(body));
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
 
   if (error) {
-    return resultPage(`<h1>Dropbox-koppeling geannuleerd</h1><p>${error}</p>`);
+    return resultaat(`<h1>Dropbox-koppeling geannuleerd</h1><p>${escapeHtml(error)}</p>`);
   }
   if (!code) {
-    return resultPage(`<h1>Er ontbreekt een code</h1><p>Start opnieuw via /instellingen.</p>`);
+    return resultaat(`<h1>Er ontbreekt een code</h1><p>Start opnieuw via /instellingen.</p>`);
+  }
+  // Alleen een koppeling die in deze browser gestart is, via de knop achter
+  // de inlog. Anders kon iemand van buiten zijn eigen Dropbox hier laten
+  // opslaan als het account van het hele team.
+  if (!oauthStateKlopt("dropbox", request, url.searchParams.get("state"))) {
+    return resultaat(
+      `<h1>Koppeling niet herkend</h1><p>Deze koppeling is niet vanuit de app gestart, of het duurde te lang. Start opnieuw via <a href="/instellingen">Koppelingen</a>.</p>`
+    );
   }
 
   const clientId = process.env.DROPBOX_CLIENT_ID;
@@ -51,7 +64,7 @@ export async function GET(request: Request) {
     const account = await getCurrentAccount(tokens.accessToken);
 
     if (!tokens.refreshToken) {
-      return resultPage(
+      return resultaat(
         `<h1>Geen refresh-token ontvangen</h1>
          <p>Dropbox gaf deze keer geen refresh-token terug. Ga naar
          <a href="https://www.dropbox.com/account/connected_apps">dropbox.com/account/connected_apps</a>,
@@ -60,8 +73,8 @@ export async function GET(request: Request) {
     }
 
     if (!getOptionalRedis()) {
-      return resultPage(`
-        <h1>Dropbox gekoppeld als ${account.email}</h1>
+      return resultaat(`
+        <h1>Dropbox gekoppeld als ${escapeHtml(account.email)}</h1>
         <p>Er is nog geen Redis-opslag gekoppeld aan dit project, dus het
         token kan niet automatisch bewaard worden. Zet deze waarde in
         <code>.env.local</code> (lokaal) én als environment variable op
@@ -75,14 +88,14 @@ export async function GET(request: Request) {
 
     await storeRefreshToken(tokens.refreshToken);
 
-    return resultPage(`
-      <h1>Dropbox gekoppeld als ${account.email}</h1>
+    return resultaat(`
+      <h1>Dropbox gekoppeld als ${escapeHtml(account.email)}</h1>
       <p>Dropbox werkt nu voor het hele team — niemand hoeft hierna nog apart
       in te loggen.</p>
       <p><a href="/instellingen">← Terug naar Koppelingen</a></p>
     `);
   } catch (err) {
     console.error("Dropbox OAuth callback failed", err);
-    return resultPage(`<h1>Koppelen mislukt</h1><p>${String(err)}</p>`);
+    return resultaat(`<h1>Koppelen mislukt</h1><p>${escapeHtml(String(err))}</p>`);
   }
 }

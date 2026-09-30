@@ -1,4 +1,6 @@
 import { getOptionalRedis, requireRedis } from "@/lib/redis";
+// Tijdslimiet en herkansing bij 429 voor elke aanroep hieronder; zie lib/server-fetch.ts.
+import { serverFetch as fetch } from "@/lib/server-fetch";
 
 /**
  * SharePoint-koppeling via Microsoft Graph, als app — niet als persoon.
@@ -139,7 +141,9 @@ export const DEFAULT_SHAREPOINT_CONFIG: SharePointConfig = {
 export async function getSharePointConfig(): Promise<SharePointConfig> {
   const redis = getOptionalRedis();
   if (redis) {
-    const raw = await redis.get(CONFIG_KEY);
+    // Een hapering in Redis valt terug op de omgeving of de vaste standaard,
+    // in plaats van de hele SharePoint-overdracht stil te leggen.
+    const raw = await redis.get(CONFIG_KEY).catch(() => null);
     if (raw) {
       try {
         const parsed = JSON.parse(raw) as SharePointConfig;

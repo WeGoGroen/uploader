@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { addClickUpAccount, getAuthorizedUser, getClickUpAccounts, patchClickUpAccount } from "@/lib/clickup";
 import { getActiveAccountName } from "@/lib/active-account";
-import { isBeheerder } from "@/lib/sessie-server";
+import { huidigeSessie, isBeheerder } from "@/lib/sessie-server";
 
 /**
  * Wie er in de app werken (nooit tokens).
@@ -34,12 +34,28 @@ export async function GET() {
  * dus wisselen is uitloggen en opnieuw inloggen onder je eigen code.
  */
 export async function POST(request: Request) {
-  const body = (await request.json()) as {
+  const body = ((await request.json().catch(() => null)) ?? {}) as {
     name?: string;
     token?: string;
     avatar?: string | null;
     email?: string | null;
   };
+
+  /*
+    Alleen je eigen account, of als beheerder elk account.
+
+    De GET hierboven gaf een medewerker al alleen zichzelf terug, maar deze
+    POST controleerde niets: met een zelfgemaakte aanvraag kon iedereen het
+    mailadres of het ClickUp-token van een collega omzetten. De app zelf
+    stuurt hier alleen het eigen account heen (een medewerker ziet op de
+    gebruikerspagina alleen zichzelf), dus voor wie gewoon de app gebruikt
+    verandert er niets.
+  */
+  const sessie = await huidigeSessie();
+  const doel = body.name?.trim() ?? "";
+  if (!sessie || (sessie.rol !== "beheerder" && doel !== sessie.naam)) {
+    return NextResponse.json({ error: "niet_toegestaan" }, { status: 403 });
+  }
 
   // Alleen het mailadres bijwerken; token en avatar blijven ongewijzigd.
   if (body.email !== undefined && !body.token) {

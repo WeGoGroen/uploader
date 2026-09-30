@@ -38,3 +38,17 @@ describe("telOverdrachten", () => {
     expect(uit.ontbreekt).toEqual([]);
   });
 });
+
+import { sessiesleutelStaat } from "./health";
+
+describe("sessiesleutelStaat", () => {
+  it("fails without a key", () => {
+    expect(() => sessiesleutelStaat(undefined)).toThrow(/SESSION_SECRET ontbreekt/);
+    expect(() => sessiesleutelStaat("")).toThrow();
+  });
+
+  it("warns about a short key and accepts a long one", () => {
+    expect(sessiesleutelStaat("kort")).toMatch(/korter dan 32/);
+    expect(sessiesleutelStaat("x".repeat(40))).toBe("ingesteld");
+  });
+});

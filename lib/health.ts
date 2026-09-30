@@ -388,6 +388,8 @@ export async function draaiControles(): Promise<Gezondheidsrapport> {
       return `${mensen.length} account(s), allemaal met een eigen code`;
     }),
 
+    meet("Sessiesleutel", async () => sessiesleutelStaat(process.env.SESSION_SECRET)),
+
     meet("BAG (adressen)", async () => {
       const res = await suggestAddresses("Damrak 1, Amsterdam");
       if (res.length === 0) throw new Error("geen resultaten voor een bekend adres");
@@ -510,4 +512,22 @@ export function telOverdrachten(
     if (status) perStatus[status].push(stripStatusMarker(f.name));
   }
   return perStatus;
+}
+
+/**
+ * Staat de sleutel die de inlogsessies ondertekent goed?
+ *
+ * Ontbreekt SESSION_SECRET, dan valt de app terug op een vaste sleutel die in
+ * de broncode staat. Iedereen met die code kan dan een geldige sessie maken,
+ * ook als beheerder. Dat merkt niemand aan de app zelf; daarom hoort het in de
+ * ochtendcontrole.
+ */
+export function sessiesleutelStaat(sleutel: string | undefined): string {
+  if (!sleutel) {
+    throw new Error("SESSION_SECRET ontbreekt: sessies worden ondertekend met de vaste sleutel uit de code");
+  }
+  if (sleutel.length < 32) {
+    return `${LET_OP} SESSION_SECRET is korter dan 32 tekens (${sleutel.length})`;
+  }
+  return "ingesteld";
 }

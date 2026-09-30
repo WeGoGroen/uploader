@@ -2,6 +2,8 @@ import { getOptionalRedis } from "@/lib/redis";
 import { fetchProjectPhotos } from "@/lib/streetview";
 import { BIJLAGE_G_BESTANDSNAAM, bijlageGInhoud } from "@/lib/bijlage-g-sjabloon";
 import { mapnaamPastBijAdres, parseProjectFolderName } from "@/lib/projectmap-match";
+// Tijdslimiet en herkansing bij 429 voor elke aanroep hieronder; zie lib/server-fetch.ts.
+import { serverFetch as fetch } from "@/lib/server-fetch";
 
 const DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token";
 const REFRESH_TOKEN_KEY = "dropbox:refresh_token";
@@ -24,9 +26,9 @@ export interface DropboxAccount {
 // met "The string did not match the expected pattern." Dropbox schrijft zelf
 // voor om zulke tekens in de header-waarde te escapen als \uXXXX i.p.v. ze
 // letterlijk mee te sturen.
-function safeHeaderJson(value: unknown): string {
+export function safeHeaderJson(value: unknown): string {
   return JSON.stringify(value).replace(
-    /[-￿]/g,
+    /[\u007f-\uffff]/g,
     (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")
   );
 }
@@ -386,6 +388,18 @@ export async function createFolders(accessToken: string, paths: string[]): Promi
       if (data[".tag"] !== "in_progress") break;
     }
   }
+  // Mislukt: dan staan de mappen er niet, en dat hoort de aanroeper te weten.
+  // Hier werd stil teruggekeerd, en ging de rest verder alsof de mappen er
+  // waren. Nog bezig na tien rondes is iets anders: dat maakt Dropbox gewoon
+  // af, dus alleen loggen en doorgaan zoals voorheen.
+  if (data[".tag"] === "failed") {
+    throw new DropboxApiError(500, `Dropbox create_folder_batch mislukt: ${JSON.stringify(data).slice(0, 200)}`);
+  }
+  if (data[".tag"] === "in_progress") {
+    console.warn("[DROPBOX] create_folder_batch nog bezig na tien rondes; Dropbox maakt hem af", {
+      aantal: paths.length,
+    });
+  }
   // "complete" met per-map path/conflict-fouten is prima — die mappen
   // bestonden al van een eerdere opname op hetzelfde adres.
 }
@@ -432,6 +446,14 @@ export async function createFolder(accessToken: string, path: string): Promise<v
 }
 
 /** Uploadt een bestand naar Dropbox; overschrijft stilzwijgend als het al bestaat. */
+/** Stuurt een Buffer mee als body zonder hem eerst te kopiëren; bij blokken
+    van vele MB's scheelt dat een tweede kopie in het geheugen. Buffers uit
+    fs/readFile en Buffer.from staan nooit op een SharedArrayBuffer, dus de
+    cast klopt. */
+function zonderKopie(buf: Buffer): Uint8Array<ArrayBuffer> {
+  return new Uint8Array(buf.buffer as ArrayBuffer, buf.byteOffset, buf.byteLength);
+}
+
 export async function uploadFile(accessToken: string, path: string, content: Buffer): Promise<void> {
   const res = await fetch(`${DROPBOX_CONTENT_BASE}/files/upload`, {
     method: "POST",
@@ -440,7 +462,7 @@ export async function uploadFile(accessToken: string, path: string, content: Buf
       "Content-Type": "application/octet-stream",
       "Dropbox-API-Arg": safeHeaderJson({ path, mode: "overwrite", autorename: false, mute: true }),
     },
-    body: new Uint8Array(content),
+    body: zonderKopie(content),
   });
   if (res.ok) return;
   const body = await res.text().catch(() => "");
@@ -512,7 +534,7 @@ export async function startUploadSession(accessToken: string, chunk: Buffer): Pr
       "Content-Type": "application/octet-stream",
       "Dropbox-API-Arg": safeHeaderJson({ close: false }),
     },
-    body: new Uint8Array(chunk),
+    body: zonderKopie(chunk),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -539,7 +561,7 @@ export async function appendUploadSession(
       "Content-Type": "application/octet-stream",
       "Dropbox-API-Arg": safeHeaderJson({ cursor: { session_id: sessionId, offset }, close }),
     },
-    body: new Uint8Array(chunk),
+    body: zonderKopie(chunk),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -564,7 +586,7 @@ export async function finishUploadSession(
         commit: { path, mode: "overwrite", autorename: false, mute: true },
       }),
     },
-    body: new Uint8Array(chunk),
+    body: zonderKopie(chunk),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -945,13 +967,6 @@ export async function getMetadata(
   throw new DropboxApiError(res.status, `Dropbox get_metadata failed: ${res.status} ${body}`);
 }
 
-/** Directe download-link (i.p.v. de Dropbox-voorbeeldpagina) voor externe
-    diensten zoals Mediatask die zelf het bestand ophalen via een URL. */
-function toDirectDownloadUrl(shareUrl: string): string {
-  if (/[?&]dl=0\b/.test(shareUrl)) return shareUrl.replace(/dl=0\b/, "dl=1");
-  return shareUrl.includes("?") ? `${shareUrl}&dl=1` : `${shareUrl}?dl=1`;
-}
-
 /**
  * Een tijdelijke link naar één bestand: vier uur geldig, geen blijvend spoor.
  *
@@ -1019,16 +1034,6 @@ export async function getFolderLinkWithCount(
   const files = await listFolderFiles(accessToken, folderPath);
   if (files.length === 0) return null;
   return { url: await getOrCreateSharedLink(accessToken, folderPath), count: files.length };
-}
-
-export async function getFileDirectLinks(accessToken: string, folderPath: string): Promise<string[]> {
-  const files = await listFolderFiles(accessToken, folderPath);
-  const links: string[] = [];
-  for (const file of files) {
-    const url = await getOrCreateSharedLink(accessToken, `${folderPath}/${file.name}`);
-    links.push(toDirectDownloadUrl(url));
-  }
-  return links;
 }
 
 /** Downloadt de ruwe inhoud van een bestand — gebruikt om Dropbox-bestanden
@@ -1835,7 +1840,17 @@ export async function archiveerProjectmappen(
       }
       const stand = (await check.json()) as Antwoord;
       if (stand[".tag"] === "complete") klaar = stand;
+      // De hele opdracht mislukt (bv. too_many_write_operations). Die herkende
+      // deze lus niet, dus hij pollde door tot de tijd op was en meldde dan
+      // "loopt nog", terwijl er niets meer liep.
+      if (stand[".tag"] === "failed") {
+        for (const t of groep) {
+          mislukt.push({ pad: t.van, reden: `batch mislukt: ${JSON.stringify(stand).slice(0, 160)}` });
+        }
+        break;
+      }
     }
+    if (!klaar && mislukt.some((m) => groep.some((t) => t.van === m.pad))) continue;
 
     if (!klaar?.entries) {
       // Nog niet af binnen onze tijd. De opdracht staat bij Dropbox en loopt

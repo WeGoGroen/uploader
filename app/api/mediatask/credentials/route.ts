@@ -1,13 +1,22 @@
 import { NextResponse } from "next/server";
-import { saveMediataskCredentials } from "@/lib/mediatask";
+import {
+  getStoredMediataskCredentials,
+  isToegestaneMediataskUrl,
+  saveMediataskCredentials,
+} from "@/lib/mediatask";
 
 /** Handmatige invoer van het Mediatask-token/basis-URL via Koppelingen. */
 export async function POST(request: Request) {
-  const body = (await request.json()) as { token?: string; baseUrl?: string };
+  const body = ((await request.json().catch(() => null)) ?? {}) as { token?: string; baseUrl?: string };
   const token = body.token?.trim();
   const baseUrl = body.baseUrl?.trim().replace(/\/$/, "");
   if (!token || !baseUrl) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
+  }
+  // Vóór de eerste aanroep: anders gaat het token al mee naar dat adres.
+  const bekend = [process.env.MEDIATASK_API_BASE, (await getStoredMediataskCredentials().catch(() => null))?.baseUrl];
+  if (!isToegestaneMediataskUrl(baseUrl, bekend)) {
+    return NextResponse.json({ error: "invalid_base_url" }, { status: 400 });
   }
 
   try {

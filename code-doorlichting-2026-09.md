@@ -25,6 +25,38 @@ stand van `main` op 29 september 2026 (commit `26468ba`).
   de SharePoint-status uit Redis).
 - Onderhoud: de 10 lint-fouten zijn weg en lint is blokkerend in CI; er is een
   `.env.example` met alle variabelen.
+- Ronde "niet merkbaar voor medewerkers":
+  - OAuth-koppelingen (Dropbox en Google) controleren nu een willekeurige
+    `state` uit een cookie. De Google-koppeling leest het account uit de
+    sessie in plaats van uit de URL, en de uitkomstpagina's escapen alle
+    tekst.
+  - `/api/health/laatste` vereist een sessie of een interne aanroep.
+  - Een ClickUp-account toevoegen kan alleen voor jezelf, tenzij je beheerder
+    bent.
+  - Het Mediatask-adres moet een `apitome.io`-host zijn, of dezelfde host als
+    een bekend adres, voordat er iets wordt opgehaald.
+  - Accountlijst en koppelingen schrijven onder een Redis-slot met een
+    strikte leesactie. Daarmee is een echte fout weg: een leeshapering gaf
+    een lege lijst terug, en de volgende schrijfactie wiste dan alle
+    ClickUp-accounts.
+  - Alle uitgaande API-aanroepen lopen via `serverFetch`: een time-out van
+    60 s (niet voor de grote uploads) en maximaal 2 herhalingen bij een 429.
+  - Een mislukte Dropbox-batch (mappen aanmaken, archiveren) wordt niet meer
+    als gelukt gezien.
+  - De statuscontrole meldt een ontbrekende of te korte `SESSION_SECRET`.
+  - Opruimwerk:
+    - Dode `getFileDirectLinks` is weg.
+    - Header-escaping gebruikt leesbare `\uXXXX`-reeksen in plaats van
+      onzichtbare tekens.
+    - Upload-blokken gaan zonder extra geheugenkopie mee.
+    - Er zijn tests voor de padfuncties.
+  - Bewust niet gedaan, omdat dit wel een klein risico geeft:
+    - Padcontrole op de Dropbox-gebruikersroutes.
+    - Productrechten op de server.
+    - Padcontrole op de interne routes (eerst nagaan wat het Business Control
+      Center aanroept).
+    - Samenvoegen van de `list_folder`-lussen levert medewerkers niets op en
+      raakt veel code.
 
 ---
 

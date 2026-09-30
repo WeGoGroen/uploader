@@ -1,4 +1,6 @@
 import { getOptionalRedis, requireRedis } from "@/lib/redis";
+// Tijdslimiet en herkansing bij 429 voor elke aanroep hieronder; zie lib/server-fetch.ts.
+import { serverFetch as fetch } from "@/lib/server-fetch";
 
 // Cliënt voor de Apitome/Mediatask-API — gebruikt om NEN2580-opnames
 // (foto's + plattegronden) automatisch als order aan te leveren. Zelfde
@@ -91,7 +93,9 @@ const MEDIATASK_CREDENTIALS_KEY = "mediatask:credentials";
 export async function getStoredMediataskCredentials(): Promise<{ token: string; baseUrl: string } | null> {
   const redis = getOptionalRedis();
   if (!redis) return null;
-  const raw = await redis.get(MEDIATASK_CREDENTIALS_KEY);
+  // Een hapering in Redis mag Mediatask niet platleggen: dan terug naar de
+  // omgevingsvariabelen, zoals ClickUp dat al deed.
+  const raw = await redis.get(MEDIATASK_CREDENTIALS_KEY).catch(() => null);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as { token?: string; baseUrl?: string };
@@ -100,6 +104,34 @@ export async function getStoredMediataskCredentials(): Promise<{ token: string; 
   } catch {
     return null;
   }
+}
+
+/**
+ * Mag de app zijn Mediatask-tokens naar dit adres sturen?
+ *
+ * Het adres komt uit een vrij veld op de Koppelingen-pagina en wordt daarna
+ * voor élke Mediatask-aanroep gebruikt, met het gedeelde token en de
+ * persoonlijke tokens van het team erbij. Een willekeurig adres invullen was
+ * dus genoeg om die tokens naar een eigen server te laten sturen. Alleen https
+ * en alleen Mediatask (apitome.io), of een host die al in gebruik is.
+ */
+export function isToegestaneMediataskUrl(adres: string, bekendeAdressen: (string | null | undefined)[] = []): boolean {
+  let url: URL;
+  try {
+    url = new URL(adres);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.username || url.password) return false;
+  const host = url.hostname.toLowerCase();
+  if (host === "apitome.io" || host.endsWith(".apitome.io")) return true;
+  return bekendeAdressen.some((b) => {
+    try {
+      return !!b && new URL(b).hostname.toLowerCase() === host;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export async function saveMediataskCredentials(token: string, baseUrl: string): Promise<void> {
