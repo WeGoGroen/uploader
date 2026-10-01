@@ -1,14 +1,20 @@
 import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
-import { createTemporaryUploadLink, deleteFile, getSharedAccessToken } from "@/lib/dropbox";
+import { createTemporaryUploadLink, deleteFile, getSharedAccessToken, getTemporaryLink } from "@/lib/dropbox";
 import { bibliotheekPad, uploadPad } from "@/lib/bibliotheek-pad";
 
 export const maxDuration = 30;
 
 /**
  * Omgevingsfoto's in de Master B-roll Library beheren vanuit het control
- * center: nieuwe foto's zetten (POST) en foto's verwijderen (DELETE). De
- * grenzen staan in lib/bibliotheek-pad.ts.
+ * center: nieuwe foto's zetten (POST), foto's verwijderen (DELETE) en één
+ * foto ophalen (GET). De grenzen staan in lib/bibliotheek-pad.ts.
+ *
+ * GET geeft een tijdelijke downloadlink voor precies dat ene bestand. Dat is
+ * wat de klantpagina nodig heeft voor "download": met /api/intern/
+ * opleverbestanden moest daarvoor de hele map worden opgelijst, met een link
+ * per bestand — bij twintig foto's uit twintig mappen zijn dat honderden
+ * verzoeken aan Dropbox.
  *
  * POST geeft een uploadlink voor precies dat ene pad; de bytes gaan buiten
  * deze server om (een foto is tot dertig megabyte, een verzoeklichaam hier
@@ -47,6 +53,24 @@ export async function POST(request: Request) {
       { error: err instanceof Error ? err.message.slice(0, 200) : "uploadlink maken mislukt" },
       { status: 502 }
     );
+  }
+}
+
+export async function GET(request: Request) {
+  if (!isInternRequest(request)) return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
+  const relatief = new URL(request.url).searchParams.get("pad") ?? "";
+  const pad = bibliotheekPad(relatief);
+  if (!pad) {
+    return NextResponse.json({ error: `alleen een beeldbestand in de bibliotheek — kreeg "${relatief}"` }, { status: 400 });
+  }
+  const t = await token();
+  if (typeof t !== "string") return t;
+  try {
+    return NextResponse.json({ ok: true, link: await getTemporaryLink(t, pad), pad });
+  } catch (err) {
+    const melding = err instanceof Error ? err.message.slice(0, 200) : "link maken mislukt";
+    // Een foto die er niet (meer) staat is geen storing van Dropbox.
+    return NextResponse.json({ error: melding }, { status: /\b(404|409)\b/.test(melding) ? 404 : 502 });
   }
 }
 
