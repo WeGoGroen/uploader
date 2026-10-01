@@ -207,6 +207,33 @@ describe("de aanlevermap", () => {
   });
 });
 
+describe("OUT/Video — de montage van de Video Edit Agent", () => {
+  const adres = "/Automatie Media/Dam 5, Amsterdam";
+
+  it("laat een video toe in OUT/Video, in welke schrijfwijze ook", () => {
+    expect(mediaDoelPad(adres, "OUT/Video", "Dam 5, Amsterdam.mp4")).toBe(
+      `${adres}/OUT/Video/Dam 5, Amsterdam.mp4`
+    );
+    expect(mediaDoelPad(adres, "out/video", "montage.MOV")).toBe(`${adres}/out/video/montage.MOV`);
+  });
+
+  it("laat in OUT/Video geen foto of iets anders toe", () => {
+    expect(mediaDoelPad(adres, "OUT/Video", "still.jpg")).toBeNull();
+    expect(mediaDoelPad(adres, "OUT/Video", "rapport.pdf")).toBeNull();
+  });
+
+  it("laat een video nergens anders toe", () => {
+    // Anders mag de nadir-agent ook video in OUT/360 zetten, en dat is nooit de bedoeling.
+    expect(mediaDoelPad(adres, "OUT/360", "rondgang.mp4")).toBeNull();
+    expect(mediaDoelPad(adres, "OUT/Photo's", "clip.mov")).toBeNull();
+  });
+
+  it("laat de invoermap van de video niet toe", () => {
+    expect(isMediaSubmap("In/Raw/Video")).toBe(false);
+    expect(isMediaSubmap("in/Video")).toBe(false);
+  });
+});
+
 describe("mediaVrijgeefPaden", () => {
   it("schuift een gekeurd bestand van de wachtmap naar OUT/360, onder dezelfde naam", () => {
     expect(mediaVrijgeefPaden("/Automatie Media/Dam 5, Amsterdam", "Woestduin 360-3.jpg")).toEqual({
