@@ -8,8 +8,9 @@
  *
  * De routes onder /api/intern geven geen bestanden terug. De meeste lezen
  * alleen; de paar die schrijven (overdracht, archiveren, deellink,
- * bestand-plaatsen) doen dat uitsluitend binnen een projectmap die al bestaat,
- * en maken er nooit zelf een aan.
+ * bestand-plaatsen) doen dat uitsluitend binnen een projectmap die al bestaat.
+ * Alleen media-projectmap en projectmap/aanmaken maken een map aan, en dan via
+ * ensureProjectFolder en pas nadat er geen bestaande map gevonden is.
  */
 export function isInternRequest(request: Request): boolean {
   const token = process.env.CONTROL_CENTER_TOKEN;
