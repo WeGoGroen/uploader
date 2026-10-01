@@ -46,10 +46,27 @@ export const MEDIA_HOOFDMAP = "Automatie Media";
 export const MEDIA_SUBMAPPEN = [
   "OUT/360",
   "OUT/360/review",
+  "OUT/_controle/360",
   "OUT/Photo's",
   "OUT/Video",
   "out/Omgevingsfoto's",
 ] as const;
+
+/**
+ * De wachtmap van de 360-eindcontrole, en waar een goedgekeurd bestand heen gaat.
+ *
+ * Tot 1 oktober zette de nadiragent elk resultaat meteen in OUT/360 en keurde
+ * hij het daarna pas. Wie de map opende zag dus ook wat nog nagekeken werd, of
+ * wat later werd afgekeurd — op Woestduin en Mary van der Sluis stonden zo
+ * nadirs met een verzonnen kleed tussen het goede werk. Nu landt het resultaat
+ * eerst hier, en schuift het pas door na een goedkeuring (van de agent of van
+ * iemand met de hand), via /api/intern/media-vrijgeven.
+ *
+ * Buiten OUT/360 en niet als submap ervan: een deellink van OUT/360 neemt zijn
+ * submappen mee, en dan zou de klant de wachtmap gewoon kunnen openen.
+ */
+export const CONTROLE_SUBMAP = "OUT/_controle/360";
+export const VRIJGEGEVEN_SUBMAP = "OUT/360";
 
 export type MediaSubmap = (typeof MEDIA_SUBMAPPEN)[number];
 
@@ -178,4 +195,22 @@ export function mediaDoelPad(
   const naam = mediaBestandsnaam(bestandsnaam, submap);
   if (!naam) return null;
   return `${projectmap}/${submap}/${naam}`;
+}
+
+/**
+ * Van de wachtmap naar de uitvoermap: de twee paden, of null als het niet mag.
+ *
+ * Eén vast paar en geen vrije van/naar. Een verplaatsing met vrije paden is
+ * een schrijf- én wisrecht op elke map onder Automatie Media; deze kan alleen
+ * dit ene ding: een gekeurd bestand onder dezelfde naam één map opschuiven,
+ * binnen hetzelfde adres.
+ */
+export function mediaVrijgeefPaden(
+  projectmap: string,
+  bestandsnaam: string
+): { van: string; naar: string } | null {
+  const van = mediaDoelPad(projectmap, CONTROLE_SUBMAP, bestandsnaam);
+  const naar = mediaDoelPad(projectmap, VRIJGEGEVEN_SUBMAP, bestandsnaam);
+  if (!van || !naar) return null;
+  return { van, naar };
 }

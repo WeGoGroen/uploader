@@ -5,6 +5,7 @@ import {
   isMediaSubmap,
   mediaBestandsnaam,
   mediaDoelPad,
+  mediaVrijgeefPaden,
 } from "@/lib/media-pad";
 
 /**
@@ -230,5 +231,30 @@ describe("OUT/Video — de montage van de Video Edit Agent", () => {
   it("laat de invoermap van de video niet toe", () => {
     expect(isMediaSubmap("In/Raw/Video")).toBe(false);
     expect(isMediaSubmap("in/Video")).toBe(false);
+  });
+});
+
+describe("mediaVrijgeefPaden", () => {
+  it("schuift een gekeurd bestand van de wachtmap naar OUT/360, onder dezelfde naam", () => {
+    expect(mediaVrijgeefPaden("/Automatie Media/Dam 5, Amsterdam", "Woestduin 360-3.jpg")).toEqual({
+      van: "/Automatie Media/Dam 5, Amsterdam/OUT/_controle/360/Woestduin 360-3.jpg",
+      naar: "/Automatie Media/Dam 5, Amsterdam/OUT/360/Woestduin 360-3.jpg",
+    });
+  });
+
+  it("weigert een projectmap buiten Automatie Media", () => {
+    // Anders is dit een verplaats-en-wisrecht op elke map in de Dropbox.
+    expect(mediaVrijgeefPaden("/Automatie Energielabels/Dam 5, Amsterdam", "a.jpg")).toBeNull();
+    expect(mediaVrijgeefPaden("/Automatie Media/../Automatie Energielabels", "a.jpg")).toBeNull();
+  });
+
+  it("weigert alles wat geen beeld is, en namen die de map uit willen", () => {
+    expect(mediaVrijgeefPaden("/Automatie Media/Dam 5, Amsterdam", "rapport.pdf")).toBeNull();
+    expect(mediaVrijgeefPaden("/Automatie Media/Dam 5, Amsterdam", "a.jpg/../b.pdf")).toBeNull();
+  });
+
+  it("de wachtmap ligt buiten OUT/360, zodat een deellink van OUT/360 hem niet meeneemt", () => {
+    const paden = mediaVrijgeefPaden("/Automatie Media/Dam 5, Amsterdam", "a.jpg");
+    expect(paden?.van.startsWith("/Automatie Media/Dam 5, Amsterdam/OUT/360/")).toBe(false);
   });
 });
