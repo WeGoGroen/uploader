@@ -1,3 +1,5 @@
+// Tijdslimiet en herkansing bij 429 voor elke aanroep hieronder; zie lib/server-fetch.ts.
+import { serverFetch as fetch } from "@/lib/server-fetch";
 /**
  * Verstuurt meldingen per mail via Resend. Bewust zonder extra pakket: het is
  * één HTTP-aanroep, dus een SDK zou alleen gewicht toevoegen.

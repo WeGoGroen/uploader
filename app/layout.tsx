@@ -6,6 +6,7 @@ import { huidigeSessie } from "@/lib/sessie-server";
 import RechtenProvider from "@/components/RechtenProvider";
 import LocationPermission from "@/components/LocationPermission";
 import UploadResume from "@/components/UploadResume";
+import SchermWakker from "@/components/SchermWakker";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -43,8 +44,15 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <LocationPermission />
-        <UploadResume />
         <RechtenProvider rechten={rechten} naam={sessie?.naam ?? null}>
+          {/*
+            Binnen de provider, niet ervoor. UploadResume leest de rechten om
+            alleen werk te tonen dat je mag hervatten; buiten de provider kreeg
+            hij de standaardwaarde "nergens recht op" en filterde hij alles
+            weg. De melding verscheen daardoor nooit meer.
+          */}
+          <UploadResume />
+          <SchermWakker />
           <div className="shell">
             <Sidebar rechten={rechten} />
             <div className="main">{children}</div>

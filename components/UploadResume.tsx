@@ -12,6 +12,7 @@ import {
   subscribe,
   type UploadTask,
 } from "@/lib/upload-queue";
+import { adresUitPad, opnameHref, soortUitPad } from "@/lib/upload-overview";
 
 /**
  * Pakt bij het openen van de app uploads op die bij een vorige sessie zijn
@@ -26,24 +27,7 @@ import {
  * weggeklikt worden.
  */
 
-/** "/Automatie NEN2580/Damrak 1, Amsterdam" → "Damrak 1, Amsterdam". */
-function addressFromPath(folderPath: string): string {
-  const parts = folderPath.split("/").filter(Boolean);
-  return parts[parts.length - 1] ?? folderPath;
-}
-
-/** Waar de opname bij dit bestand vandaan komt, zodat je erheen kunt klikken. */
-function opnameLink(folderPath: string): string {
-  const adres = addressFromPath(folderPath);
-  const basis = /NEN/i.test(folderPath) ? "/nen" : "/energielabel";
-  return `${basis}?addr=${encodeURIComponent(adres)}`;
-}
-
 export default function UploadResume() {
-  // Op het dashboard staat dezelfde lijst al als vaste kolom ("Nog af te
-  // maken"), inclusief voortgang en dezelfde knop. Twee keer hetzelfde tonen
-  // levert alleen de vraag op welke van de twee je moet gebruiken — en de
-  // zwevende melding dekt daar bovendien de pagina af.
   // Op het dashboard én op de mediapagina staat dezelfde lijst al ín de
   // pagina, mét voortgang en dezelfde knop. Twee keer hetzelfde tonen levert
   // alleen de vraag op welke van de twee je moet gebruiken — en de zwevende
@@ -77,8 +61,7 @@ export default function UploadResume() {
     formulier waar hij niet mag komen: klikken eindigt dan op de omleiding
     terug naar het dashboard.
   */
-  const magHervatten = (folderPath: string) =>
-    /NEN/i.test(folderPath) ? rechten.nen : /Media/i.test(folderPath) ? rechten.media : rechten.energielabel;
+  const magHervatten = (folderPath: string) => rechten[soortUitPad(folderPath)];
   const tasks = allTasks.filter((t) => ids.includes(t.id) && magHervatten(t.folderPath));
   const busy = tasks.some((t) => t.dropbox === "uploading");
   const failed = tasks.filter((t) => t.dropbox === "error");
@@ -137,9 +120,11 @@ export default function UploadResume() {
         {tasks.map((t: UploadTask) => (
           <li key={t.id}>
             {/* Het adres brengt je naar de opname zelf — eerder was er geen
-                enkele weg terug vanuit deze melding. */}
-            <a className="resume-panel-addr" href={opnameLink(t.folderPath)}>
-              {addressFromPath(t.folderPath)}
+                enkele weg terug vanuit deze melding. Een media-upload ging
+                daarbij naar het energielabelscherm: de link kende alleen NEN
+                en energielabel. */}
+            <a className="resume-panel-addr" href={opnameHref(t.folderPath)}>
+              {adresUitPad(t.folderPath)}
             </a>
             <span className="resume-panel-file">
               {t.folder} · {t.name}

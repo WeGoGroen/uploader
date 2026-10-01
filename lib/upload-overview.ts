@@ -76,10 +76,23 @@ export function adresUitPad(folderPath: string): string {
   return delen[delen.length - 1] ?? folderPath;
 }
 
+/**
+ * Welk product bij een Dropbox-pad hoort, op grond van de hoofdmap.
+ *
+ * Alleen de hoofdmap telt. Dit zocht eerst naar "NEN" in het hele pad, en dan
+ * was een media-opname aan de Nenijstraat ineens NEN2580-werk: verkeerd
+ * scherm achter de link, en het verkeerde recht om hem te mogen zien.
+ */
 export function soortUitPad(folderPath: string): Soort {
-  if (/NEN/i.test(folderPath)) return "nen";
-  if (/Automatie Media/i.test(folderPath)) return "media";
+  const hoofdmap = (folderPath.split("/").filter(Boolean)[0] ?? "").toLowerCase();
+  if (hoofdmap === "automatie media") return "media";
+  if (hoofdmap.startsWith("automatie nen")) return "nen";
   return "energielabel";
+}
+
+/** Het scherm waar je met dit adres verdergaat, bv. "/media?addr=Dam%205%2C%20Amsterdam". */
+export function opnameHref(folderPath: string): string {
+  return `${PRODUCT_BASIS[soortUitPad(folderPath)]}?addr=${encodeURIComponent(adresUitPad(folderPath))}`;
 }
 
 /**

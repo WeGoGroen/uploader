@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bouwOpenstaand,
   gemiddeldPct,
+  opnameHref,
   soortUitPad,
   taakHoortBij,
   type OverzichtDraft,
@@ -189,6 +190,21 @@ describe("producten en gebruikers", () => {
     expect(soortUitPad("/Automatie Media/Dam 5, Amsterdam")).toBe("media");
     expect(soortUitPad("/Automatie NEN2580/Dam 5, Amsterdam")).toBe("nen");
     expect(soortUitPad("/Automatie Energielabels/Dam 5, Amsterdam")).toBe("energielabel");
+  });
+
+  it("looks only at the root folder, not at the address", () => {
+    expect(soortUitPad("/Automatie Media/Nenijstraat 1, Utrecht")).toBe("media");
+    expect(soortUitPad("/Automatie Energielabels/Nenijstraat 1, Utrecht")).toBe("energielabel");
+    expect(soortUitPad("/Automatie NEN2580/Afgerond/Mediapark 2, Hilversum")).toBe("nen");
+    expect(soortUitPad("/automatie media/Dam 5, Amsterdam")).toBe("media");
+  });
+
+  it("links every product to its own screen", () => {
+    expect(opnameHref("/Automatie Media/Dam 5, Amsterdam")).toBe("/media?addr=Dam%205%2C%20Amsterdam");
+    expect(opnameHref("/Automatie NEN2580/Dam 5, Amsterdam")).toBe("/nen?addr=Dam%205%2C%20Amsterdam");
+    expect(opnameHref("/Automatie Energielabels/Afgerond/Dam 5, Amsterdam")).toBe(
+      "/energielabel?addr=Dam%205%2C%20Amsterdam"
+    );
   });
 
   it("routes a media upload to the media page", () => {

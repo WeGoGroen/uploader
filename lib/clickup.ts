@@ -1,4 +1,6 @@
-import { getOptionalRedis, requireRedis } from "@/lib/redis";
+import { getOptionalRedis, metSlot, requireRedis } from "@/lib/redis";
+// Tijdslimiet en herkansing bij 429 voor elke aanroep hieronder; zie lib/server-fetch.ts.
+import { serverFetch as fetch } from "@/lib/server-fetch";
 
 const CLICKUP_API_BASE = "https://api.clickup.com/api/v2";
 
@@ -213,9 +215,27 @@ export async function getClickUpAccounts(): Promise<ClickUpAccount[]> {
  */
 export async function addClickUpAccount(account: ClickUpAccount): Promise<void> {
   const redis = requireRedis();
-  const current = await extraAccounts();
-  const next = [...current.filter((a) => a.name !== account.name), account];
-  await redis.set(EXTRA_ACCOUNTS_KEY, JSON.stringify(next));
+  await metSlot(redis, EXTRA_ACCOUNTS_KEY, async () => {
+    const current = await extraAccountsStrikt(redis);
+    const next = [...current.filter((a) => a.name !== account.name), account];
+    await redis.set(EXTRA_ACCOUNTS_KEY, JSON.stringify(next));
+  });
+}
+
+/**
+ * De accounts uit Redis om te wijzigen, zonder terugval.
+ *
+ * extraAccounts() geeft bij een hapering een lege lijst, en dat is goed voor
+ * het inlogscherm. Maar wie daarna één account terugschreef, schreef een
+ * lijst met alléén dat account weg: alle andere accounts waren dan uit Redis
+ * verdwenen. Bij wijzigen dus liever een fout dan een lege lijst.
+ */
+async function extraAccountsStrikt(redis: ReturnType<typeof requireRedis>): Promise<ClickUpAccount[]> {
+  const raw = await redis.get(EXTRA_ACCOUNTS_KEY);
+  if (!raw) return [];
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) throw new Error("De accountlijst in Redis is onleesbaar; er is niets gewijzigd.");
+  return parsed as ClickUpAccount[];
 }
 
 /**
@@ -228,11 +248,13 @@ export async function addClickUpAccount(account: ClickUpAccount): Promise<void> 
  */
 export async function verwijderAccount(naam: string): Promise<boolean> {
   const redis = requireRedis();
-  const huidig = await extraAccounts();
-  const over = huidig.filter((a) => a.name !== naam);
-  if (over.length !== huidig.length) {
-    await redis.set(EXTRA_ACCOUNTS_KEY, JSON.stringify(over));
-  }
+  await metSlot(redis, EXTRA_ACCOUNTS_KEY, async () => {
+    const huidig = await extraAccountsStrikt(redis);
+    const over = huidig.filter((a) => a.name !== naam);
+    if (over.length !== huidig.length) {
+      await redis.set(EXTRA_ACCOUNTS_KEY, JSON.stringify(over));
+    }
+  });
   // Ook als hij niet in Redis stond kan hij uit de omgeving komen; dan is er
   // niets verwijderd en hoort de beller dat te weten.
   return !envAccounts().some((a) => a.name === naam);
@@ -241,8 +263,12 @@ export async function verwijderAccount(naam: string): Promise<boolean> {
 /**
  * Werkt een deel van een account bij (bv. alleen de avatar, of alleen het
  * token) zonder de rest te verliezen. Een account dat alleen via
- * CLICKUP_ACCOUNTS bestaat, krijgt zo een Redis-override met dezelfde naam —
- * getClickUpAccounts() laat die override altijd winnen van de env-versie.
+ * CLICKUP_ACCOUNTS bestaat, krijgt zo een Redis-override met dezelfde naam.
+ * Die wint van de env-versie, behalve het token: daar wint de omgeving (zie
+ * getClickUpAccounts).
+ *
+ * Lezen en schrijven gebeuren onder één slot, zodat twee wijzigingen tegelijk
+ * (code en foto) elkaar niet overschrijven.
  */
 export async function patchClickUpAccount(patch: {
   name: string;
@@ -257,24 +283,35 @@ export async function patchClickUpAccount(patch: {
   codeKlaar?: string | null;
   mediataskToken?: string;
 }): Promise<void> {
-  const current = await getClickUpAccounts();
-  const existing = current.find((a) => a.name === patch.name);
-  // Zonder token kan iemand geen ClickUp-taak aanmaken en dus geen
-  // energielabel doen. Voor NEN2580 en media is dat niet nodig, dus een
-  // account mag bestaan met een leeg token — het recht op energielabel wordt
-  // dan geweigerd in plaats van de hele uitnodiging.
-  const token = patch.token ?? existing?.token ?? "";
-  await addClickUpAccount({
-    name: patch.name,
-    token,
-    avatar: patch.avatar === null ? undefined : patch.avatar ?? existing?.avatar,
-    email: patch.email === null ? undefined : patch.email ?? existing?.email,
-    rechten: patch.rechten ?? existing?.rechten,
-    rol: patch.rol ?? existing?.rol,
-    codeHash: patch.codeHash ?? existing?.codeHash,
-    codeSalt: patch.codeSalt ?? existing?.codeSalt,
-    codeKlaar: patch.codeKlaar === null ? undefined : patch.codeKlaar ?? existing?.codeKlaar,
-    mediataskToken: patch.mediataskToken ?? existing?.mediataskToken,
+  const redis = requireRedis();
+  await metSlot(redis, EXTRA_ACCOUNTS_KEY, async () => {
+    const uitRedis = await extraAccountsStrikt(redis);
+    // Zelfde samenvoeging als getClickUpAccounts, maar op de strikt gelezen
+    // Redis-lijst, zodat een hapering niet als "geen accounts" telt.
+    const opNaam = new Map<string, ClickUpAccount>();
+    for (const a of [...envAccounts(), ...uitRedis]) opNaam.set(a.name, a);
+    const existing = opNaam.get(patch.name);
+    // Zonder token kan iemand geen ClickUp-taak aanmaken en dus geen
+    // energielabel doen. Voor NEN2580 en media is dat niet nodig, dus een
+    // account mag bestaan met een leeg token — het recht op energielabel wordt
+    // dan geweigerd in plaats van de hele uitnodiging.
+    const token = patch.token ?? existing?.token ?? "";
+    const bijgewerkt: ClickUpAccount = {
+      name: patch.name,
+      token,
+      avatar: patch.avatar === null ? undefined : patch.avatar ?? existing?.avatar,
+      email: patch.email === null ? undefined : patch.email ?? existing?.email,
+      rechten: patch.rechten ?? existing?.rechten,
+      rol: patch.rol ?? existing?.rol,
+      codeHash: patch.codeHash ?? existing?.codeHash,
+      codeSalt: patch.codeSalt ?? existing?.codeSalt,
+      codeKlaar: patch.codeKlaar === null ? undefined : patch.codeKlaar ?? existing?.codeKlaar,
+      mediataskToken: patch.mediataskToken ?? existing?.mediataskToken,
+    };
+    await redis.set(
+      EXTRA_ACCOUNTS_KEY,
+      JSON.stringify([...uitRedis.filter((a) => a.name !== patch.name), bijgewerkt])
+    );
   });
 }
 

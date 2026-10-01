@@ -6,7 +6,9 @@ import {
   gewicht,
   magOpnieuw,
   sessieOnbruikbaar,
+  teHerstellen,
   wachttijd,
+  type UploadTask,
 } from "./upload-queue";
 
 const MB = 1024 * 1024;
@@ -139,5 +141,64 @@ describe("wachttijd", () => {
     for (let poging = 1; poging <= 12; poging++) {
       expect(wachttijd(poging, null)).toBeLessThanOrEqual(30_000);
     }
+  });
+});
+
+/**
+ * Wat er vanzelf opnieuw gaat als het netwerk terugkomt. Te ruim is een video
+ * van 800MB die bij elke keer ontgrendelen weer over de lijn gaat; te krap is
+ * een opnemer die in de kelder niet merkt dat zijn foto's nooit aankwamen.
+ */
+describe("teHerstellen", () => {
+  const t = (p: Partial<UploadTask> & { id: string }): UploadTask => ({
+    folderPath: "/Automatie Media/Dam 5, Amsterdam",
+    folder: "In/Raw/Photo's",
+    name: `${p.id}.jpg`,
+    pct: 0,
+    dropbox: "error",
+    ...p,
+  });
+
+  it("picks failed uploads whose error is worth retrying", () => {
+    const lijst = [t({ id: "a", herstelbaar: true }), t({ id: "b", herstelbaar: false })];
+    expect(teHerstellen(lijst, new Map())).toEqual(["a"]);
+  });
+
+  it("leaves running and finished uploads alone", () => {
+    const lijst = [
+      t({ id: "a", dropbox: "uploading", herstelbaar: true }),
+      t({ id: "b", dropbox: "done", herstelbaar: true }),
+    ];
+    expect(teHerstellen(lijst, new Map())).toEqual([]);
+  });
+
+  it("skips errors of unknown kind", () => {
+    // Een taak uit een vorige sessie weet niet waarom hij misging.
+    expect(teHerstellen([t({ id: "a" })], new Map())).toEqual([]);
+  });
+
+  it("stops after a few automatic rounds per file", () => {
+    const lijst = [t({ id: "a", herstelbaar: true }), t({ id: "b", herstelbaar: true })];
+    const pogingen = new Map([
+      ["a", 3],
+      ["b", 2],
+    ]);
+    expect(teHerstellen(lijst, pogingen, 3)).toEqual(["b"]);
+  });
+});
+
+/**
+ * Welke fouten als herstelbaar op de taak komen. runTask zet
+ * `herstelbaar: magOpnieuw(err)`, dus dit is de regel die bepaalt of er
+ * vanzelf opnieuw geprobeerd wordt.
+ */
+describe("herstelbaar na een fout", () => {
+  it("counts a stalled or dropped connection as recoverable", () => {
+    expect(magOpnieuw(new NetwerkFout("Netwerkfout: de upload stond stil"))).toBe(true);
+  });
+
+  it("does not count a refusal as recoverable", () => {
+    expect(magOpnieuw(new UploadFout(409, '{"error_summary":"path/conflict/file/"}'))).toBe(false);
+    expect(magOpnieuw(new UploadFout(400, "bad request"))).toBe(false);
   });
 });

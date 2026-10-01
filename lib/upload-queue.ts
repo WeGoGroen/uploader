@@ -44,6 +44,12 @@ export interface UploadTask {
   /** Geschatte resterende tijd in seconden, of null zolang dat nog niet te
       zeggen valt (te weinig gemeten). */
   etaSeconds?: number | null;
+  /**
+   * Alleen bij een fout: loont het om het later vanzelf nog eens te proberen?
+   * Waar bij een netwerkfout, 429 of 5xx; niet bij een weigering die bij een
+   * herhaling precies hetzelfde antwoord geeft.
+   */
+  herstelbaar?: boolean;
 }
 
 /**
@@ -243,6 +249,7 @@ export function enqueue(
       herstart van de app overleeft. */
   account?: string | null
 ) {
+  luisterNaarHerstel();
   const task: UploadTask = {
     id: `${Date.now()}-${seq++}`,
     folderPath,
@@ -315,6 +322,7 @@ function pumpCompress() {
  * zien waar die uploads bij hoorden.
  */
 export async function hervatOpenstaandeUploads(): Promise<string[]> {
+  luisterNaarHerstel();
   const openstaand = await openstaandeUploads();
   const hervat: string[] = [];
   let nieuw = 0;
@@ -356,6 +364,15 @@ export async function hervatOpenstaandeUploads(): Promise<string[]> {
  * hervatten en moet de melding dat eerlijk zeggen.
  */
 export async function probeerOpnieuw(ids: string[]): Promise<number> {
+  // Iemand drukt zelf op de knop: dan telt het automatische herstel weer
+  // vanaf nul. Wie na drie mislukte automatische rondes zelf ingrijpt, wil
+  // dat de volgende keer dat het netwerk terugkomt ook weer meetelt.
+  for (const id of ids) autoPogingen.delete(id);
+  return herstart(ids);
+}
+
+async function herstart(ids: string[]): Promise<number> {
+  luisterNaarHerstel();
   const set = new Set(ids);
   const bewaard = await openstaandeUploads();
   let gestart = 0;
@@ -382,7 +399,8 @@ export async function probeerOpnieuw(ids: string[]): Promise<number> {
         dropbox: "uploading",
         pct: 0,
         dropboxError: undefined,
-            etaSeconds: null,
+        herstelbaar: undefined,
+        etaSeconds: null,
       });
     } else {
       tasks = [...tasks, task];
@@ -401,6 +419,65 @@ export function forgetTasks(ids: string[]) {
   for (const t of tasks) if (set.has(t.id)) void vergeetUpload(t.id);
   tasks = tasks.filter((t) => !set.has(t.id));
   emit();
+}
+
+/**
+ * Vanzelf herstellen als de verbinding terug is.
+ *
+ * Wat sneuvelde terwijl de iPad in de tas zat of in een kelder zonder bereik
+ * stond, bleef "mislukt" tot iemand het zag en op een knop drukte. Terwijl het
+ * bestand nog op het apparaat staat en probeerOpnieuw het zonder vragen weer
+ * kan oppakken. Dus: zodra de browser zegt dat het netwerk terug is, of de
+ * pagina weer in beeld komt (iOS zet een tabblad op de achtergrond stil, en de
+ * uploads die daarbij afbraken komen als fout terug), gaan de mislukte
+ * uploads opnieuw de rij in.
+ *
+ * Alleen fouten waar herhalen zin heeft, en hoogstens een paar rondes per
+ * bestand. Een upload die om een andere reden structureel stukloopt, mag niet
+ * bij elke keer ontgrendelen weer een hele video over de lijn sturen.
+ */
+export const MAX_AUTO_HERSTEL = 3;
+/** Na "online" even wachten: de eerste seconden is een mobiele verbinding
+    vaak nog niet bruikbaar, en dan sneuvelt de herkansing meteen weer. */
+const NA_ONLINE_MS = 3_000;
+const NA_ZICHTBAAR_MS = 1_000;
+
+const autoPogingen = new Map<string, number>();
+let luistert = false;
+let herstelTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Welke taken nu vanzelf opnieuw mogen. Los, zodat het te testen is. */
+export function teHerstellen(
+  lijst: UploadTask[],
+  pogingen: ReadonlyMap<string, number>,
+  max = MAX_AUTO_HERSTEL
+): string[] {
+  return lijst
+    .filter((t) => t.dropbox === "error" && t.herstelbaar === true && (pogingen.get(t.id) ?? 0) < max)
+    .map((t) => t.id);
+}
+
+function planHerstel(ms: number) {
+  if (herstelTimer) clearTimeout(herstelTimer);
+  herstelTimer = setTimeout(() => {
+    herstelTimer = null;
+    // Zegt de browser dat er geen netwerk is, dan wachten op "online".
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    const ids = teHerstellen(tasks, autoPogingen);
+    if (ids.length === 0) return;
+    for (const id of ids) autoPogingen.set(id, (autoPogingen.get(id) ?? 0) + 1);
+    void herstart(ids);
+  }, ms);
+}
+
+/** Eén keer per tabblad, en pas zodra de wachtrij echt gebruikt wordt. */
+function luisterNaarHerstel() {
+  if (luistert || typeof window === "undefined" || typeof document === "undefined") return;
+  luistert = true;
+  window.addEventListener("online", () => planHerstel(NA_ONLINE_MS));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") planHerstel(NA_ZICHTBAAR_MS);
+  });
 }
 
 /**
@@ -461,13 +538,16 @@ async function runTask(task: UploadTask, file: File) {
     }
     patch(task.id, { dropbox: "done", pct: 100, etaSeconds: null });
     startedAt.delete(task.id);
+    autoPogingen.delete(task.id);
     void vergeetUpload(task.id);
   } catch (err) {
+    startedAt.delete(task.id);
     // De upload kan tóch geslaagd zijn (netwerk-hik ná aankomst) — pas
     // "mislukt" tonen als het bestand echt niet in de map staat.
     const reallyThere = await fileExists(task.folderPath, task.folder, file.name);
     if (reallyThere) {
-      patch(task.id, { dropbox: "done", pct: 100 });
+      patch(task.id, { dropbox: "done", pct: 100, etaSeconds: null });
+      autoPogingen.delete(task.id);
       void vergeetUpload(task.id);
       return;
     }
@@ -476,6 +556,8 @@ async function runTask(task: UploadTask, file: File) {
     patch(task.id, {
       dropbox: "error",
       dropboxError: err instanceof Error ? err.message : "Uploaden mislukt",
+      herstelbaar: magOpnieuw(err),
+      etaSeconds: null,
     });
   }
 }

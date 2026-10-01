@@ -20,7 +20,10 @@ tabel zegt wat er daarna mee gedaan is.
 | — · uploadlink per bestand | Opgelost: links worden per serie in één aanvraag opgehaald |
 | — · sessie weggooien bij een fout | Opgelost: hervatten tenzij de sessie zelf stuk is; een verlopen token haalt een vers token |
 | — · blokgrootte vast op 16MB | Opgelost: beweegt mee met het bestand, zodat ook een 20MB-bestand vier werkers gebruikt |
-| 6–10, 13–21 | Nog open |
+| 6 · mislukt op /media doodlopend | Opgelost: reden en "Opnieuw" per bestand, "Alle opnieuw" bij de stap en op het slotscherm |
+| 7 · wake lock | Opgelost: `components/SchermWakker.tsx` in de layout, op de hele wachtrij, ja/nee, teruggevraagd bij terugkeer in beeld |
+| 8 · geen herstel bij `online`/terug in beeld | Opgelost: herstelbare fouten gaan vanzelf opnieuw, hoogstens drie rondes per bestand |
+| 9, 10, 13–21 | Nog open |
 
 Let op bij het teruglezen: de mappen heetten tijdens deze doorlichting nog
 `in/Photo's`, `in/Video` en `in/360`. Op `main` zijn dat inmiddels

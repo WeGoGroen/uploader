@@ -2,7 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useIkBen } from "@/components/RechtenProvider";
-import { enqueue, getServerSnapshot, getSnapshot, subscribe } from "@/lib/upload-queue";
+import {
+  enqueue,
+  getServerSnapshot,
+  getSnapshot,
+  probeerOpnieuw,
+  subscribe,
+  type UploadTask,
+} from "@/lib/upload-queue";
 import { MEDIA_STAPPEN, type MediaStap } from "@/lib/media-folders";
 import { leesbareOmvang, type StapInhoud } from "@/lib/media-inhoud";
 import { relatieveTijd } from "@/lib/relatieve-tijd";
@@ -152,6 +159,11 @@ export default function MediaFlow() {
   // localStorage gelezen tijdens het renderen: opslag is geen React-bron, dus
   // een wijziging zou anders pas bij een toevallige hertekening zichtbaar zijn.
   const [sessies, setSessies] = useState<MediaSessie[]>([]);
+  // Na het hydrateren inlezen, niet in de beginwaarde van useState: op de
+  // server bestaat localStorage niet, en een andere eerste render dan de
+  // server gaf, geeft een hydration-fout. Eén keer bij het openen is precies
+  // het "synchroniseren met een extern systeem" waar een effect voor is.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setSessies(alleMediaSessies()), []);
 
   const [query, setQuery] = useState("");
@@ -201,6 +213,41 @@ export default function MediaFlow() {
   );
 
   const { stand: dropbox, fout: dropboxFout } = useDropboxInhoud(folder?.path ?? null);
+
+  /*
+    Opnieuw proberen, per bestand of voor alles wat mislukt is.
+
+    Een mislukte upload was hier een doodlopende weg: "mislukt", zonder reden
+    en zonder knop. De zwevende melding met een "Opnieuw"-knop verbergt zich
+    op deze pagina juist, omdat de lijst hier al staat. Het bestand staat nog
+    op het apparaat, dus opnieuw proberen hoeft niets te vragen.
+  */
+  const [herstart, setHerstart] = useState<string[]>([]);
+  // Ids waarvan het bestand niet meer op dit apparaat staat (ouder dan een
+  // dag, of de opslag weigerde het). Dan valt er niets te herkansen, en moet
+  // de regel dat zeggen in plaats van een knop te tonen die niets doet.
+  const [kwijt, setKwijt] = useState<string[]>([]);
+
+  async function opnieuw(ids: string[]) {
+    if (ids.length === 0) return;
+    setHerstart((v) => [...v, ...ids]);
+    try {
+      await probeerOpnieuw(ids);
+    } finally {
+      setHerstart((v) => v.filter((id) => !ids.includes(id)));
+    }
+    // Wat opnieuw gestart is staat nu weer op "bezig"; wat nog op "mislukt"
+    // staat, had geen bestand meer om mee te beginnen.
+    const nogMislukt = getSnapshot()
+      .filter((t) => ids.includes(t.id) && t.dropbox === "error")
+      .map((t) => t.id);
+    if (nogMislukt.length > 0) setKwijt((v) => [...new Set([...v, ...nogMislukt])]);
+  }
+
+  /** Alles van deze opname wat mislukt is en nog opnieuw kan. */
+  function herkansbaar(lijst: UploadTask[]): string[] {
+    return lijst.filter((t) => t.dropbox === "error" && !kwijt.includes(t.id)).map((t) => t.id);
+  }
 
   /**
    * Hoeveel bestanden er voor een stap staan.
@@ -289,30 +336,38 @@ export default function MediaFlow() {
   }, [address, folder, huidige]);
 
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /*
+    Zoeken terwijl je typt. Een te korte zoekterm wist de lijst niet meer via
+    state maar valt weg in wat er getoond wordt (zoekresultaten hieronder):
+    state zetten in de body van een effect geeft een extra render per
+    toetsaanslag. En een antwoord dat binnenkomt nadat je al verder typte,
+    overschrijft de nieuwere resultaten niet meer.
+  */
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
     // Ook stoppen zodra er een adres gekozen is: setQuery(label) zet anders
     // meteen een nieuwe zoekopdracht in gang en knippert de lijst terug.
-    if (query.trim().length < 3 || address || loadingAddress) {
-      setSuggestions([]);
-      return;
-    }
+    if (query.trim().length < 3 || address || loadingAddress) return;
+    let actueel = true;
     debounce.current = setTimeout(async () => {
       setSearching(true);
       try {
         const res = await fetch(`/api/address/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
-        setSuggestions(data.suggestions ?? []);
+        if (actueel) setSuggestions(data.suggestions ?? []);
       } catch {
-        setSuggestions([]);
+        if (actueel) setSuggestions([]);
       } finally {
         setSearching(false);
       }
     }, 300);
     return () => {
+      actueel = false;
       if (debounce.current) clearTimeout(debounce.current);
     };
   }, [query, address, loadingAddress]);
+
+  const zoekresultaten = query.trim().length >= 3 && !address && !loadingAddress ? suggestions : [];
 
   function startNearbySearch() {
     setLocationError(null);
@@ -517,35 +572,9 @@ export default function MediaFlow() {
   const totaalInDropbox = MEDIA_STAPPEN.reduce((som, s) => som + aantalVoor(s), 0);
   const bytesInDropbox = MEDIA_STAPPEN.reduce((som, s) => som + (dropbox?.stappen[s.key]?.bytes ?? 0), 0);
 
-  /**
-   * Scherm wakker houden zolang er iets omhoog gaat. Een webpagina kan niet
-   * doorwerken als iOS het tabblad opschort — valt het scherm in slaap, dan
-   * stopt de upload en gaat hij pas verder als je de app weer opent. Dit is
-   * het enige wat een webapp daar realistisch tegen kan doen; Safari kent
-   * geen achtergrond-upload.
-   */
-  useEffect(() => {
-    if (bezigTotaal === 0) return;
-    type Slot = { release: () => Promise<void> };
-    let slot: Slot | null = null;
-    let losgelaten = false;
-    const wakeLock = (navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<Slot> } })
-      .wakeLock;
-    void wakeLock
-      ?.request("screen")
-      .then((s) => {
-        if (losgelaten) void s.release();
-        else slot = s;
-      })
-      // Geweigerd of niet ondersteund: dan werkt uploaden gewoon door, alleen
-      // zonder deze bescherming.
-      .catch(() => {});
-    return () => {
-      losgelaten = true;
-      void slot?.release().catch(() => {});
-    };
-  }, [bezigTotaal]);
-
+  // Het scherm wakker houden gebeurt in components/SchermWakker.tsx, op het
+  // niveau van de hele app: hier ging het slot eraf zodra je op "Afronden"
+  // tikte, terwijl de uploads doorliepen.
 
   /**
    * Media-opnames op dit apparaat waar nog iets loopt of is blijven liggen.
@@ -883,16 +912,16 @@ export default function MediaFlow() {
 
               {nearby && nearby.length === 0 && <p className="note">Geen adressen gevonden in de buurt.</p>}
 
-              {((nearby && nearby.length > 0) || (showManualSearch && suggestions.length > 0)) && (
+              {((nearby && nearby.length > 0) || (showManualSearch && zoekresultaten.length > 0)) && (
                 <div>
                   <div className="list-head">
                     <span className="eyebrow">
-                      {showManualSearch && suggestions.length > 0 ? "Zoekresultaten" : "Dichtstbijzijnde adressen"}
+                      {showManualSearch && zoekresultaten.length > 0 ? "Zoekresultaten" : "Dichtstbijzijnde adressen"}
                     </span>
                   </div>
                   <ul className="rows">
-                    {(showManualSearch && suggestions.length > 0
-                      ? suggestions.map((a) => ({ ...a, distanceMeters: null as number | null }))
+                    {(showManualSearch && zoekresultaten.length > 0
+                      ? zoekresultaten.map((a) => ({ ...a, distanceMeters: null as number | null }))
                       : (nearby ?? []).map((a) => ({ ...a, distanceMeters: a.distanceMeters as number | null }))
                     ).map((a) => (
                       <li key={a.id}>
@@ -1006,6 +1035,25 @@ export default function MediaFlow() {
               );
             })}
           </ul>
+
+          {herkansbaar(takenVanOpname).length > 0 && (
+            <div className="media-retry-all">
+              <span>
+                {herkansbaar(takenVanOpname).length === 1
+                  ? "1 bestand is niet aangekomen."
+                  : `${herkansbaar(takenVanOpname).length} bestanden zijn niet aangekomen.`}{" "}
+                Ze staan nog op dit apparaat.
+              </span>
+              <button
+                type="button"
+                className="media-retry-btn"
+                onClick={() => void opnieuw(herkansbaar(takenVanOpname))}
+                disabled={herkansbaar(takenVanOpname).every((id) => herstart.includes(id))}
+              >
+                Opnieuw proberen
+              </button>
+            </div>
+          )}
 
           {/* Eén slotknop: afronden brengt je terug naar het adresscherm, dus
               een aparte "Nieuw adres" ernaast deed hetzelfde. Dropbox blijft
@@ -1146,6 +1194,27 @@ export default function MediaFlow() {
           </p>
         )}
 
+        {/* Bij meer dan één mislukt bestand één knop voor allemaal; bij één
+            staat de knop al op de regel zelf. */}
+        {herkansbaar(taken).length > 1 && (
+          <div className="media-retry-all">
+            <span>
+              {herkansbaar(taken).length} bestanden zijn niet aangekomen. Ze staan nog op dit apparaat
+              {taken.some((t) => t.dropbox === "error" && t.herstelbaar)
+                ? " en gaan vanzelf opnieuw zodra de verbinding terug is."
+                : "."}
+            </span>
+            <button
+              type="button"
+              className="media-retry-btn"
+              onClick={() => void opnieuw(herkansbaar(taken))}
+              disabled={herkansbaar(taken).every((id) => herstart.includes(id))}
+            >
+              Alle {herkansbaar(taken).length} opnieuw
+            </button>
+          </div>
+        )}
+
         {taken.length > 0 && (
           <ul className="media-files">
             {taken.map((t) => (
@@ -1155,14 +1224,38 @@ export default function MediaFlow() {
                   t.dropbox === "error" ? "is-error" : t.dropbox === "done" ? "is-done" : undefined
                 }
               >
-                <span className="media-file-name">{t.name}</span>
+                <span className="media-file-name">
+                  {t.name}
+                  {/* De reden erbij: "de upload stond stil" vraagt iets anders
+                      van de opnemer dan "Dropbox weigerde het bestand". */}
+                  {t.dropbox === "error" && (
+                    <span className="media-file-fout">
+                      {kwijt.includes(t.id)
+                        ? "Staat niet meer op dit apparaat. Kies het bestand opnieuw."
+                        : `${t.dropboxError ?? "Uploaden mislukt"}${
+                            t.herstelbaar ? " — gaat vanzelf opnieuw zodra de verbinding terug is." : ""
+                          }`}
+                    </span>
+                  )}
+                </span>
                 {/* Ook bij "klaar" het percentage tonen. Een los vinkje liet in
                     het midden of het bestand hélemaal over was; 100% is het
                     antwoord op de vraag die je stelt terwijl je staat te
                     wachten. */}
                 <span className="media-file-state">
                   {t.dropbox === "error" ? (
-                    "mislukt"
+                    kwijt.includes(t.id) ? (
+                      "mislukt"
+                    ) : (
+                      <button
+                        type="button"
+                        className="media-retry-btn"
+                        onClick={() => void opnieuw([t.id])}
+                        disabled={herstart.includes(t.id)}
+                      >
+                        {herstart.includes(t.id) ? "Bezig…" : "Opnieuw"}
+                      </button>
+                    )
                   ) : t.dropbox === "done" ? (
                     <>
                       <span className="media-file-check" aria-hidden="true">
