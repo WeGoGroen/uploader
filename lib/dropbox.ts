@@ -1851,6 +1851,12 @@ export interface MapBestand {
   id: string;
   /** Wanneer Dropbox het bestand binnenkreeg (ISO), voor zover bekend. */
   gewijzigd?: string;
+  /**
+   * De inhoudshash die Dropbox zelf bijhoudt (hex). Twee bestanden met dezelfde
+   * hash zijn byte voor byte gelijk, ook onder een andere naam of in een andere
+   * map; het control center gebruikt dat om dubbele foto's te vinden.
+   */
+  inhoudshash?: string;
 }
 
 export interface MapInhoud {
@@ -1916,6 +1922,7 @@ export async function leesProjectmap(accessToken: string, padOfId: string): Prom
         path_lower?: string;
         path_display?: string;
         server_modified?: string;
+        content_hash?: string;
       }[];
       cursor: string;
       has_more: boolean;
@@ -1936,6 +1943,7 @@ export async function leesProjectmap(accessToken: string, padOfId: string): Prom
           grootte: Number(entry.size) || 0,
           id: entry.id ?? "",
           gewijzigd: entry.server_modified,
+          inhoudshash: entry.content_hash,
         });
       }
     }
