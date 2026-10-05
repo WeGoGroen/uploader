@@ -49,6 +49,7 @@ export const MEDIA_SUBMAPPEN = [
   "OUT/_controle/360",
   "OUT/Photo's",
   "OUT/Video",
+  "OUT/_controle/Video",
   "out/Omgevingsfoto's",
 ] as const;
 
@@ -103,9 +104,12 @@ const VIDEO = /\.(mp4|mov)$/i;
 /**
  * De submappen waar video in hoort: de opgeleverde montage, en de clips die
  * een collega via het Business Control Center aanlevert (Media → Video →
- * Video uploaden). In geen van beide mag een beeld, en nergens anders video.
+ * Video uploaden). Daarnaast OUT/_controle/Video: een lichte 1080p-kopie van
+ * de montage, om in het control center vloeiend af te spelen — buiten OUT/Video,
+ * zodat de klant via de deellink alleen de echte video ziet. In geen van deze
+ * mappen mag een beeld, en nergens anders video.
  */
-const VIDEO_SUBMAPPEN = ["out/video", "in/raw/video"];
+const VIDEO_SUBMAPPEN = ["out/video", "out/_controle/video", "in/raw/video"];
 
 /**
  * Is dit een projectmap onder de mediahoofdmap?
