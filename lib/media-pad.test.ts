@@ -232,6 +232,8 @@ describe("OUT/Video — de montage van de Video Edit Agent", () => {
       `${adres}/OUT/Video/Dam 5, Amsterdam.mp4`
     );
     expect(mediaDoelPad(adres, "out/video", "montage.MOV")).toBe(`${adres}/out/video/montage.MOV`);
+    expect(mediaDoelPad(adres, "OUT/_controle/Video", "montage.mp4")).toBe(`${adres}/OUT/_controle/Video/montage.mp4`);
+    expect(mediaDoelPad(adres, "OUT/_controle/Video", "foto.jpg")).toBeNull();
   });
 
   it("laat in OUT/Video geen foto of iets anders toe", () => {
