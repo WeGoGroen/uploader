@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
-import { detailProjectFolders, getFolderStatuses, getSharedAccessToken, statusVeld } from "@/lib/dropbox";
+import { getFolderStatuses, statusVeld } from "@/lib/dropbox";
+import { haalDropboxStand } from "@/lib/dropbox-stand";
 
 export const maxDuration = 60;
 
@@ -15,40 +16,33 @@ export const maxDuration = 60;
  * Dropbox knijpt daar hard op af. Nu is het drie verzoeken, ongeacht hoeveel
  * opdrachten er lopen — dat is het verschil tussen een sync die meegroeit en
  * eentje die stukloopt zodra het bedrijf verdubbelt.
+ *
+ * Die listing duurt inmiddels een halve minuut en wordt daarom bewaard en op
+ * de achtergrond ververst; zie lib/dropbox-stand.ts. `gemetenOp` is wanneer
+ * de listing gemaakt is, niet wanneer je hem opvroeg. `?vers=1` wacht op een
+ * nieuwe.
  */
-const HOOFDMAPPEN = ["/Automatie Energielabels", "/Automatie NEN2580", "/Automatie Media"];
-
 export async function GET(request: Request) {
   if (!isInternRequest(request)) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }
 
-  const token = await getSharedAccessToken();
+  const vers = new URL(request.url).searchParams.get("vers") === "1";
   // De overdrachtsstatus per projectmap leeft in Redis (kaal pad in kleine
-  // letters), niet meer in de mapnaam — zie lib/dropbox.ts.
-  const statussen = await getFolderStatuses();
-  const mappen = await Promise.all(
-    HOOFDMAPPEN.map(async (root) => {
-      try {
-        const { folders, volledig } = await detailProjectFolders(token, root);
-        // De statussleutel hangt aan de hoofdmap, niet aan de map waar het
-        // project toevallig ligt: een gearchiveerd project houdt zo zijn
-        // status. Zie statusVeld() in lib/dropbox.ts.
-        const projecten = folders.map((f) => ({
-          ...f,
-          sharepoint: statussen[statusVeld(root, f.name)] ?? null,
-        }));
-        return { root, volledig, projecten, fout: null as string | null };
-      } catch (err) {
-        return {
-          root,
-          volledig: false,
-          projecten: [],
-          fout: err instanceof Error ? err.message.slice(0, 200) : "onbekende fout",
-        };
-      }
-    })
-  );
+  // letters), niet meer in de mapnaam — zie lib/dropbox.ts. Die lezen we elke
+  // keer vers: hij verandert los van de listing en kost een enkele Redis-vraag.
+  const [stand, statussen] = await Promise.all([haalDropboxStand({ vers }), getFolderStatuses()]);
 
-  return NextResponse.json({ gemetenOp: new Date().toISOString(), mappen });
+  const mappen = stand.mappen.map((m) => ({
+    ...m,
+    // De statussleutel hangt aan de hoofdmap, niet aan de map waar het
+    // project toevallig ligt: een gearchiveerd project houdt zo zijn
+    // status. Zie statusVeld() in lib/dropbox.ts.
+    projecten: m.projecten.map((f) => ({
+      ...f,
+      sharepoint: statussen[statusVeld(m.root, f.name)] ?? null,
+    })),
+  }));
+
+  return NextResponse.json({ gemetenOp: stand.gemetenOp, mappen });
 }
