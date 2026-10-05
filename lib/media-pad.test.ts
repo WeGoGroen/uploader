@@ -207,6 +207,23 @@ describe("de aanlevermap", () => {
   });
 });
 
+describe("In/Raw/Video — clips aangeleverd via het Business Control Center", () => {
+  const adres = "/Automatie Media/Dam 5, Amsterdam";
+
+  it("laat een clip toe bij een aanlevering", () => {
+    expect(mediaDoelPad(adres, "In/Raw/Video", "C3680.MP4", "aanlevering")).toBe(`${adres}/In/Raw/Video/C3680.MP4`);
+  });
+
+  it("weigert er een beeld, en weigert de map voor de agent zelf", () => {
+    expect(mediaDoelPad(adres, "In/Raw/Video", "foto.jpg", "aanlevering")).toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Video", "C3680.MP4")).toBeNull();
+  });
+
+  it("laat geen video in de 360-invoermap", () => {
+    expect(mediaDoelPad(adres, "In/Raw/360", "C3680.MP4", "aanlevering")).toBeNull();
+  });
+});
+
 describe("OUT/Video — de montage van de Video Edit Agent", () => {
   const adres = "/Automatie Media/Dam 5, Amsterdam";
 

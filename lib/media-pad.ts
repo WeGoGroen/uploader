@@ -85,7 +85,7 @@ export type MediaSubmap = (typeof MEDIA_SUBMAPPEN)[number];
  * originelen stilletjes weg — precies het soort verruiming waar niemand een
  * melding van krijgt.
  */
-export const AANLEVER_SUBMAPPEN = ["In/Raw/360"] as const;
+export const AANLEVER_SUBMAPPEN = ["In/Raw/360", "In/Raw/Video"] as const;
 
 export type AanleverSubmap = (typeof AANLEVER_SUBMAPPEN)[number];
 
@@ -100,8 +100,12 @@ const BEELD = /\.(jpe?g|png|tiff?|webp|insp|heic|heif)$/i;
 /** Wat de videomontage oplevert. Alleen in OUT/Video — zie magInSubmap. */
 const VIDEO = /\.(mp4|mov)$/i;
 
-/** De ene submap waar video in hoort. */
-const VIDEO_SUBMAP = "out/video";
+/**
+ * De submappen waar video in hoort: de opgeleverde montage, en de clips die
+ * een collega via het Business Control Center aanlevert (Media → Video →
+ * Video uploaden). In geen van beide mag een beeld, en nergens anders video.
+ */
+const VIDEO_SUBMAPPEN = ["out/video", "in/raw/video"];
 
 /**
  * Is dit een projectmap onder de mediahoofdmap?
@@ -176,7 +180,7 @@ export function mediaBestandsnaam(ruw: string, submap = ""): string | null {
  * verruiming die niemand opmerkt is precies wat deze grenzen moeten voorkomen.
  */
 export function magInSubmap(naam: string, submap: string): boolean {
-  const isVideomap = submap.toLowerCase() === VIDEO_SUBMAP;
+  const isVideomap = VIDEO_SUBMAPPEN.includes(submap.toLowerCase());
   return isVideomap ? VIDEO.test(naam) : BEELD.test(naam);
 }
 
