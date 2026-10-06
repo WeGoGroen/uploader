@@ -28,6 +28,8 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     folder_id?: string;
     pad?: string;
+    /** false: alleen wat er direct in de map staat, niet alles eronder. */
+    diep?: boolean;
   } | null;
 
   const folderId = body?.folder_id?.trim() ?? "";
@@ -54,7 +56,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const inhoud = await leesProjectmap(token, doel);
+    const inhoud = await leesProjectmap(token, doel, { diep: body?.diep !== false });
     return NextResponse.json({ ok: true, ...inhoud });
   } catch (err) {
     const melding = err instanceof Error ? err.message.slice(0, 250) : "uitlezen mislukt";
