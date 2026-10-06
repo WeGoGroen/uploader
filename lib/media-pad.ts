@@ -32,6 +32,11 @@ export const MEDIA_HOOFDMAP = "Automatie Media";
  * bewerkte foto's bij Imagen staan met "submap moet een van OUT/360,
  * OUT/360/review, out/Omgevingsfoto's zijn".
  *
+ * "OUT/Video" is de uitvoermap van de Video Edit Agent in het control center:
+ * die monteert de clips uit In/Raw/Video automatisch en zet de video hier neer.
+ * Het is de enige submap waar een video in mag, en er mag daar niets anders in
+ * — zie `magInSubmap` hieronder.
+ *
  * Alles onder de uitvoermap: dat is in deze mappenstructuur de afgesproken
  * scheiding tussen wat de opnemer aanlevert (In/Raw) en wat de bewerking
  * oplevert (OUT). De agent mag nooit in de invoermap schrijven — daar staan de
@@ -41,9 +46,28 @@ export const MEDIA_HOOFDMAP = "Automatie Media";
 export const MEDIA_SUBMAPPEN = [
   "OUT/360",
   "OUT/360/review",
+  "OUT/_controle/360",
   "OUT/Photo's",
+  "OUT/Video",
+  "OUT/_controle/Video",
   "out/Omgevingsfoto's",
 ] as const;
+
+/**
+ * De wachtmap van de 360-eindcontrole, en waar een goedgekeurd bestand heen gaat.
+ *
+ * Tot 1 oktober zette de nadiragent elk resultaat meteen in OUT/360 en keurde
+ * hij het daarna pas. Wie de map opende zag dus ook wat nog nagekeken werd, of
+ * wat later werd afgekeurd — op Woestduin en Mary van der Sluis stonden zo
+ * nadirs met een verzonnen kleed tussen het goede werk. Nu landt het resultaat
+ * eerst hier, en schuift het pas door na een goedkeuring (van de agent of van
+ * iemand met de hand), via /api/intern/media-vrijgeven.
+ *
+ * Buiten OUT/360 en niet als submap ervan: een deellink van OUT/360 neemt zijn
+ * submappen mee, en dan zou de klant de wachtmap gewoon kunnen openen.
+ */
+export const CONTROLE_SUBMAP = "OUT/_controle/360";
+export const VRIJGEGEVEN_SUBMAP = "OUT/360";
 
 export type MediaSubmap = (typeof MEDIA_SUBMAPPEN)[number];
 
@@ -62,7 +86,7 @@ export type MediaSubmap = (typeof MEDIA_SUBMAPPEN)[number];
  * originelen stilletjes weg — precies het soort verruiming waar niemand een
  * melding van krijgt.
  */
-export const AANLEVER_SUBMAPPEN = ["In/Raw/360"] as const;
+export const AANLEVER_SUBMAPPEN = ["In/Raw/360", "In/Raw/Video"] as const;
 
 export type AanleverSubmap = (typeof AANLEVER_SUBMAPPEN)[number];
 
@@ -73,6 +97,19 @@ export type Schrijfsoort = "oplevering" | "aanlevering";
     daar: schrijft hij iets anders weg, dan klopt er iets niet en is weigeren
     beter dan het ergens neerzetten. */
 const BEELD = /\.(jpe?g|png|tiff?|webp|insp|heic|heif)$/i;
+
+/** Wat de videomontage oplevert. Alleen in OUT/Video — zie magInSubmap. */
+const VIDEO = /\.(mp4|mov)$/i;
+
+/**
+ * De submappen waar video in hoort: de opgeleverde montage, en de clips die
+ * een collega via het Business Control Center aanlevert (Media → Video →
+ * Video uploaden). Daarnaast OUT/_controle/Video: een lichte 1080p-kopie van
+ * de montage, om in het control center vloeiend af te spelen — buiten OUT/Video,
+ * zodat de klant via de deellink alleen de echte video ziet. In geen van deze
+ * mappen mag een beeld, en nergens anders video.
+ */
+const VIDEO_SUBMAPPEN = ["out/video", "out/_controle/video", "in/raw/video"];
 
 /**
  * Is dit een projectmap onder de mediahoofdmap?
@@ -131,11 +168,24 @@ export function isAanleverSubmap(submap: string): submap is AanleverSubmap {
  * "vloer.jpg/../geheim.pdf" door de extensiecontrole glippen op de ".pdf" die
  * er na het opschonen niet eens meer staat.
  */
-export function mediaBestandsnaam(ruw: string): string | null {
+export function mediaBestandsnaam(ruw: string, submap = ""): string | null {
   const naam = sanitizePathSegment(ruw);
   if (naam.length < 5 || naam.length > 180) return null;
-  if (!BEELD.test(naam)) return null;
+  if (!magInSubmap(naam, submap)) return null;
   return naam;
+}
+
+/**
+ * Beeld waar beeld hoort, video waar video hoort.
+ *
+ * Twee lijsten in plaats van één ruimere: kwam .mp4 gewoon bij BEELD, dan kon
+ * de nadir-agent vanaf dat moment ook een video in OUT/360 zetten, en de
+ * montage een foto in OUT/Video. Geen van beide is ooit de bedoeling, en een
+ * verruiming die niemand opmerkt is precies wat deze grenzen moeten voorkomen.
+ */
+export function magInSubmap(naam: string, submap: string): boolean {
+  const isVideomap = VIDEO_SUBMAPPEN.includes(submap.toLowerCase());
+  return isVideomap ? VIDEO.test(naam) : BEELD.test(naam);
 }
 
 /** Het volledige pad, of null als een van de drie delen niet deugt. */
@@ -150,7 +200,25 @@ export function mediaDoelPad(
   // zeggen — dat is geen formaliteit maar de plek waar die keuze zichtbaar is.
   const mag = soort === "aanlevering" ? isAanleverSubmap(submap) : isMediaSubmap(submap);
   if (!isMediaProjectmap(projectmap) || !mag) return null;
-  const naam = mediaBestandsnaam(bestandsnaam);
+  const naam = mediaBestandsnaam(bestandsnaam, submap);
   if (!naam) return null;
   return `${projectmap}/${submap}/${naam}`;
+}
+
+/**
+ * Van de wachtmap naar de uitvoermap: de twee paden, of null als het niet mag.
+ *
+ * Eén vast paar en geen vrije van/naar. Een verplaatsing met vrije paden is
+ * een schrijf- én wisrecht op elke map onder Automatie Media; deze kan alleen
+ * dit ene ding: een gekeurd bestand onder dezelfde naam één map opschuiven,
+ * binnen hetzelfde adres.
+ */
+export function mediaVrijgeefPaden(
+  projectmap: string,
+  bestandsnaam: string
+): { van: string; naar: string } | null {
+  const van = mediaDoelPad(projectmap, CONTROLE_SUBMAP, bestandsnaam);
+  const naar = mediaDoelPad(projectmap, VRIJGEGEVEN_SUBMAP, bestandsnaam);
+  if (!van || !naar) return null;
+  return { van, naar };
 }

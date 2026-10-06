@@ -5,6 +5,7 @@ import {
   isMediaSubmap,
   mediaBestandsnaam,
   mediaDoelPad,
+  mediaVrijgeefPaden,
 } from "@/lib/media-pad";
 
 /**
@@ -203,5 +204,76 @@ describe("de aanlevermap", () => {
     expect(
       mediaDoelPad("/Automatie Energielabels/Dam 5", "In/Raw/360", "pano.jpg", "aanlevering")
     ).toBeNull();
+  });
+});
+
+describe("In/Raw/Video — clips aangeleverd via het Business Control Center", () => {
+  const adres = "/Automatie Media/Dam 5, Amsterdam";
+
+  it("laat een clip toe bij een aanlevering", () => {
+    expect(mediaDoelPad(adres, "In/Raw/Video", "C3680.MP4", "aanlevering")).toBe(`${adres}/In/Raw/Video/C3680.MP4`);
+  });
+
+  it("weigert er een beeld, en weigert de map voor de agent zelf", () => {
+    expect(mediaDoelPad(adres, "In/Raw/Video", "foto.jpg", "aanlevering")).toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Video", "C3680.MP4")).toBeNull();
+  });
+
+  it("laat geen video in de 360-invoermap", () => {
+    expect(mediaDoelPad(adres, "In/Raw/360", "C3680.MP4", "aanlevering")).toBeNull();
+  });
+});
+
+describe("OUT/Video — de montage van de Video Edit Agent", () => {
+  const adres = "/Automatie Media/Dam 5, Amsterdam";
+
+  it("laat een video toe in OUT/Video, in welke schrijfwijze ook", () => {
+    expect(mediaDoelPad(adres, "OUT/Video", "Dam 5, Amsterdam.mp4")).toBe(
+      `${adres}/OUT/Video/Dam 5, Amsterdam.mp4`
+    );
+    expect(mediaDoelPad(adres, "out/video", "montage.MOV")).toBe(`${adres}/out/video/montage.MOV`);
+    expect(mediaDoelPad(adres, "OUT/_controle/Video", "montage.mp4")).toBe(`${adres}/OUT/_controle/Video/montage.mp4`);
+    expect(mediaDoelPad(adres, "OUT/_controle/Video", "foto.jpg")).toBeNull();
+  });
+
+  it("laat in OUT/Video geen foto of iets anders toe", () => {
+    expect(mediaDoelPad(adres, "OUT/Video", "still.jpg")).toBeNull();
+    expect(mediaDoelPad(adres, "OUT/Video", "rapport.pdf")).toBeNull();
+  });
+
+  it("laat een video nergens anders toe", () => {
+    // Anders mag de nadir-agent ook video in OUT/360 zetten, en dat is nooit de bedoeling.
+    expect(mediaDoelPad(adres, "OUT/360", "rondgang.mp4")).toBeNull();
+    expect(mediaDoelPad(adres, "OUT/Photo's", "clip.mov")).toBeNull();
+  });
+
+  it("laat de invoermap van de video niet toe", () => {
+    expect(isMediaSubmap("In/Raw/Video")).toBe(false);
+    expect(isMediaSubmap("in/Video")).toBe(false);
+  });
+});
+
+describe("mediaVrijgeefPaden", () => {
+  it("schuift een gekeurd bestand van de wachtmap naar OUT/360, onder dezelfde naam", () => {
+    expect(mediaVrijgeefPaden("/Automatie Media/Dam 5, Amsterdam", "Woestduin 360-3.jpg")).toEqual({
+      van: "/Automatie Media/Dam 5, Amsterdam/OUT/_controle/360/Woestduin 360-3.jpg",
+      naar: "/Automatie Media/Dam 5, Amsterdam/OUT/360/Woestduin 360-3.jpg",
+    });
+  });
+
+  it("weigert een projectmap buiten Automatie Media", () => {
+    // Anders is dit een verplaats-en-wisrecht op elke map in de Dropbox.
+    expect(mediaVrijgeefPaden("/Automatie Energielabels/Dam 5, Amsterdam", "a.jpg")).toBeNull();
+    expect(mediaVrijgeefPaden("/Automatie Media/../Automatie Energielabels", "a.jpg")).toBeNull();
+  });
+
+  it("weigert alles wat geen beeld is, en namen die de map uit willen", () => {
+    expect(mediaVrijgeefPaden("/Automatie Media/Dam 5, Amsterdam", "rapport.pdf")).toBeNull();
+    expect(mediaVrijgeefPaden("/Automatie Media/Dam 5, Amsterdam", "a.jpg/../b.pdf")).toBeNull();
+  });
+
+  it("de wachtmap ligt buiten OUT/360, zodat een deellink van OUT/360 hem niet meeneemt", () => {
+    const paden = mediaVrijgeefPaden("/Automatie Media/Dam 5, Amsterdam", "a.jpg");
+    expect(paden?.van.startsWith("/Automatie Media/Dam 5, Amsterdam/OUT/360/")).toBe(false);
   });
 });

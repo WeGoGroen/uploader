@@ -1695,6 +1695,55 @@ export async function verplaats(accessToken: string, van: string, naar: string):
   throw new DropboxApiError(res.status, `Dropbox files/move_v2 failed: ${res.status} ${body}`);
 }
 
+/**
+ * Kopieert een bestand binnen hetzelfde Dropbox-account. Dropbox doet het
+ * zelf, zonder dat er een byte langs onze server gaat — ook bij een clip van
+ * honderden megabytes. "bestond" als er op het doel al een bestand staat:
+ * nooit overschrijven, want daar kan een origineel staan.
+ */
+export async function kopieer(accessToken: string, van: string, naar: string): Promise<"gekopieerd" | "bestond"> {
+  const res = await fetch(`${DROPBOX_API_BASE}/files/copy_v2`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from_path: van, to_path: naar, autorename: false }),
+  });
+  if (res.ok) return "gekopieerd";
+  const body = await res.text().catch(() => "");
+  if (res.status === 409 && body.includes("to/conflict")) return "bestond";
+  throw new DropboxApiError(res.status, `Dropbox files/copy_v2 failed: ${res.status} ${body}`);
+}
+
+/** Wat er achter een deellink zit. `pad` alleen als de link naar iets in dit account wijst. */
+export interface LinkInhoud {
+  soort: "file" | "folder";
+  naam: string;
+  pad: string | null;
+}
+
+export async function leesDeellink(accessToken: string, url: string): Promise<LinkInhoud> {
+  const res = await fetch(`${DROPBOX_API_BASE}/sharing/get_shared_link_metadata`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new DropboxApiError(res.status, `Dropbox get_shared_link_metadata failed: ${res.status} ${body}`);
+  }
+  const data = (await res.json()) as { ".tag": string; name: string; path_lower?: string };
+  return { soort: data[".tag"] === "folder" ? "folder" : "file", naam: data.name, pad: data.path_lower ?? null };
+}
+
+function toDirectDownloadUrl(shareUrl: string): string {
+  if (/[?&]dl=0\b/.test(shareUrl)) return shareUrl.replace(/dl=0\b/, "dl=1");
+  return shareUrl.includes("?") ? `${shareUrl}&dl=1` : `${shareUrl}?dl=1`;
+}
+
+/** Een externe bestandslink als directe download, voor save_url. */
+export function directeDownload(url: string): string {
+  return toDirectDownloadUrl(url);
+}
+
 export interface ArchiveerUitkomst {
   archief: string;
   /** Dropbox is nog aan het verplaatsen. Geen fout: de opdracht staat, en een
@@ -1913,6 +1962,12 @@ export interface MapBestand {
   id: string;
   /** Wanneer Dropbox het bestand binnenkreeg (ISO), voor zover bekend. */
   gewijzigd?: string;
+  /**
+   * De inhoudshash die Dropbox zelf bijhoudt (hex). Twee bestanden met dezelfde
+   * hash zijn byte voor byte gelijk, ook onder een andere naam of in een andere
+   * map; het control center gebruikt dat om dubbele foto's te vinden.
+   */
+  inhoudshash?: string;
 }
 
 export interface MapInhoud {
@@ -1978,6 +2033,7 @@ export async function leesProjectmap(accessToken: string, padOfId: string): Prom
         path_lower?: string;
         path_display?: string;
         server_modified?: string;
+        content_hash?: string;
       }[];
       cursor: string;
       has_more: boolean;
@@ -1998,6 +2054,7 @@ export async function leesProjectmap(accessToken: string, padOfId: string): Prom
           grootte: Number(entry.size) || 0,
           id: entry.id ?? "",
           gewijzigd: entry.server_modified,
+          inhoudshash: entry.content_hash,
         });
       }
     }

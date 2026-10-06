@@ -6,7 +6,6 @@ import {
   statusFromName,
   statusVeld,
   stripStatusMarker,
-  summarizeProjectFolders,
   type FolderStatus,
 } from "@/lib/dropbox";
 import {
@@ -26,7 +25,27 @@ import { calendarLocationToBagQuery } from "@/lib/address-format";
 import { getAccessTokenForAccount, getTodayEvents } from "@/lib/google-calendar";
 import { resolveActiveAccountName } from "@/lib/active-account";
 import { getOptionalRedis } from "@/lib/redis";
+import { haalDropboxStand } from "@/lib/dropbox-stand";
 import { checkStreetView } from "@/lib/streetview";
+
+/**
+ * Eén hoofdmap uit de bewaarde Dropbox-listing (lib/dropbox-stand.ts).
+ *
+ * De SharePoint-overdracht en de verweesde mappen lazen elk zelf de hele
+ * hoofdmap uit — drie recursieve listings per ronde, 25 seconden, terwijl
+ * /api/intern/dropbox dezelfde listing al bewaart. Een hoofdmap die in de
+ * bewaarde listing mislukt is, gooit hier zijn fout, zodat de controle rood
+ * wordt in plaats van "geen lege mappen" te melden over niets.
+ */
+async function hoofdmapUitStand(
+  root: string
+): Promise<{ folders: { name: string; files: number }[]; volledig: boolean }> {
+  const stand = await haalDropboxStand();
+  const map = stand.mappen.find((m) => m.root === root);
+  if (!map) throw new Error(`${root} staat niet in de Dropbox-listing`);
+  if (map.fout) throw new Error(map.fout);
+  return { folders: map.projecten, volledig: map.volledig };
+}
 
 export interface Controle {
   naam: string;
@@ -277,10 +296,9 @@ async function werkControles(): Promise<Controle[]> {
      * geen uren.
      */
     meet("SharePoint-overdracht", async () => {
-      const t = await getSharedAccessToken();
       const root = "/Automatie Energielabels";
       const [{ folders, volledig }, statussen] = await Promise.all([
-        summarizeProjectFolders(t, root),
+        hoofdmapUitStand(root),
         getFolderStatuses(),
       ]);
 
@@ -316,10 +334,9 @@ async function werkControles(): Promise<Controle[]> {
     }),
 
     meet("Verweesde projectmappen", async () => {
-      const t = await getSharedAccessToken();
       const [label, nen] = await Promise.all([
-        summarizeProjectFolders(t, "/Automatie Energielabels"),
-        summarizeProjectFolders(t, "/Automatie NEN2580"),
+        hoofdmapUitStand("/Automatie Energielabels"),
+        hoofdmapUitStand("/Automatie NEN2580"),
       ]);
       const leeg = [
         ...label.folders.filter((f) => f.files === 0).map((f) => `Energielabels/${f.name}`),
