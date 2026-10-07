@@ -793,6 +793,11 @@ export default function Home() {
   // Lopende teller voor de uploadpopup ("Bezig: Xs").
   useEffect(() => {
     if (!uploadProgress) return;
+    // Klok stilzetten zodra alles klaar is: de pop-up blijft bij een fout
+    // open staan, en dan moet de tijd tonen hoe lang het uploaden duurde.
+    const afgerond =
+      uploadProgress.taskDone && Object.values(uploadProgress.docs).every((st) => st !== "pending");
+    if (afgerond) return;
     const id = setInterval(() => {
       setUploadElapsed(Math.round((Date.now() - uploadProgress.startedAt) / 1000));
     }, 500);
@@ -1279,7 +1284,12 @@ export default function Home() {
       setCreateError("Taak aanmaken mislukt. Probeer het opnieuw.");
     } finally {
       setCreating(false);
-      setTimeout(() => setUploadProgress(null), 1000);
+      // Alleen vanzelf sluiten als alles goed ging; bij een mislukte bijlage
+      // blijft de pop-up staan tot de opnemer zelf op Sluiten tikt.
+      setTimeout(
+        () => setUploadProgress((p) => (p && Object.values(p.docs).some((st) => st === "error") ? p : null)),
+        1000
+      );
     }
   }
 
@@ -2370,39 +2380,102 @@ export default function Home() {
         </div>
       )}
 
-      {uploadProgress && (
-        <div className="upload-overlay">
-          <div className="upload-modal" role="dialog" aria-label="Bezig met uploaden naar ClickUp">
-            <h3>Bezig met uploaden naar ClickUp…</h3>
-            <ul className="upload-list">
-              <li className={uploadProgress.taskDone ? "is-done" : "is-busy"}>
-                {uploadProgress.taskDone ? (
-                  <span className="upload-check" aria-hidden="true">✓</span>
-                ) : (
-                  <span className="spinner" aria-hidden="true" />
-                )}
-                ClickUp-taak aanmaken
-              </li>
-              {DOCUMENT_FIELDS.map((d) => {
-                const s = uploadProgress.docs[d.key];
-                return (
-                  <li key={d.key} className={s === "done" || s === "skip" ? "is-done" : s === "error" ? "is-error" : "is-busy"}>
-                    {s === "done" || s === "skip" ? (
-                      <span className="upload-check" aria-hidden="true">✓</span>
-                    ) : s === "error" ? (
-                      <span className="upload-warn" aria-hidden="true">⚠</span>
-                    ) : (
-                      <span className="spinner" aria-hidden="true" />
+      {uploadProgress &&
+        (() => {
+          // Zelfde opbouw als de Mediatask-pop-up bij NEN: de uitkomst in de
+          // kop, en per onderdeel één regel met de uitkomst rechts.
+          const docs = uploadProgress.docs;
+          const totaal = 1 + DOCUMENT_FIELDS.length;
+          const klaar =
+            (uploadProgress.taskDone ? 1 : 0) +
+            DOCUMENT_FIELDS.filter((d) => docs[d.key] === "done" || docs[d.key] === "skip").length;
+          const fouten = DOCUMENT_FIELDS.filter((d) => docs[d.key] === "error").length;
+          const afgerond = uploadProgress.taskDone && DOCUMENT_FIELDS.every((d) => docs[d.key] !== "pending");
+          // De bijlagen gaan één voor één: alleen de eerste die nog openstaat
+          // is echt bezig. Vier draaiende icoontjes tegelijk suggereerden iets
+          // anders.
+          const bezigMet = uploadProgress.taskDone ? DOCUMENT_FIELDS.find((d) => docs[d.key] === "pending")?.key : undefined;
+          const spinner = <span className="spinner" aria-hidden="true" />;
+          return (
+            <div className="upload-overlay">
+              <div className="upload-modal mt-modal" role="dialog" aria-label="Uploaden naar ClickUp">
+                <div className="mt-head">
+                  <span className={`mt-icon${fouten > 0 ? " is-error" : ""}`} aria-hidden="true">
+                    {fouten > 0 ? "!" : afgerond ? "✓" : spinner}
+                  </span>
+                  <div className="mt-head-tekst">
+                    <h3>
+                      {!afgerond
+                        ? "Bezig met uploaden naar ClickUp"
+                        : fouten > 0
+                          ? `Taak staat in ClickUp, ${fouten} bijlage${fouten === 1 ? "" : "n"} mislukt`
+                          : "Klaar — taak staat in ClickUp"}
+                    </h3>
+                    <p className="mt-num">
+                      {klaar} van {totaal}
+                      {afgerond ? "" : " klaar"} · {formatEta(uploadElapsed)}
+                    </p>
+                    {!afgerond && (
+                      <div className="doc-upload-bar">
+                        <div className="doc-upload-bar-fill" style={{ width: `${Math.round((klaar / totaal) * 100)}%` }} />
+                      </div>
                     )}
-                    {d.label}
-                  </li>
-                );
-              })}
-            </ul>
-            <p className="upload-timer">Bezig: {uploadElapsed}s</p>
-          </div>
-        </div>
-      )}
+                  </div>
+                </div>
+
+                <div className="mt-body">
+                  <ul className="mt-rows">
+                    <li className="mt-row">
+                      <span className="mt-k">Taak</span>
+                      <span className="mt-v">{uploadProgress.taskDone ? "Aangemaakt in ClickUp" : "Aanmaken in ClickUp"}</span>
+                      {uploadProgress.taskDone ? (
+                        <span className="mt-s is-done">✓</span>
+                      ) : (
+                        <span className="mt-s">{spinner}</span>
+                      )}
+                    </li>
+                    {DOCUMENT_FIELDS.map((d) => {
+                      const st = docs[d.key];
+                      return (
+                        <li key={d.key} className="mt-row">
+                          <span className="mt-k">{d.key}</span>
+                          <span className="mt-v">{d.label.replace(/^D\d+\s*/, "")}</span>
+                          {st === "done" ? (
+                            <span className="mt-s is-done">✓ in ClickUp</span>
+                          ) : st === "error" ? (
+                            <span className="mt-s is-error">⚠ mislukt</span>
+                          ) : st === "skip" ? (
+                            <span className="mt-s">geen Dropbox</span>
+                          ) : bezigMet === d.key ? (
+                            <span className="mt-s">{spinner} overzetten…</span>
+                          ) : (
+                            <span className="mt-s">wacht</span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+
+                <div className="mt-foot">
+                  {!afgerond && <span className="mt-foot-tekst">Laat dit scherm open tot het klaar is</span>}
+                  {/* Bij een fout blijft de pop-up staan tot de opnemer zelf
+                      sluit: in één seconde is niet te lezen wát er misging. */}
+                  {afgerond && fouten > 0 && (
+                    <>
+                      <span className="mt-foot-tekst">
+                        De bestanden staan veilig in Dropbox. Op het volgende scherm kun je het opnieuw proberen.
+                      </span>
+                      <button type="button" className="btn btn-primary" onClick={() => setUploadProgress(null)}>
+                        Sluiten
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
     </>
   );
 }

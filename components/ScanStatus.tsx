@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Verwerkingsstatus van de scans bij Mediatask, op het dashboard.
@@ -26,6 +26,26 @@ export default function ScanStatusKaart() {
   const [rijen, setRijen] = useState<ScanStatus[] | null>(null);
   const [herstelBezig, setHerstelBezig] = useState<number | null>(null);
   const [melding, setMelding] = useState<string | null>(null);
+  const [menuVoor, setMenuVoor] = useState<number | null>(null);
+  const [verbergBezig, setVerbergBezig] = useState<number | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Menu sluiten bij een tik ernaast of Escape, zoals elk uitklapmenu.
+  useEffect(() => {
+    if (menuVoor === null) return;
+    function weg(e: PointerEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuVoor(null);
+    }
+    function esc(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenuVoor(null);
+    }
+    document.addEventListener("pointerdown", weg);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", weg);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [menuVoor]);
 
   function laad(ververs = false) {
     fetch(`/api/mediatask/scanstatus${ververs ? "?ververs=1" : ""}`, { cache: "no-store" })
@@ -69,6 +89,41 @@ export default function ScanStatusKaart() {
     }
   }
 
+  /**
+   * Voor een melding die niet klopt: de order is bij Mediatask goed
+   * doorgekomen, maar er hangt nog een puntenwolk zonder beelden aan. De
+   * server kijkt eerst nog één keer vers, en onthoudt het daarna voor
+   * iedereen — ook de ochtendcontrole en de agent slaan deze scans dan over.
+   */
+  async function verberg(orderId: number) {
+    setMenuVoor(null);
+    setVerbergBezig(orderId);
+    setMelding(null);
+    try {
+      const res = await fetch("/api/mediatask/scanstatus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMelding(d.error ?? "Verbergen mislukt.");
+        return;
+      }
+      // Meteen uit de lijst, niet pas na de volgende peiling.
+      setRijen((rs) => (rs ? rs.filter((r) => r.orderId !== orderId) : rs));
+      setMelding(
+        d.alAlsnogVerwerkt
+          ? "Mediatask had de scan intussen alsnog verwerkt."
+          : "Verborgen. Komt er later een nieuwe afgekeurde scan bij deze order, dan zie je die weer."
+      );
+    } catch {
+      setMelding("Verbergen mislukt.");
+    } finally {
+      setVerbergBezig(null);
+    }
+  }
+
   // Ook kort de geslaagde tonen. Zonder dat verdwijnt een rij die op "bezig"
   // stond zonder bevestiging uit beeld, en dat leest als "waar is het
   // gebleven?" in plaats van "het is goed gekomen". Na een paar uur is het
@@ -108,14 +163,47 @@ export default function ScanStatusKaart() {
               </span>
             </span>
             {r.stand === "mislukt" && (
-              <button
-                type="button"
-                className="btn btn-quiet"
-                disabled={herstelBezig === r.orderId}
-                onClick={() => herstel(r.orderId)}
-              >
-                {herstelBezig === r.orderId ? "Bezig…" : "Opnieuw versturen"}
-              </button>
+              <span className="scanstatus-acties">
+                <button
+                  type="button"
+                  className="btn btn-quiet"
+                  disabled={herstelBezig === r.orderId || verbergBezig === r.orderId}
+                  onClick={() => herstel(r.orderId)}
+                >
+                  {herstelBezig === r.orderId ? "Bezig…" : "Opnieuw versturen"}
+                </button>
+                <div className="scanstatus-meer" ref={menuVoor === r.orderId ? menuRef : undefined}>
+                  <button
+                    type="button"
+                    className="scanstatus-meer-knop"
+                    aria-label={`Meer opties voor ${r.adres}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menuVoor === r.orderId}
+                    disabled={verbergBezig === r.orderId}
+                    onClick={() => setMenuVoor(menuVoor === r.orderId ? null : r.orderId)}
+                  >
+                    {verbergBezig === r.orderId ? (
+                      <span className="spinner" aria-hidden="true" />
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <circle cx="3" cy="8" r="1.5" />
+                        <circle cx="8" cy="8" r="1.5" />
+                        <circle cx="13" cy="8" r="1.5" />
+                      </svg>
+                    )}
+                  </button>
+                  {menuVoor === r.orderId && (
+                    <div className="scanstatus-menu" role="menu">
+                      <button type="button" role="menuitem" className="user-menu-item" onClick={() => verberg(r.orderId)}>
+                        <span className="scanstatus-menu-tekst">
+                          <b>Verbergen</b>
+                          <span>Staat goed bij Mediatask</span>
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </span>
             )}
           </li>
         ))}

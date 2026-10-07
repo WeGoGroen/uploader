@@ -1994,7 +1994,15 @@ export interface MapInhoud {
  * opleveren over onderdelen die er wél zijn, en daarna zou het aanvullen ze
  * dubbel neerzetten — precies wat een tweede klik niet mag doen.
  */
-export async function leesProjectmap(accessToken: string, padOfId: string): Promise<MapInhoud> {
+export async function leesProjectmap(
+  accessToken: string,
+  padOfId: string,
+  opties: { diep?: boolean } = {}
+): Promise<MapInhoud> {
+  // diep: false leest alleen wat er direct in de map staat. Voor een lijst van
+  // submappen (de makelaars onder Presets) is dat één aanroep in plaats van
+  // een listing door alle projecten eronder.
+  const recursive = opties.diep !== false;
   const meta = await getMetadata(accessToken, padOfId);
   if (!meta || meta[".tag"] !== "folder") {
     throw new DropboxApiError(404, `Geen map gevonden op ${padOfId}`);
@@ -2015,7 +2023,7 @@ export async function leesProjectmap(accessToken: string, padOfId: string): Prom
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
         // Op id zoeken mag bij de eerste aanroep ook, maar het pad is
         // leesbaarder in de logs en we hebben hem hierboven toch al opgehaald.
-        body: JSON.stringify(cursor ? { cursor } : { path: pad, recursive: true }),
+        body: JSON.stringify(cursor ? { cursor } : { path: pad, recursive }),
       }
     );
     if (!res.ok) {

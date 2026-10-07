@@ -1244,214 +1244,244 @@ function DocumentenContent() {
 
       {showMediataskModal && (
         <div className="upload-overlay">
-          <div className="upload-modal" role="dialog" aria-label="Bezig met uploaden naar Mediatask">
+          <div className="upload-modal mt-modal" role="dialog" aria-label="Uploaden naar Mediatask">
             {(() => {
               const klaar = !!mediataskOrderId && !mediataskError && !mediataskSubmitError;
+              const fout = !!mediataskError || !!mediataskSubmitError;
               const scanSleutels = Object.keys(mediataskSteps).filter((k) => k.startsWith("scan:"));
               const mediaSleutels = Object.keys(mediataskSteps).filter((k) => k.startsWith("media:"));
               const gevuld = LINK_FOLDERS.filter((f) => (existing[f]?.length ?? 0) > 0 && f !== "Optimized");
               const leeg = LINK_FOLDERS.filter((f) => (existing[f]?.length ?? 0) === 0);
-              const teken = (st: MediataskStepStatus | undefined) =>
-                st === "done" ? (
-                  <span className="upload-check" aria-hidden="true">✓</span>
-                ) : st === "error" ? (
-                  <span className="upload-warn" aria-hidden="true">⚠</span>
-                ) : st === "busy" ? (
-                  <span className="spinner" aria-hidden="true" />
+              const puntenwolken = Object.keys(scanBevestigd).length > 0 ? Math.max(...Object.values(scanBevestigd)) : 0;
+              const spinner = <span className="spinner" aria-hidden="true" />;
+
+              // De order en het indienen zijn voor de opnemer één ding: staat
+              // de order erin of niet. Twee regels daarvoor kostten alleen ruimte.
+              const orderSt = mediataskSteps.order;
+              const submitSt = mediataskSteps.submit;
+              const orderTekst =
+                orderSt === "done" && submitSt === "done"
+                  ? vasteOrderId
+                    ? "Afgemaakt en ingediend"
+                    : "Aangemaakt en ingediend"
+                  : vasteOrderId
+                    ? `#${vasteOrderId} afmaken`
+                    : orderSt === "done"
+                      ? "Aangemaakt"
+                      : "Order aanmaken";
+              const orderStatus =
+                orderSt === "error" ? (
+                  <span className="mt-s is-error">⚠ mislukt</span>
+                ) : submitSt === "error" || (mediataskSubmitError && mediataskOrderId) ? (
+                  <span className="mt-s is-error">⚠ niet ingediend</span>
+                ) : orderSt === "done" && submitSt === "done" ? (
+                  <span className="mt-s is-done">✓</span>
+                ) : orderSt === "busy" || submitSt === "busy" ? (
+                  <span className="mt-s">{spinner}</span>
+                ) : orderSt === "done" ? (
+                  <span className="mt-s">wacht op indienen</span>
                 ) : (
-                  <span className="dbx-strip-doc-empty" aria-hidden="true" />
+                  <span className="mt-s">wacht</span>
                 );
-              const klasse = (st: MediataskStepStatus | undefined) =>
-                st === "done" ? "is-done" : st === "error" ? "is-error" : "is-busy";
+
+              const mediaKlaar = mediaSleutels.filter((k) => mediataskSteps[k] === "done").length;
+              const mediaFout = mediaSleutels.filter((k) => mediataskSteps[k] === "error").length;
+              const mediaBezig = mediaSleutels.some((k) => mediataskSteps[k] === "busy" || mediataskSteps[k] === "pending");
 
               return (
                 <>
                   {/* De kop vertelt de uitkomst, niet de bezigheid: als het klaar
                       is wil je dat in één blik zien en niet "bezig…" blijven lezen. */}
-                  <h3>
-                    {mediataskError
-                      ? "Uploaden naar Mediatask mislukt"
-                      : klaar
-                        ? `Klaar — order #${mediataskOrderId} staat bij Mediatask`
-                        : "Bezig met uploaden naar Mediatask…"}
-                  </h3>
-
-                  {!klaar && !mediataskError && (
-                    <>
-                      <div className="doc-upload-bar">
-                        <div className="doc-upload-bar-fill" style={{ width: `${Math.round(mediataskPct)}%` }} />
-                      </div>
-                      <p className="note" style={{ padding: 0, margin: "0 0 12px" }}>{Math.round(mediataskPct)}%</p>
-                    </>
-                  )}
-
-                  {/* Drie blokken, in de volgorde waarin het gebeurt: eerst de
-                      order, dan de scans die er echt heen gaan, dan wat er als
-                      link bij komt. Eerder liep dat door elkaar. */}
-                  <p className="upload-groep">De order</p>
-                  <ul className="upload-list">
-                    <li className={klasse(mediataskSteps.order)}>
-                      {teken(mediataskSteps.order)}
-                      {vasteOrderId
-                        ? `Order #${vasteOrderId} afmaken (staat al bij Mediatask)`
-                        : "Order aanmaken bij Mediatask"}
-                    </li>
-                    <li className={klasse(mediataskSteps.submit)}>
-                      {teken(mediataskSteps.submit)}
-                      Indienen bij Mediatask
-                    </li>
-                  </ul>
-
-                  {scanSleutels.length > 0 && (
-                    <>
-                      <p className="upload-groep">Scans — rechtstreeks naar Mediatask</p>
-                      <ul className="upload-list">
-                        {scanSleutels.map((k) => {
-                          const naam = k.slice(5);
-                          const st = mediataskSteps[k];
-                          return (
-                            <li key={k} className={klasse(st)}>
-                              {teken(st)}
-                              <span className="upload-step-naam">{naam}</span>
-                              <span className="upload-step-note">
-                                {st === "busy"
-                                  ? "doorsturen…"
-                                  : st === "done"
-                                    ? scanAlAanwezig[naam]
-                                      ? "stond al bij Mediatask — tijdens het uploaden doorgestuurd"
-                                      : `staat bij Mediatask${scanBevestigd[naam] ? ` (${scanBevestigd[naam]} aan order)` : ""}`
-                                    : st === "error"
-                                      ? "niet aangekomen"
-                                      : "in de wachtrij"}
-                              </span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-
-                      {/* Wat er ná het versturen bij Mediatask gebeurt. Zonder
-                          deze regel kijk je bij een grote scan een kwartier
-                          lang naar niets, en dat ziet er precies zo uit als een
-                          scan die is afgekeurd. */}
-                      {verwerking && (
-                        <div className={`verwerk-blok${verwerking.klaar >= verwerking.totaal ? " is-klaar" : ""}`}>
-                          {verwerking.klaar >= verwerking.totaal ? (
-                            <span className="upload-check" aria-hidden="true">✓</span>
-                          ) : (
-                            <span className="spinner" aria-hidden="true" />
-                          )}
-                          <span>
-                            <b>
-                              {verwerking.klaar >= verwerking.totaal
-                                ? "Scans zijn verwerkt en goedgekeurd"
-                                : `Mediatask verwerkt de scans — ${verwerking.klaar} van ${verwerking.totaal} klaar`}
-                            </b>
-                            <span>
-                              {verwerking.klaar >= verwerking.totaal
-                                ? "Mediatask heeft de puntenwolken kunnen uitlezen. Er is niets meer te doen."
-                                : "Dit duurt bij een grote scan tot een kwartier en loopt bij Mediatask door. Je kunt dit scherm sluiten en weggaan."}
-                            </span>
-                          </span>
-                        </div>
+                  <div className="mt-head">
+                    <span className={`mt-icon${fout ? " is-error" : ""}`} aria-hidden="true">
+                      {fout ? "!" : klaar ? "✓" : spinner}
+                    </span>
+                    <div className="mt-head-tekst">
+                      <h3>
+                        {mediataskError
+                          ? "Uploaden naar Mediatask mislukt"
+                          : mediataskSubmitError && mediataskOrderId
+                            ? `Order #${mediataskOrderId} aangemaakt, indienen mislukt`
+                            : klaar
+                              ? `Order #${mediataskOrderId} staat bij Mediatask`
+                              : "Bezig met uploaden naar Mediatask"}
+                      </h3>
+                      {klaar && (
+                        <p>
+                          Ingediend{mediataskState ? ` · status: ${mediataskState}` : ""}
+                          {/* Het aantal komt uit Mediatask zelf, ná het koppelen:
+                              dit is de bevestiging dat de scans er ook echt aan hangen. */}
+                          {puntenwolken > 0 && ` · ${puntenwolken} puntenwolk${puntenwolken === 1 ? "" : "en"} aan de order`}
+                        </p>
                       )}
-                    </>
-                  )}
+                      {!mediataskOrderId && !mediataskError && (
+                        <>
+                          <p className="mt-num">
+                            {Math.round(mediataskPct)}% · {mediataskElapsed} s
+                          </p>
+                          <div className="doc-upload-bar">
+                            <div className="doc-upload-bar-fill" style={{ width: `${Math.round(mediataskPct)}%` }} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
 
-                  {mediaSleutels.length > 0 && (
-                    <>
-                      <p className="upload-groep">
-                        Foto&apos;s en video&apos;s — {mediaAlsLink ? "via de downloadlinks in de opmerking bij de order" : "als foto aan de order"}
+                  <div className="mt-body">
+                    {mediataskError && <p className="mt-alert">{mediataskError}</p>}
+                    {mediataskOrderId && mediataskSubmitError && (
+                      <p className="mt-alert">
+                        Het indienen mislukte ({mediataskSubmitError}). Dien de order handmatig in bij Mediatask.
+                        Niet opnieuw uploaden, anders ontstaat er een dubbele order.
                       </p>
-                      <ul className="upload-list">
-                        {mediaSleutels.map((k) => {
-                          const naam = k.slice(6);
-                          const st = mediataskSteps[k];
-                          return (
-                            <li key={k} className={klasse(st)}>
-                              {teken(st)}
-                              <span className="upload-step-naam">{naam}</span>
-                              <span className="upload-step-note">
-                                {st === "done"
-                                  ? mediaAlsLink
-                                    ? "als link meegegeven"
-                                    : "hangt als foto aan de order"
-                                  : st === "error"
-                                    ? "niet aangekomen"
-                                    : "doorsturen…"}
-                              </span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </>
-                  )}
+                    )}
 
-                  {gevuld.length > 0 && (
-                    <>
-                      <p className="upload-groep">Meegestuurd als Dropbox-link</p>
-                      <ul className="upload-list">
-                        {gevuld.map((f) => (
-                          <li key={f} className="is-done">
-                            <span className="upload-check" aria-hidden="true">✓</span>
-                            <span className="upload-step-naam">{f}</span>
-                            <span className="upload-step-note">
-                              {existing[f]?.length} bestand{existing[f]?.length === 1 ? "" : "en"}
-                            </span>
+                    {/* Eén regel per onderdeel, label links en uitkomst rechts, in
+                        de volgorde waarin het gebeurt. De lange lijst per bestand
+                        duwde de knop onder de vouw. */}
+                    <ul className="mt-rows">
+                      <li className="mt-row">
+                        <span className="mt-k">Order</span>
+                        <span className="mt-v">{orderTekst}</span>
+                        {orderStatus}
+                      </li>
+
+                      {scanSleutels.map((k, i) => {
+                        const naam = k.slice(5);
+                        const st = mediataskSteps[k];
+                        const laatste = i === scanSleutels.length - 1;
+                        return (
+                          <li key={k} className="mt-row">
+                            <span className="mt-k">{i === 0 ? (scanSleutels.length > 1 ? "Scans" : "Scan") : ""}</span>
+                            <span className="mt-v mt-file">{naam}</span>
+                            {/* Kort houden: een lange toelichting hier drukte de
+                                bestandsnaam tot één letter per regel samen. */}
+                            {st === "busy" ? (
+                              <span className="mt-s">{spinner} doorsturen…</span>
+                            ) : st === "done" ? (
+                              <span className="mt-s is-done">✓ {scanAlAanwezig[naam] ? "stond er al" : "staat er"}</span>
+                            ) : st === "error" ? (
+                              <span className="mt-s is-error">⚠ niet aangekomen</span>
+                            ) : (
+                              <span className="mt-s">in de wachtrij</span>
+                            )}
+
+                            {/* Wat er ná het versturen bij Mediatask gebeurt. Zonder
+                                deze regel kijk je bij een grote scan een kwartier
+                                lang naar niets, en dat ziet er precies zo uit als
+                                een scan die is afgekeurd. */}
+                            {laatste && verwerking && (
+                              <div className={`mt-proc${verwerking.klaar >= verwerking.totaal ? " is-klaar" : ""}`}>
+                                {verwerking.klaar >= verwerking.totaal ? (
+                                  <span className="upload-check" aria-hidden="true">✓</span>
+                                ) : (
+                                  spinner
+                                )}
+                                <span>
+                                  <b>
+                                    {verwerking.klaar >= verwerking.totaal
+                                      ? "Scans zijn verwerkt en goedgekeurd"
+                                      : `Mediatask verwerkt de scan${verwerking.totaal === 1 ? "" : "s"} · ${verwerking.klaar} van ${verwerking.totaal}`}
+                                  </b>
+                                  <span>
+                                    {verwerking.klaar >= verwerking.totaal
+                                      ? "Er is niets meer te doen."
+                                      : "Duurt tot een kwartier. Je kunt dit scherm sluiten."}
+                                  </span>
+                                </span>
+                              </div>
+                            )}
                           </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
+                        );
+                      })}
 
-                  {/* Lege mappen op één regel: vier grijze regels met "leeg"
-                      duwden de uitkomst uit beeld. */}
-                  {leeg.length > 0 && (
-                    <p className="upload-leeg">Leeg gebleven: {leeg.join(", ")}</p>
-                  )}
+                      {mediaSleutels.length > 0 && (
+                        <li className="mt-row">
+                          <span className="mt-k">Media</span>
+                          <span className="mt-v">
+                            {mediaKlaar === mediaSleutels.length
+                              ? `${mediaKlaar} ${mediaAlsLink ? "als link in de opmerking" : "als foto aan de order"}`
+                              : `${mediaKlaar} van ${mediaSleutels.length} ${mediaAlsLink ? "meegegeven" : "aan de order"}`}
+                          </span>
+                          {mediaFout > 0 ? (
+                            <span className="mt-s is-error">⚠ {mediaFout} niet aangekomen</span>
+                          ) : mediaBezig ? (
+                            <span className="mt-s">{spinner}</span>
+                          ) : (
+                            <span className="mt-s is-done">✓</span>
+                          )}
+                          {/* De bestandsnamen ingeklapt: wie wil controleren klapt
+                              open, en bij een fout staat de lijst al open. */}
+                          <details className="mt-details" open={mediaFout > 0}>
+                            <summary>Toon bestanden</summary>
+                            <ul>
+                              {mediaSleutels.map((k) => {
+                                const st = mediataskSteps[k];
+                                return (
+                                  <li key={k} className={st === "error" ? "is-error" : undefined}>
+                                    {st === "done" ? "✓" : st === "error" ? "⚠" : "…"} {k.slice(6).split("/").pop()}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </details>
+                        </li>
+                      )}
+
+                      {gevuld.length > 0 && (
+                        <li className="mt-row">
+                          <span className="mt-k">Dropbox</span>
+                          <span className="mt-v mt-chips">
+                            {gevuld.map((f) => (
+                              <span key={f} className="mt-chip">
+                                {f} <b>{existing[f]?.length}</b>
+                              </span>
+                            ))}
+                          </span>
+                          <span className="mt-s is-done">✓</span>
+                        </li>
+                      )}
+
+                      {leeg.length > 0 && (
+                        <li className="mt-row is-muted">
+                          <span className="mt-k">Leeg</span>
+                          <span className="mt-v">{leeg.join(", ")}</span>
+                          <span className="mt-s" />
+                        </li>
+                      )}
+                    </ul>
+                  </div>
                 </>
               );
             })()}
-            {!mediataskOrderId && !mediataskError && (
-              <p className="upload-timer">Bezig: {mediataskElapsed}s</p>
-            )}
-            {mediataskOrderId && !mediataskSubmitError && (
-              <p className="upload-timer">
-                ✓ Order #{mediataskOrderId} ingediend bij Mediatask{mediataskState ? ` — status: ${mediataskState}` : ""}
-                {/* Het aantal komt uit Mediatask zelf, ná het koppelen: dit is
-                    de bevestiging dat de scans er ook echt aan hangen. */}
-                {Object.keys(scanBevestigd).length > 0 &&
-                  ` · ${Math.max(...Object.values(scanBevestigd))} puntenwolk(en) aan deze order`}
-              </p>
-            )}
-            {mediataskOrderId && mediataskSubmitError && (
-              <p className="upload-timer" style={{ color: "var(--bad)" }}>
-                ⚠ Order #{mediataskOrderId} is aangemaakt, maar het indienen mislukte ({mediataskSubmitError}). Dien
-                &apos;m handmatig in bij Mediatask — niet opnieuw uploaden, dan ontstaat er een dubbele order.
-              </p>
-            )}
-            {mediataskError && (
-              <>
-                <p className="upload-timer" style={{ color: "var(--bad)" }}>{mediataskError}</p>
+            {/* De knoppen staan buiten het scrollgebied: ook met een lange lijst
+                is "Sluiten en afronden" altijd in beeld. */}
+            <div className="mt-foot">
+              {!mediataskOrderId && !mediataskError && (
+                <span className="mt-foot-tekst">Laat dit scherm open tot het klaar is</span>
+              )}
+              {mediataskError && (
                 <button type="button" className="btn btn-quiet" onClick={() => setShowMediataskModal(false)}>
                   Sluiten
                 </button>
-              </>
-            )}
-            {mediataskOrderId && (
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => {
-                  setShowMediataskModal(false);
-                  // Deze opname is klaar. Terugvallen op de uploadpagina zou
-                  // suggereren dat er nog iets moet gebeuren, en nodigt uit tot
-                  // een tweede order voor hetzelfde adres.
-                  router.push("/");
-                }}
-              >
-                Sluiten en afronden
-              </button>
-            )}
+              )}
+              {mediataskOrderId && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    setShowMediataskModal(false);
+                    // Deze opname is klaar. Terugvallen op de uploadpagina zou
+                    // suggereren dat er nog iets moet gebeuren, en nodigt uit tot
+                    // een tweede order voor hetzelfde adres.
+                    router.push("/");
+                  }}
+                >
+                  Sluiten en afronden
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
