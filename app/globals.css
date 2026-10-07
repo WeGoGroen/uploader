@@ -869,18 +869,6 @@ select:focus-visible, textarea:focus-visible {
   box-shadow: 0 24px 60px rgba(20, 30, 24, 0.35);
 }
 .upload-modal h3 { margin: 0 0 14px; font-size: 16px; font-weight: 680; line-height: 1.35; }
-/* Kopje boven een groep stappen. */
-.upload-groep {
-  margin: 18px 0 8px; font-size: 11px; font-weight: 750;
-  letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint);
-}
-.upload-groep:first-of-type { margin-top: 4px; }
-.upload-leeg {
-  margin: 16px 0 0; font-size: 12px; color: var(--ink-faint);
-}
-/* Naam links, uitkomst rechts — zo staan de uitkomsten onder elkaar en is in
-   één verticale blik te zien of alles goed ging. */
-.upload-step-naam { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .upload-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .upload-list li { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--ink-faint); }
 .upload-list li.is-done { color: var(--ink); }
@@ -1259,12 +1247,6 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
 .scan-list li.is-bezig strong { color: var(--ink-faint); }
 .scan-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 /* Aantal bestanden / "overgeslagen" achter een stap in de upload-popup. */
-.upload-step-note {
-  margin-left: auto; flex: none; text-align: right;
-  font-size: 12px; color: var(--ink-faint);
-}
-.upload-list li.is-done .upload-step-note { color: #1c7a41; }
-.upload-list li.is-error .upload-step-note { color: var(--bad); }
 .scan-pick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .scan-pick-name { font-size: 13px; font-weight: 620; color: var(--ink); }
 
@@ -1840,17 +1822,91 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
 /* Verwerking bij Mediatask, ná het versturen. Bewust een blok met uitleg en
    geen regel in de stappenlijst: die lijst gaat over wat de app doet, dit gaat
    over wachten waar je niets aan hoeft te doen. */
-.verwerk-blok {
-  display: flex; align-items: flex-start; gap: 10px;
-  margin-top: 12px; padding: 12px 13px;
-  background: var(--inset); border: 1px solid var(--rule); border-radius: 12px;
-  font-size: 13px; line-height: 1.45;
+/* ---------- Mediatask-pop-up na de NEN-upload ----------
+   Kop en knoppen staan vast, alleen de regels ertussen scrollen: zo blijft
+   "Sluiten en afronden" altijd in beeld, ook op een iPad in liggende stand. */
+.upload-modal.mt-modal {
+  max-width: 520px; padding: 0; overflow: hidden;
+  display: flex; flex-direction: column;
 }
-.verwerk-blok.is-klaar { background: var(--accent-wash); border-color: var(--accent); }
-.verwerk-blok > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.verwerk-blok b { font-weight: 650; color: var(--ink); }
-.verwerk-blok span span { color: var(--ink-faint); font-size: 12px; }
-.verwerk-blok .spinner, .verwerk-blok .upload-check { flex: none; margin-top: 2px; }
+.mt-head { display: flex; gap: 12px; align-items: flex-start; padding: 20px 22px 14px; }
+.mt-head-tekst { flex: 1; min-width: 0; }
+.mt-head h3 { margin: 0; font-size: 17px; font-weight: 700; line-height: 1.3; text-wrap: balance; }
+.mt-head p { margin: 3px 0 0; font-size: 12.5px; color: var(--ink-faint); }
+.mt-head .doc-upload-bar { margin-top: 10px; }
+.mt-head .doc-upload-bar-fill { background: var(--accent); }
+.mt-num { font-variant-numeric: tabular-nums; }
+.mt-icon {
+  flex: none; width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 16px; font-weight: 800;
+  background: var(--accent-wash); color: #1c7a41;
+}
+.mt-icon.is-error { background: var(--bad-wash); color: var(--bad); }
+.mt-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 22px 6px; }
+.mt-alert {
+  margin: 0 0 8px; padding: 10px 12px; border-radius: 10px;
+  background: var(--bad-wash); color: var(--bad); font-size: 13px; line-height: 1.45;
+}
+/* Label links, wat er is gebeurd in het midden, uitkomst rechts: in één
+   verticale blik te zien of alles goed ging. */
+.mt-rows { list-style: none; margin: 0; padding: 0; }
+.mt-row {
+  display: grid; grid-template-columns: 70px minmax(0, 1fr) auto;
+  gap: 4px 12px; align-items: baseline;
+  padding: 11px 0; border-top: 1px solid var(--rule);
+}
+.mt-row:first-child { border-top: 0; }
+.mt-k {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.mt-v { min-width: 0; overflow-wrap: anywhere; font-size: 14px; color: var(--ink); }
+.mt-file { font-family: var(--mono); font-size: 13px; }
+.mt-s {
+  display: inline-flex; align-items: center; gap: 6px; justify-self: end;
+  font-size: 12.5px; color: var(--ink-faint); white-space: nowrap;
+}
+.mt-s.is-done { color: #1c7a41; }
+.mt-s.is-error { color: var(--bad); }
+.mt-s .spinner, .mt-head .spinner { width: 14px; height: 14px; }
+.mt-row.is-muted .mt-v { color: var(--ink-faint); font-size: 13px; }
+.mt-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.mt-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px;
+  border-radius: 999px; background: var(--inset); border: 1px solid var(--rule); font-size: 12.5px;
+}
+.mt-chip b { font-weight: 650; color: #1c7a41; font-variant-numeric: tabular-nums; }
+/* Wat Mediatask na het versturen nog doet, direct onder de scan. */
+.mt-proc {
+  grid-column: 2 / -1; display: flex; align-items: flex-start; gap: 9px;
+  margin-top: 6px; padding: 9px 11px; border-radius: 10px;
+  background: var(--inset); border: 1px solid var(--rule);
+  font-size: 12.5px; line-height: 1.4;
+}
+.mt-proc.is-klaar { background: var(--accent-wash); border-color: var(--accent); }
+.mt-proc > span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.mt-proc b { font-weight: 650; color: var(--ink); }
+.mt-proc span span { color: var(--ink-faint); }
+.mt-proc .spinner { flex: none; width: 14px; height: 14px; margin-top: 1px; }
+.mt-proc .upload-check { flex: none; }
+.mt-details { grid-column: 2 / -1; }
+.mt-details summary {
+  width: fit-content; cursor: pointer; list-style: none;
+  font-size: 12.5px; color: var(--ink-faint);
+}
+.mt-details summary::-webkit-details-marker { display: none; }
+.mt-details summary::before { content: "▸ "; }
+.mt-details[open] summary::before { content: "▾ "; }
+.mt-details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.mt-details ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }
+.mt-details li { font-family: var(--mono); font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
+.mt-details li.is-error { color: var(--bad); }
+.mt-foot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 22px 18px; border-top: 1px solid var(--rule);
+}
+.mt-foot:empty { display: none; }
+.mt-foot-tekst { font-size: 12.5px; color: var(--ink-faint); }
 
 /* Kerncijfers boven de opnamelijst: doorstroom in één blik. */
 .cijfers {
