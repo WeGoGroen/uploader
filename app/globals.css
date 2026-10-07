@@ -869,17 +869,7 @@ select:focus-visible, textarea:focus-visible {
   box-shadow: 0 24px 60px rgba(20, 30, 24, 0.35);
 }
 .upload-modal h3 { margin: 0 0 14px; font-size: 16px; font-weight: 680; line-height: 1.35; }
-.upload-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.upload-list li { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--ink-faint); }
-.upload-list li.is-done { color: var(--ink); }
-.upload-list li.is-error { color: var(--bad); }
 .upload-check { color: #1c7a41; font-weight: 700; flex: none; }
-.upload-warn { color: var(--bad); font-weight: 700; flex: none; }
-.upload-list .spinner { flex: none; }
-.upload-timer {
-  margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--rule);
-  font-size: 12.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums;
-}
 
 .control {
   width: 100%; min-height: 50px; padding: 0 14px;
