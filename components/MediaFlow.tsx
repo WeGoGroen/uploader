@@ -1040,9 +1040,13 @@ export default function MediaFlow() {
                       <li key={s.key} className={`mt-row${aantal === 0 && mislukt === 0 && bz === 0 ? " is-muted" : ""}`}>
                         <span className="mt-k">{s.naam}</span>
                         <span className="mt-v">
+                          {/* Wat nog onderweg is apart noemen: "0 bestanden" naast een
+                              draaiend icoon las alsof er niets gekozen was. */}
                           {aantal === 0 && bz === 0 && mislukt === 0
                             ? "Niets geüpload"
-                            : `${meervoud(aantal)}${bytes > 0 ? ` · ${leesbareOmvang(bytes)}` : ""}`}
+                            : aantal === 0 && bz > 0
+                              ? `${meervoud(bz)} onderweg`
+                              : `${meervoud(aantal)}${bytes > 0 ? ` · ${leesbareOmvang(bytes)}` : ""}${bz > 0 ? ` · ${bz} onderweg` : ""}`}
                         </span>
                         {bz > 0 ? (
                           <span className="mt-s">

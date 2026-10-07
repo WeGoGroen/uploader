@@ -9,6 +9,7 @@ import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 import UploadPanel from "@/components/UploadPanel";
 import { useRechten } from "@/components/RechtenProvider";
 import ScanStatusKaart from "@/components/ScanStatus";
+import MeerMenu from "@/components/MeerMenu";
 
 interface MediataskOrderSummary {
   address?: string;
@@ -476,20 +477,9 @@ export default function Dashboard() {
                         ) : energielabelStarted ? (
                           <StatusPill label="Energielabel: concept" tone="busy" />
                         ) : (
-                          <>
-                            <a href={`/energielabel?addr=${encodeURIComponent(bagQuery)}`} className="btn btn-quiet">
-                              Energielabel starten
-                            </a>
-                            <button
-                              type="button"
-                              className="today-appt-service-tag"
-                              title="Al geüpload, maar staat hier nog als niet gedaan? Meld het handmatig."
-                              disabled={meldBezig === statusStreet}
-                              onClick={() => meldKlaar(statusStreet)}
-                            >
-                              {meldBezig === statusStreet ? "Bezig…" : "Toch al gedaan?"}
-                            </button>
-                          </>
+                          <a href={`/energielabel?addr=${encodeURIComponent(bagQuery)}`} className="btn btn-quiet">
+                            Energielabel starten
+                          </a>
                         ))}
                       {services.nen &&
                         (() => {
@@ -502,6 +492,24 @@ export default function Dashboard() {
                             </a>
                           );
                         })()}
+                      {/* "Toch al gedaan?" zat als losse knop tussen de hoofdknoppen
+                          in. Het is een uitzondering, geen vervolgstap, dus het
+                          hoort achter de puntjes en niet naast "starten". */}
+                      {services.energielabel && !energielabelDone && incompleteDocs.length === 0 && !energielabelStarted && (
+                        <span className="today-appt-meer">
+                          <MeerMenu
+                            label={`Meer opties voor ${street}`}
+                            bezig={meldBezig === statusStreet}
+                            items={[
+                              {
+                                label: "Energielabel al gedaan",
+                                uitleg: "Al geüpload, maar staat hier nog open",
+                                onClick: () => meldKlaar(statusStreet),
+                              },
+                            ]}
+                          />
+                        </span>
+                      )}
                     </div>
                   </div>
                 );

@@ -381,6 +381,29 @@ h2 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.02em; }
    afspraak met twee diensten rechts buiten de kaart. */
 .draft-actions.today-appt-actions { flex: 1 1 100%; min-width: 0; flex-wrap: wrap; gap: 10px; }
 .today-appt-actions > .btn { flex: 0 1 auto; min-width: 0; white-space: normal; text-align: center; }
+/* De puntjes rechts uitlijnen, los van de hoofdknoppen. */
+.today-appt-meer { margin-left: auto; }
+
+/* ⋯-knop met uitklapmenu (components/MeerMenu). */
+.meer { position: relative; flex: none; }
+.meer-knop {
+  display: grid; place-items: center; width: 40px; height: 40px;
+  border: 1px solid var(--rule-strong); border-radius: 999px;
+  background: var(--paper); color: var(--ink-faint); cursor: pointer;
+}
+.meer-knop:hover, .meer-knop[aria-expanded="true"] { background: var(--inset); color: var(--ink); }
+.meer-knop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.meer-knop .spinner { width: 14px; height: 14px; }
+.meer-menu {
+  position: absolute; z-index: 40; right: 0; top: calc(100% + 6px); min-width: 270px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; padding: 6px;
+  box-shadow: 0 14px 34px rgba(20, 30, 24, 0.22);
+}
+.meer-menu .user-menu-item { min-height: 48px; }
+.meer-menu-tekst { display: flex; flex-direction: column; gap: 1px; }
+.meer-menu-tekst b { font-weight: 600; }
+.meer-menu-tekst span { font-size: 12px; color: var(--ink-faint); }
+.scanstatus-lijst .meer-knop { width: 36px; height: 36px; }
 .btn-refresh .spin { animation: btn-refresh-spin 0.8s linear infinite; }
 @keyframes btn-refresh-spin { to { transform: rotate(360deg); } }
 
@@ -1940,24 +1963,6 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
 .scanstatus-tekst span { font-size: 12px; color: var(--ink-faint); }
 .scanstatus-lijst .btn { flex: none; min-height: 36px; font-size: 12.5px; padding: 0 14px; }
 .scanstatus-acties { flex: none; display: flex; align-items: center; gap: 6px; }
-.scanstatus-meer { position: relative; }
-.scanstatus-meer-knop {
-  display: grid; place-items: center; width: 36px; height: 36px;
-  border: 1px solid var(--rule-strong); border-radius: 999px;
-  background: var(--paper); color: var(--ink-faint); cursor: pointer;
-}
-.scanstatus-meer-knop:hover, .scanstatus-meer-knop[aria-expanded="true"] { background: var(--inset); color: var(--ink); }
-.scanstatus-meer-knop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.scanstatus-meer-knop .spinner { width: 14px; height: 14px; }
-.scanstatus-menu {
-  position: absolute; z-index: 40; right: 0; top: calc(100% + 6px); min-width: 220px;
-  background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; padding: 6px;
-  box-shadow: 0 14px 34px rgba(20, 30, 24, 0.22);
-}
-.scanstatus-menu .user-menu-item { min-height: 48px; }
-.scanstatus-menu-tekst { display: flex; flex-direction: column; gap: 1px; }
-.scanstatus-menu-tekst b { font-weight: 600; }
-.scanstatus-menu-tekst span { font-size: 12px; color: var(--ink-faint); }
 .scanstatus-lijst li.is-goed .scanstatus-icoon { color: #1c7a41; font-weight: 700; }
 
 /* ---------- Instellingen ---------- */
