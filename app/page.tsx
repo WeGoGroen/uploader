@@ -453,7 +453,7 @@ export default function Dashboard() {
                         )}
                       </div>
                     </div>
-                    <div className="draft-actions" style={{ gap: 10, flexWrap: "wrap" }}>
+                    <div className="draft-actions today-appt-actions">
                       {services.energielabel &&
                         (energielabelDone ? (
                           <StatusPill

@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { getSharedAccessToken, listFolderFiles, openFileStream } from "@/lib/dropbox";
-import { attachPointclouds, listPointclouds, requestPointcloudUploads } from "@/lib/mediatask";
+import {
+  attachPointclouds,
+  listPointclouds,
+  requestPointcloudUploads,
+  type MediataskPointcloud,
+} from "@/lib/mediatask";
 import { getOptionalRedis } from "@/lib/redis";
 
 /**
@@ -305,7 +310,10 @@ export async function controleerEnHerstel(
   }
   uit.gecontroleerd = puntenwolken.length;
 
-  const kapot = puntenwolken.filter((p) => (p.images?.length ?? 0) === 0);
+  // Met de hand goedgekeurde scans niet opnieuw versturen: die zijn bij
+  // Mediatask al goed afgehandeld, en nog een keer sturen zet er alleen een
+  // dubbele puntenwolk bij.
+  const kapot = await echtAfgekeurd(orderId, puntenwolken);
   if (kapot.length === 0) return uit;
   uit.mislukt = kapot.map((p) => naamUitUrl(p.url) ?? `puntenwolk ${p.id}`);
 
@@ -331,4 +339,75 @@ export async function controleerEnHerstel(
     }
   }
   return uit;
+}
+
+/**
+ * Afgekeurde scans die iemand met de hand als "toch goed" heeft gemarkeerd.
+ *
+ * Mediatask meldt een afgekeurde scan alleen als een puntenwolk zonder
+ * voorbeeldbeelden. Dat signaal klopt niet altijd: een order kan bij hen
+ * gewoon zijn afgehandeld terwijl er nog een oude of dubbele puntenwolk
+ * zonder beelden aan hangt. Dan bleef er op het dashboard (en in de
+ * ochtendcontrole) een rode melding staan die niet klopt, en die je nergens
+ * weg kon halen.
+ *
+ * Bewaard per puntenwolk-id en niet per order: komt er later een nieuwe scan
+ * bij die wél afgekeurd wordt, dan valt die buiten deze lijst en wordt hij
+ * gewoon weer gemeld. Zo verbergt "goedgekeurd" nooit een nieuw probleem.
+ */
+export interface ScansGoedgekeurd {
+  puntenwolkIds: number[];
+  door: string | null;
+  op: string;
+}
+
+const GOED_PREFIX = "mediatask:scans-goed:";
+
+export async function leesScansGoedgekeurd(orderId: number): Promise<ScansGoedgekeurd | null> {
+  const redis = getOptionalRedis();
+  if (!redis) return null;
+  const raw = await redis.get(`${GOED_PREFIX}${orderId}`).catch(() => null);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ScansGoedgekeurd;
+  } catch {
+    return null;
+  }
+}
+
+/** De puntenwolken zonder beelden die níet met de hand zijn goedgekeurd. */
+export async function echtAfgekeurd(
+  orderId: number,
+  puntenwolken: MediataskPointcloud[]
+): Promise<MediataskPointcloud[]> {
+  const kapot = puntenwolken.filter((p) => (p.images?.length ?? 0) === 0);
+  if (kapot.length === 0) return kapot;
+  const goed = await leesScansGoedgekeurd(orderId);
+  if (!goed) return kapot;
+  const ids = new Set(goed.puntenwolkIds);
+  return kapot.filter((p) => !ids.has(p.id));
+}
+
+/**
+ * Markeert de afgekeurde scans van een order als goed.
+ *
+ * Kijkt eerst nog één keer vers bij Mediatask: misschien is de scan intussen
+ * alsnog verwerkt, en dan is er niets te markeren. Alleen wat op dít moment
+ * zonder beelden is, gaat de lijst in.
+ */
+export async function markeerScansGoed(
+  orderId: number,
+  door: string | null
+): Promise<{ gemarkeerd: number; alAlsnogVerwerkt: boolean }> {
+  const redis = getOptionalRedis();
+  if (!redis) throw new Error("Opslag (Redis) is niet beschikbaar");
+  const puntenwolken = await listPointclouds(orderId);
+  const kapot = puntenwolken.filter((p) => (p.images?.length ?? 0) === 0);
+  if (kapot.length === 0) return { gemarkeerd: 0, alAlsnogVerwerkt: true };
+
+  const bestaand = await leesScansGoedgekeurd(orderId);
+  const ids = Array.from(new Set([...(bestaand?.puntenwolkIds ?? []), ...kapot.map((p) => p.id)]));
+  const waarde: ScansGoedgekeurd = { puntenwolkIds: ids, door, op: new Date().toISOString() };
+  await redis.set(`${GOED_PREFIX}${orderId}`, JSON.stringify(waarde));
+  return { gemarkeerd: kapot.length, alAlsnogVerwerkt: false };
 }
