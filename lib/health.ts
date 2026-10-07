@@ -17,6 +17,7 @@ import { getTeams, requireClickUpConfig, getListCustomFields, getClickUpAccounts
 import { staatUit } from "@/lib/koppelingen";
 import { haalPersoneel } from "@/lib/personeel";
 import { getAgencies, listOrders, listPointclouds } from "@/lib/mediatask";
+import { echtAfgekeurd } from "@/lib/mediatask-pointclouds";
 import { suggestAddresses } from "@/lib/pdok";
 import { calendarLocationToBagQuery } from "@/lib/address-format";
 import { getAccessTokenForAccount, getTodayEvents } from "@/lib/google-calendar";
@@ -456,7 +457,9 @@ export async function draaiControles(): Promise<Gezondheidsrapport> {
       const stuk: string[] = [];
       for (const o of orders) {
         const pcs = await listPointclouds(o.id).catch(() => []);
-        const kapot = pcs.filter((p) => (p.images?.length ?? 0) === 0).length;
+        // Met de hand goedgekeurde scans (⋯ → Verbergen op het dashboard)
+        // overslaan: die stonden bij Mediatask al goed.
+        const kapot = (await echtAfgekeurd(o.id, pcs)).length;
         if (kapot > 0) stuk.push(`#${o.id} (${kapot})`);
       }
       if (stuk.length > 0) {

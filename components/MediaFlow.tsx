@@ -962,60 +962,120 @@ export default function MediaFlow() {
         </div>
         <div className="pinned-head-spacer" style={{ height: pinnedHeadHeight }} />
 
-        <div
-          className="pad"
-          style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}
-        >
+        <div className="mt-scherm">
           {renderStappen()}
-          <h1>Klaar</h1>
-          <p className="lede">
-            {bezigTotaal > 0
-              ? `Nog ${bezigTotaal} bestand${bezigTotaal === 1 ? "" : "en"} onderweg naar Dropbox — dat loopt door, ook als je dit scherm verlaat.`
-              : !dropbox && takenVanOpname.length === 0
-                ? // Zonder blik in Dropbox is "niets geüpload" een gok: via de
-                  // Dropbox-app kan de map allang vol staan.
-                  dropboxFout
-                  ? "Dropbox kon niet worden bekeken. Via “Openen” bovenaan zie je wat er staat."
-                  : "Even kijken wat er in Dropbox staat…"
-                : totaalInDropbox === 0
-                  ? // Niets aangeleverd: dan is "alles staat in Dropbox" een loze
-                    // bevestiging van werk dat niet gedaan is.
-                    "Er is niets geüpload voor dit adres. Ga terug om alsnog bestanden te kiezen."
-                  : `${totaalInDropbox} bestand${totaalInDropbox === 1 ? "" : "en"} in Dropbox${
-                      bytesInDropbox > 0 ? ` (${leesbareOmvang(bytesInDropbox)})` : ""
-                    }${
-                      // Via de Dropbox-app kan het nog doorlopen; dat eerlijk
-                      // zeggen i.p.v. "alles staat erin".
-                      MEDIA_STAPPEN.some(komtNogBinnen) ? " — er komt nog binnen via de Dropbox-app." : "."
-                    }`}
-          </p>
+          {(() => {
+            // Zelfde opbouw als de upload-pop-ups bij NEN en Energielabel: de
+            // uitkomst in de kop, en per soort één regel met de uitkomst rechts.
+            const perSoort = MEDIA_STAPPEN.map((s) => {
+              const eigen = takenVanOpname.filter((t) => t.folder === s.map);
+              const bezig = eigen.filter((t) => t.dropbox === "uploading").length;
+              const mislukt = eigen.filter((t) => t.dropbox === "error").length;
+              const lopend = eigen.filter((t) => t.dropbox !== "error");
+              const pct =
+                bezig > 0
+                  ? Math.round(
+                      lopend.reduce((tot, t) => tot + (t.dropbox === "done" ? 100 : t.pct), 0) / Math.max(1, lopend.length)
+                    )
+                  : null;
+              return { s, aantal: aantalVoor(s), bytes: dropbox?.stappen[s.key]?.bytes ?? 0, bezig, mislukt, pct };
+            });
+            const misluktTotaal = perSoort.reduce((som, r) => som + r.mislukt, 0);
+            const eersteMislukt = perSoort.find((r) => r.mislukt > 0);
+            const nogNietBekeken = !dropbox && takenVanOpname.length === 0;
+            const meervoud = (n: number) => `${n} bestand${n === 1 ? "" : "en"}`;
 
-          <ul className="media-files">
-            {MEDIA_STAPPEN.map((s) => {
-              const aantal = aantalVoor(s);
-              const bytes = dropbox?.stappen[s.key]?.bytes ?? 0;
-              const mislukt = takenVanOpname.filter((t) => t.folder === s.map && t.dropbox === "error").length;
-              return (
-                <li key={s.key}>
-                  <span className="media-file-name">{s.naam}</span>
-                  <span className="media-file-state">
-                    {aantal === 0 ? "niets" : `${aantal}${bytes > 0 ? ` · ${leesbareOmvang(bytes)}` : ""}`}
-                    {mislukt > 0 ? ` · ${mislukt} mislukt` : ""}
+            const fout = misluktTotaal > 0 || (nogNietBekeken && dropboxFout) || (!nogNietBekeken && totaalInDropbox === 0);
+            const bezig = bezigTotaal > 0 || (nogNietBekeken && !dropboxFout);
+            const titel =
+              bezigTotaal > 0
+                ? `Nog ${meervoud(bezigTotaal)} onderweg naar Dropbox`
+                : nogNietBekeken
+                  ? // Zonder blik in Dropbox is "niets geüpload" een gok: via de
+                    // Dropbox-app kan de map allang vol staan.
+                    dropboxFout
+                    ? "Dropbox kon niet worden bekeken"
+                    : "Even kijken wat er in Dropbox staat…"
+                  : totaalInDropbox === 0
+                    ? // Niets aangeleverd: dan is "klaar" een loze bevestiging
+                      // van werk dat niet gedaan is.
+                      "Er is niets geüpload voor dit adres"
+                    : misluktTotaal > 0
+                      ? `${meervoud(misluktTotaal)} niet in Dropbox gekomen`
+                      : `Klaar — ${meervoud(totaalInDropbox)} in Dropbox`;
+            const onderTitel = [
+              bytesInDropbox > 0 ? leesbareOmvang(bytesInDropbox) : null,
+              // Via de Dropbox-app kan het nog doorlopen; dat eerlijk zeggen
+              // i.p.v. "alles staat erin".
+              MEDIA_STAPPEN.some(komtNogBinnen) ? "er komt nog binnen via de Dropbox-app" : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            const uitleg =
+              bezigTotaal > 0
+                ? "Loopt door, ook als je dit scherm verlaat"
+                : nogNietBekeken && dropboxFout
+                  ? "Via “Openen” bovenaan zie je wat er staat"
+                  : !nogNietBekeken && totaalInDropbox === 0
+                    ? "Ga terug om alsnog bestanden te kiezen"
+                    : eersteMislukt
+                      ? `Ga terug naar ${eersteMislukt.s.naam} om ze opnieuw te kiezen`
+                      : null;
+
+            return (
+              <>
+                <div className="mt-head">
+                  <span className={`mt-icon${fout ? " is-error" : ""}`} aria-hidden="true">
+                    {fout ? "!" : bezig ? <span className="spinner" /> : "✓"}
                   </span>
-                </li>
-              );
-            })}
-          </ul>
+                  <div className="mt-head-tekst">
+                    <h1 className="mt-titel">{titel}</h1>
+                    {onderTitel && <p>{onderTitel}</p>}
+                  </div>
+                </div>
 
-          {/* Eén slotknop: afronden brengt je terug naar het adresscherm, dus
-              een aparte "Nieuw adres" ernaast deed hetzelfde. Dropbox blijft
-              bereikbaar via "Openen" in de balk bovenaan — dat scheelt de
-              opnemer een omweg langs de Dropbox-app om hier klaar te zijn. */}
-          <div className="form-foot" style={{ marginTop: 16, justifyContent: "flex-end" }}>
-            <button className="btn btn-primary" onClick={afronden}>
-              Afronden
-            </button>
-          </div>
+                <div className="mt-body">
+                  <ul className="mt-rows">
+                    {perSoort.map(({ s, aantal, bytes, bezig: bz, mislukt, pct }) => (
+                      <li key={s.key} className={`mt-row${aantal === 0 && mislukt === 0 && bz === 0 ? " is-muted" : ""}`}>
+                        <span className="mt-k">{s.naam}</span>
+                        <span className="mt-v">
+                          {aantal === 0 && bz === 0 && mislukt === 0
+                            ? "Niets geüpload"
+                            : `${meervoud(aantal)}${bytes > 0 ? ` · ${leesbareOmvang(bytes)}` : ""}`}
+                        </span>
+                        {bz > 0 ? (
+                          <span className="mt-s">
+                            <span className="spinner" aria-hidden="true" />
+                            {pct !== null ? `${pct}%` : "bezig"}
+                          </span>
+                        ) : mislukt > 0 ? (
+                          <span className="mt-s is-error">⚠ {mislukt} mislukt</span>
+                        ) : komtNogBinnen(s) ? (
+                          <span className="mt-s">komt nog binnen</span>
+                        ) : aantal > 0 ? (
+                          <span className="mt-s is-done">✓ in Dropbox</span>
+                        ) : (
+                          <span className="mt-s">—</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Eén slotknop: afronden brengt je terug naar het adresscherm, dus
+                    een aparte "Nieuw adres" ernaast deed hetzelfde. Dropbox blijft
+                    bereikbaar via "Openen" in de balk bovenaan — dat scheelt de
+                    opnemer een omweg langs de Dropbox-app om hier klaar te zijn. */}
+                <div className="mt-foot">
+                  {uitleg && <span className="mt-foot-tekst">{uitleg}</span>}
+                  <button className="btn btn-primary mt-foot-knop" onClick={afronden}>
+                    Afronden
+                  </button>
+                </div>
+              </>
+            );
+          })()}
         </div>
       </>
     );

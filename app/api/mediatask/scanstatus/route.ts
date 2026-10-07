@@ -3,7 +3,7 @@ import { huidigeMediataskGebruiker, listOrders, listPointclouds } from "@/lib/me
 import { getActiveAccountName } from "@/lib/active-account";
 import { eigenOrders } from "@/lib/mediatask-format";
 import { getOptionalRedis } from "@/lib/redis";
-import { leesOrderTijd } from "@/lib/mediatask-pointclouds";
+import { echtAfgekeurd, leesOrderTijd, markeerScansGoed } from "@/lib/mediatask-pointclouds";
 
 /**
  * Per recente order van jóu: hoeveel scans er verwerkt zijn bij Mediatask.
@@ -83,7 +83,9 @@ export async function GET(request: Request) {
       const pcs = await listPointclouds(o.id).catch(() => []);
       if (pcs.length === 0) continue;
 
-      const klaar = pcs.filter((p) => (p.images?.length ?? 0) > 0).length;
+      // Met de hand goedgekeurde scans tellen als klaar: die stonden bij
+      // Mediatask al goed, alleen het signaal van de API klopte niet.
+      const klaar = pcs.length - (await echtAfgekeurd(o.id, pcs)).length;
       // Mediatask geeft geen aanmaakmoment terug; we gebruiken het moment
       // waarop wij de order aanmaakten (vastgelegd bij het versturen).
       const gemaakt = await leesOrderTijd(o.id);
@@ -116,6 +118,44 @@ export async function GET(request: Request) {
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Scanstatus ophalen mislukt" },
+      { status: 502 }
+    );
+  }
+}
+
+/**
+ * "Verbergen" vanuit het ⋯-menu: de afgekeurde scans van een order markeren
+ * als goed.
+ *
+ * Voor de melding die niet klopt: de order is bij Mediatask goed doorgekomen,
+ * maar er hangt nog een puntenwolk zonder beelden aan. Vóór het markeren wordt
+ * nog één keer vers gekeken; daarna verdwijnt de melding ook uit de
+ * ochtendcontrole en de controle-route, en verstuurt niemand de scan opnieuw.
+ */
+export async function POST(request: Request) {
+  const ikBen = await getActiveAccountName();
+  if (!ikBen) return NextResponse.json({ error: "niet ingelogd" }, { status: 401 });
+
+  const body = (await request.json().catch(() => null)) as { orderId?: unknown } | null;
+  const orderId = Number(body?.orderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    return NextResponse.json({ error: "ongeldig ordernummer" }, { status: 400 });
+  }
+
+  // Alleen je eigen orders: dezelfde grens als de kaart zelf trekt.
+  const ik = await huidigeMediataskGebruiker();
+  if (!ik?.eigen || !eigenOrders(await listOrders(), ik.id).some((o) => o.id === orderId)) {
+    return NextResponse.json({ error: "deze order staat niet op jouw naam" }, { status: 403 });
+  }
+
+  try {
+    const uitkomst = await markeerScansGoed(orderId, ikBen);
+    const redis = getOptionalRedis();
+    if (redis) await redis.del(`${CACHE_PREFIX}${ikBen}`).catch(() => {});
+    return NextResponse.json(uitkomst);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Verbergen mislukt" },
       { status: 502 }
     );
   }

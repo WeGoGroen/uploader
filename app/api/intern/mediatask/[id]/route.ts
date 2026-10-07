@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
 import { getOrder, listPointclouds, requireMediataskConfig } from "@/lib/mediatask";
+import { leesScansGoedgekeurd } from "@/lib/mediatask-pointclouds";
 
 export const maxDuration = 45;
 
@@ -40,9 +41,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "ongeldig ordernummer" }, { status: 400 });
   }
 
-  const [order, pointclouds, comments, history, activities] = await Promise.all([
+  const [order, pointclouds, goedgekeurd, comments, history, activities] = await Promise.all([
     getOrder(orderId).catch(() => null),
     listPointclouds(orderId).catch(() => []),
+    leesScansGoedgekeurd(orderId),
     probeer<unknown[]>(`/api/orders/${orderId}/comments`),
     probeer<unknown[]>(`/api/orders/${orderId}/history`),
     probeer<unknown[]>(`/api/orders/${orderId}/activities`),
@@ -60,6 +62,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   return NextResponse.json({
     order: { ...order, mediataskUrl: basis ? `${basis}/orders/${orderId}` : null },
     pointclouds,
+    // Puntenwolken zonder beelden die iemand op het dashboard als "toch goed"
+    // heeft gemarkeerd (⋯ → Verbergen). Die zijn bij Mediatask goed
+    // doorgekomen: niet als afgekeurd melden en niet opnieuw versturen. Een
+    // puntenwolk zonder beelden die hier níet in staat, is wel een probleem.
+    handmatigGoedgekeurd: goedgekeurd,
     // Alle drie proberen: welke van de drie Mediatask aanbiedt is niet
     // gedocumenteerd, en dit is één keer uitzoeken in plaats van gokken.
     comments: comments ?? [],
