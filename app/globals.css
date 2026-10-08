@@ -793,6 +793,31 @@ select:focus-visible, textarea:focus-visible {
 .compass-modal .dbx-strip-docs { grid-template-columns: 1fr; }
 /* Rode rand zolang er geen makelaar gekozen is — doorklikken kan dan niet. */
 .compass-modal.is-invalid { border: 2px solid var(--bad); }
+/* Spoed-schakelaar in "Klopt dit?" (NEN): één tik in plaats van via
+   "Aanpassen". Oranje als hij aan staat, zodat spoed niet ongemerkt meegaat. */
+.prio-schakel {
+  display: flex; align-items: center; gap: 14px; margin-top: 12px; padding: 12px 14px;
+  border: 1px solid var(--rule-strong); border-radius: 12px; background: var(--paper); cursor: pointer;
+}
+.prio-schakel.is-aan { border-color: #e8b44c; background: var(--warn-wash); }
+.prio-schakel.is-vast { cursor: default; opacity: 0.7; }
+.prio-tekst { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.prio-tekst b { font-size: 15px; font-weight: 650; }
+.prio-tekst span { font-size: 12.5px; color: var(--ink-faint); }
+.prio-switch {
+  appearance: none; flex: none; width: 52px; height: 30px; margin: 0;
+  border-radius: 999px; background: var(--rule-strong); position: relative; cursor: pointer;
+  transition: background 0.15s;
+}
+.prio-switch::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 0.15s;
+}
+.prio-switch:checked { background: #c98a12; }
+.prio-switch:checked::after { transform: translateX(22px); }
+.prio-switch:disabled { cursor: default; }
+.prio-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .prio-switch, .prio-switch::after { transition: none; } }
 /* Ontbrekende makelaar in de vinklijst: opvallend rood i.p.v. een groen vinkje. */
 .dbx-strip-doc-row.is-warning-row { color: var(--bad); font-weight: 700; }
 .dbx-strip-doc-row.is-warning-row .dbx-strip-doc-status { color: var(--bad); font-weight: 700; }
