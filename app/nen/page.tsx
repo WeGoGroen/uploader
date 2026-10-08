@@ -867,6 +867,17 @@ export default function UploadNen() {
     );
   }
 
+  // Mediatask kent twee prioriteiten: "no" (normale planning) en "yes"
+  // (spoed). Wisselen kon alleen via "Aanpassen" in de ordersectie; de
+  // schakelaar in "Klopt dit?" doet het met één tik, vlak voordat de order
+  // wordt aangemaakt. Zonder beide waarden (andere inrichting bij Mediatask)
+  // blijft het bij de gewone keuzelijst.
+  const spoedKeuze = (() => {
+    const ja = config?.priorities.find((p) => p.name.toLowerCase() === "yes");
+    const nee = config?.priorities.find((p) => p.name.toLowerCase() === "no");
+    return ja && nee ? { ja: ja.id, nee: nee.id } : null;
+  })();
+
   // Is er (automatisch of handmatig) een makelaar gekozen? Bepaalt de rode
   // waarschuwing in de adreskaart én of de bevestigingspop-up door mag naar
   // de documentenpagina.
@@ -875,7 +886,7 @@ export default function UploadNen() {
   // Overzicht van alle al ingevulde Mediatask-ordergegevens (m.u.v. de
   // foto/tekening-URL's), als vinklijst onder het adres — zodat in één oogopslag
   // zichtbaar is wat er al is voorgevuld, zonder eerst de sectie open te klappen.
-  function renderMediataskSummary() {
+  function renderMediataskSummary({ zonderPrio = false }: { zonderPrio?: boolean } = {}) {
     const items: { label: string; value: string }[] = [];
 
     const productLabel = selectedProduct?.full_name ?? (manualProductId || null);
@@ -885,7 +896,7 @@ export default function UploadNen() {
     if (agencyLabel) items.push({ label: "Makelaar", value: agencyLabel });
 
     const priorityLabel = config?.priorities.find((p) => p.id === priorityId)?.name ?? (manualPriorityId || null);
-    if (priorityLabel) items.push({ label: "Prioriteit", value: priorityLabel });
+    if (priorityLabel && !(zonderPrio && spoedKeuze)) items.push({ label: "Prioriteit", value: priorityLabel });
 
     for (const [key, value] of Object.entries(finalProductConfig)) {
       if (!value) continue;
@@ -1543,7 +1554,32 @@ export default function UploadNen() {
               </button>
             </div>
 
-            {agencyChosen && !agencyEditMode && renderMediataskSummary()}
+            {agencyChosen && !agencyEditMode && renderMediataskSummary({ zonderPrio: true })}
+
+            {agencyChosen && !agencyEditMode && spoedKeuze && (
+              // Een bestaande order houdt zijn prioriteit: deze app past die
+              // nergens aan, dus de schakelaar mag dan niets beloven.
+              <label className={`prio-schakel${priorityId === spoedKeuze.ja ? " is-aan" : ""}${result ? " is-vast" : ""}`}>
+                <span className="prio-tekst">
+                  <b>Spoed</b>
+                  <span>
+                    {result
+                      ? `Staat vast op order #${result.orderId}. Wijzigen kan in Mediatask zelf.`
+                      : priorityId === spoedKeuze.ja
+                        ? "Mediatask pakt deze order met voorrang op."
+                        : "Normale planning bij Mediatask."}
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  className="prio-switch"
+                  checked={priorityId === spoedKeuze.ja}
+                  disabled={!!result || orderSetup === "bezig"}
+                  onChange={(e) => setPriorityId(e.target.checked ? spoedKeuze.ja : spoedKeuze.nee)}
+                />
+              </label>
+            )}
 
             {agencyEditMode || !agencyChosen ? (
               <>
