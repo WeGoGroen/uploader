@@ -9,6 +9,7 @@ import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 import { normalizeForMatch } from "@/lib/address-format";
 import { configVoorProduct } from "@/lib/mediatask-format";
 import { meldGestart, startHartslag, type OpnameMelding } from "@/lib/opname-melden";
+import { tijdslimiet } from "@/lib/tijdslimiet";
 
 // Zelfde submap-structuur als het NEN2580-sjabloon in Dropbox ("Voorbeeld
 // Map NEN2580"). Optimized staat vooraan: dat is de map waar de opnemer
@@ -758,6 +759,11 @@ export default function UploadNen() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ woonplaats: address.woonplaatsnaam, straatEnNummer, kind: "nen" }),
+        // Normaal tien seconden (straatbeelden erbij). Op een iPad met een
+        // weggevallen verbinding gaf fetch nooit antwoord en bleef de knop op
+        // "Dropbox-map klaarzetten…" staan; nu volgt een melding en kan
+        // opnieuw tikken. De map wordt hergebruikt, dus dat is veilig.
+        signal: tijdslimiet(60_000),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.path) {
@@ -768,7 +774,7 @@ export default function UploadNen() {
       void refreshFileCounts(data);
       return data as DropboxFolder;
     } catch {
-      setFolderError("De Dropbox-map kon niet worden aangemaakt.");
+      setFolderError("De Dropbox-map kon niet worden aangemaakt. Tik nog een keer op Documenten uploaden.");
       return null;
     } finally {
       setFolderBusy(false);
