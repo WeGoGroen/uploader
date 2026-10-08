@@ -6,6 +6,7 @@ import {
   getSharedAccessToken,
   sanitizePathSegment,
 } from "@/lib/dropbox";
+import { isEnergielabelProjectmap } from "@/lib/energielabel-projectmap-pad";
 
 export const maxDuration = 30;
 
@@ -24,8 +25,10 @@ export const maxDuration = 30;
  *
  * Drie grenzen, en ze zijn het punt van deze route:
  *
- *  1. Alleen een projectmap onder "Automatie Energielabels" — direct, of in het
- *     archief "Afgerond". Een pad daarbuiten is geen label-dossier.
+ *  1. Alleen een projectmap van een energielabel: onder "Automatie
+ *     Energielabels" (direct of in "Afgerond"), of in de oude indeling
+ *     "Intern (GoGroen)/<maand>/". Een pad daarbuiten is geen label-dossier;
+ *     zie lib/energielabel-projectmap-pad.ts.
  *  2. De projectmap moet al bestaan. Deze route maakt er nooit een aan: geen
  *     map betekent dat een adres anders gespeld staat, en een tweede map naast
  *     de echte verspreidt de stukken zonder dat iemand het merkt.
@@ -36,15 +39,6 @@ export const maxDuration = 30;
 
 const HOOFDMAP = "Automatie Energielabels";
 const SUBMAP = "EP-Online";
-
-function isProjectmap(pad: string): boolean {
-  if (!pad.startsWith(`/${HOOFDMAP}/`) || pad.includes("..") || pad.endsWith("/")) return false;
-  const delen = pad.split("/").filter(Boolean);
-  // ["Automatie Energielabels", "<adres>"] of ["Automatie Energielabels", "Afgerond", "<adres>"]
-  if (delen.length === 2) return delen[1] !== "Afgerond";
-  if (delen.length === 3) return delen[1] === "Afgerond";
-  return false;
-}
 
 export async function POST(request: Request) {
   if (!isInternRequest(request)) {
@@ -57,9 +51,9 @@ export async function POST(request: Request) {
   } | null;
 
   const projectmap = body?.projectmap?.trim() ?? "";
-  if (!isProjectmap(projectmap)) {
+  if (!isEnergielabelProjectmap(projectmap)) {
     return NextResponse.json(
-      { error: `alleen een projectmap onder /${HOOFDMAP} — kreeg "${projectmap}"` },
+      { error: `alleen een projectmap onder /${HOOFDMAP} of Intern (GoGroen) — kreeg "${projectmap}"` },
       { status: 400 }
     );
   }
