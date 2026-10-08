@@ -44,6 +44,8 @@ export interface Kandidaat {
   /** Aantal bestanden dat bij het peilen gezien is — genoeg om een lege map
       van een gevulde te onderscheiden. */
   bestanden: number;
+  /** De namen van wat er direct in de map staat (hooguit honderd). */
+  namen: string[];
 }
 
 interface Regel {
@@ -84,7 +86,7 @@ async function lijst(accessToken: string, pad: string): Promise<Regel[]> {
 async function peil(
   accessToken: string,
   pad: string
-): Promise<{ laatstGewijzigd: string | null; bestanden: number }> {
+): Promise<{ laatstGewijzigd: string | null; bestanden: number; namen: string[] }> {
   const regels = await lijst(accessToken, pad).catch(() => [] as Regel[]);
   const bestanden = regels.filter((r) => r[".tag"] === "file");
   const datums = bestanden.map((b) => b.server_modified).filter((d): d is string => Boolean(d));
@@ -94,6 +96,10 @@ async function peil(
   return {
     laatstGewijzigd: datums.sort().pop() ?? null,
     bestanden: bestanden.length + submappen,
+    // Wat er direct in staat, voor het control center: bij drie of meer
+    // treffers kiest het de enige map met een opnameformulier of met het
+    // ClickUp-id van de opdracht. Begrensd, want het gaat als JSON mee.
+    namen: regels.map((r) => r.name ?? "").filter(Boolean).slice(0, 100),
   };
 }
 
@@ -113,7 +119,7 @@ export async function zoekKandidaten(
   const doel = parseProjectFolderName(adres);
   if (!doel) return [];
 
-  const gevonden: Omit<Kandidaat, "laatstGewijzigd" | "bestanden">[] = [];
+  const gevonden: Omit<Kandidaat, "laatstGewijzigd" | "bestanden" | "namen">[] = [];
 
   for (const locatie of ENERGIELABEL_LOCATIES) {
     const bovenste = await lijst(accessToken, locatie.pad);
@@ -149,7 +155,7 @@ export async function zoekKandidaten(
     uit.push({ ...k, ...(await peil(accessToken, k.pad)) });
   }
   for (const k of gevonden.slice(maxPeilingen)) {
-    uit.push({ ...k, laatstGewijzigd: null, bestanden: 0 });
+    uit.push({ ...k, laatstGewijzigd: null, bestanden: 0, namen: [] });
   }
   return uit;
 }
