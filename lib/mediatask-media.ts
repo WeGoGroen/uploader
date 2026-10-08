@@ -8,6 +8,7 @@ import {
   type MediaUploadTarget,
 } from "@/lib/mediatask";
 import { bewaarMd5, leesbareFout, leesMd5, type Md5Hint } from "@/lib/mediatask-pointclouds";
+import { naamUitUrl } from "@/lib/mediatask-bestandsnaam";
 
 /**
  * Foto's en video's uit Dropbox meesturen naar Mediatask, als foto's aan de
@@ -59,18 +60,11 @@ export function contentType(naam: string): string {
   return CONTENT_TYPES[ext] ?? "application/octet-stream";
 }
 
-/** De bestandsnaam uit de downloadlink die Mediatask teruggeeft. */
-function naamUitUrl(url: string): string | null {
-  const m = /filename%3D%22([^%]+)%22/.exec(url) ?? /filename="([^"]+)"/.exec(url);
-  if (m) return decodeURIComponent(m[1]);
-  const laatste = url.split("?")[0].split("/").pop();
-  return laatste ? decodeURIComponent(laatste) : null;
-}
 
 /** Wat er al als foto aan de order hangt — om niets dubbel te versturen. */
 export async function alAanwezigeFotoNamen(orderId: number): Promise<Set<string>> {
   const aanwezig = await listPhotos(orderId).catch(() => []);
-  return new Set(aanwezig.map((p) => naamUitUrl(p.url)).filter((n): n is string => Boolean(n)));
+  return new Set(aanwezig.map((p) => naamUitUrl(p.url, { terugvalOpPad: true })).filter((n): n is string => Boolean(n)));
 }
 
 /** Eén bestand: aanmelden, doorzetten naar S3, koppelen. */

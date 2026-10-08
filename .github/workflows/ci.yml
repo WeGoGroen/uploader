@@ -15,11 +15,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      # Lint heeft een aantal pre-existing meldingen door de app heen (een
-      # strengere hooks-regel die met Next 16 is meegekomen) — nog niet
-      # blokkerend gemaakt zodat CI niet meteen roodstaat; wel zichtbaar in
-      # de workflow-log als aandachtspunt voor een aparte opschoonronde.
+      # Blokkerend: de meldingen van de strengere hooks-regel uit Next 16 zijn
+      # opgeruimd. Waarschuwingen laten CI niet falen, fouten wel.
       - run: npm run lint
-        continue-on-error: true
       - run: npm test
       - run: npm run build

@@ -204,7 +204,6 @@ export default function Sidebar({
   const onLoginPage = pathname === "/login";
   useEffect(() => {
     if (!onLoginPage) loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onLoginPage]);
 
   /*
@@ -219,7 +218,6 @@ export default function Sidebar({
     const bij = () => loadAll();
     window.addEventListener("koppelingen-gewijzigd", bij);
     return () => window.removeEventListener("koppelingen-gewijzigd", bij);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

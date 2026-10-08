@@ -140,7 +140,6 @@ function DocumentenContent() {
   // voorkomt dat je na "Toch doorsturen" opnieuw de hele molen doorloopt.
   const [scanCheckOpen, setScanCheckOpen] = useState(false);
   // Tekstregel bij de scan-stap in de voortgangspop-up.
-  const [scanUploadStap, setScanUploadStap] = useState<string | null>(null);
   // Id van de vastgelegde scancontrole, zodat die aan de order gekoppeld kan
   // worden zodra we een ordernummer hebben.
   const [scanRecordId, setScanRecordId] = useState<string | null>(null);

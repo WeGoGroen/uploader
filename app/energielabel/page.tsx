@@ -804,26 +804,36 @@ export default function Home() {
     return () => clearInterval(id);
   }, [uploadProgress]);
 
+  /*
+    Zoeken terwijl je typt. Een te korte zoekterm wist de lijst niet meer via
+    state maar valt weg in wat er getoond wordt (zoekresultaten hieronder):
+    state zetten in de body van een effect geeft een extra render per
+    toetsaanslag. En een antwoord dat binnenkomt nadat je al verder typte,
+    overschrijft de nieuwere resultaten niet meer.
+  */
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (query.trim().length < 3) {
-      setSuggestions([]);
-      return;
-    }
+    if (query.trim().length < 3) return;
+    let actueel = true;
     debounceRef.current = setTimeout(async () => {
       setSearching(true);
       try {
         const res = await fetch(`/api/address/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
-        setSuggestions(data.suggestions ?? []);
+        if (actueel) setSuggestions(data.suggestions ?? []);
+      } catch {
+        // Geen verbinding: de oude lijst laten staan, de volgende toets probeert opnieuw.
       } finally {
         setSearching(false);
       }
     }, 300);
     return () => {
+      actueel = false;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query]);
+
+  const zoekresultaten = query.trim().length >= 3 ? suggestions : [];
 
   // Groepeer de technische velden één keer, niet bij elke render.
   const groupedFields = useMemo(() => {
@@ -984,6 +994,12 @@ export default function Home() {
     setLoadingAddress(true);
     setAddress(null);
     setDraftId(null);
+    // Ook het id dat het opslaan-effect als terugval gebruikt. Bleef dat staan,
+    // dan schreef het nieuwe adres (met lege velden) zich weg onder het id van
+    // het concept dat je net had hervat: wie via "Terug naar adres" per
+    // ongeluk een andere afspraak aantikte, was al zijn ingevulde velden kwijt.
+    // resetSearch deed dit al; dit pad niet.
+    pendingDraftIdRef.current = null;
     setCreatedTaskUrl(null);
     setCreateError(null);
     setStep("search");
@@ -1742,16 +1758,16 @@ export default function Home() {
 
             {nearby && nearby.length === 0 && <p className="note">Geen adressen gevonden in de buurt.</p>}
 
-            {((nearby && nearby.length > 0) || (showManualSearch && suggestions.length > 0)) && (
+            {((nearby && nearby.length > 0) || (showManualSearch && zoekresultaten.length > 0)) && (
               <div>
                 <div className="list-head">
                   <span className="eyebrow">
-                    {showManualSearch && suggestions.length > 0 ? "Zoekresultaten" : "Dichtstbijzijnde adressen"}
+                    {showManualSearch && zoekresultaten.length > 0 ? "Zoekresultaten" : "Dichtstbijzijnde adressen"}
                   </span>
                 </div>
                 <ul className="rows">
-                  {(showManualSearch && suggestions.length > 0
-                    ? suggestions.map((a) => ({ ...a, distanceMeters: null as number | null }))
+                  {(showManualSearch && zoekresultaten.length > 0
+                    ? zoekresultaten.map((a) => ({ ...a, distanceMeters: null as number | null }))
                     : (nearby ?? []).map((a) => ({ ...a, distanceMeters: a.distanceMeters as number | null }))
                   ).map((a) => (
                     <li key={a.id}>

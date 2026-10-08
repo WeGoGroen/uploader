@@ -44,6 +44,9 @@ function watNuTeDoen(naam: string, detail: string): string {
     }
     return "Het automatische beeldmateriaal (straatbeeld en luchtfoto) wordt niet meer geplaatst. Controleer in console.cloud.google.com of de Street View Static API én de Maps Static API nog aan staan, of de key niet is ingetrokken, en of de dag-quota niet bereikt is. Nieuwe projectmappen worden gewoon aangemaakt, alleen zonder beeldmateriaal.";
   }
+  if (naam === "Sessiesleutel") {
+    return "Zet in Vercel onder Settings → Environment Variables een SESSION_SECRET van minstens 32 willekeurige tekens en deploy opnieuw. Let op: iedereen wordt daarna één keer uitgelogd. Tot die tijd kan iemand die de broncode kent zelf een geldige inlog maken.";
+  }
   if (naam === "Inlog actief") {
     return "LET OP: de app staat op dit moment open voor iedereen die het adres kent — inclusief de volledige Dropbox. Zet APP_PASSWORD terug in Vercel onder Settings → Environment Variables en deploy opnieuw. Dit heeft voorrang op al het andere.";
   }

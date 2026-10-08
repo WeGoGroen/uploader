@@ -80,7 +80,7 @@ async function ensureBagPdfs(
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as {
+  const body = ((await request.json().catch(() => ({}))) ?? {}) as {
     woonplaats?: string;
     straatEnNummer?: string;
     kind?: "energielabel" | "nen" | "media";
@@ -95,7 +95,21 @@ export async function POST(request: Request) {
   }
 
   const kind = body.kind ?? "energielabel";
-  const folder = await ensureProjectFolder(kind, body.woonplaats, body.straatEnNummer);
+  let folder: Awaited<ReturnType<typeof ensureProjectFolder>>;
+  try {
+    folder = await ensureProjectFolder(kind, body.woonplaats, body.straatEnNummer);
+  } catch (err) {
+    // Zoeken of aanmaken liep stuk (Dropbox druk of onbereikbaar). Liever een
+    // nette fout waarop de app opnieuw kan proberen dan een tweede map.
+    console.error("[DROPBOX-MAP] projectmap klaarzetten mislukt", {
+      adres: `${body.straatEnNummer}, ${body.woonplaats}`,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return NextResponse.json(
+      { error: "Dropbox reageerde niet. Probeer het zo nog eens." },
+      { status: 502 }
+    );
+  }
   if (!folder) {
     return NextResponse.json(
       { error: "Dropbox is nog niet gekoppeld. Zie Verbindingen." },

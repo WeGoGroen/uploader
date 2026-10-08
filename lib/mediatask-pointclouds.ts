@@ -7,6 +7,7 @@ import {
   type MediataskPointcloud,
 } from "@/lib/mediatask";
 import { getOptionalRedis } from "@/lib/redis";
+import { naamUitUrl } from "@/lib/mediatask-bestandsnaam";
 
 /**
  * Scans uit Dropbox als puntenwolk aan een Mediatask-order hangen.
@@ -266,11 +267,6 @@ export async function leesOrderPad(orderId: number): Promise<string | null> {
   return redis.get(`${PAD_PREFIX}${orderId}`).catch(() => null);
 }
 
-/** De bestandsnaam zit in de downloadlink die Mediatask teruggeeft. */
-function naamUitUrl(url: string): string | null {
-  const m = /filename%3D%22([^%]+)%22/.exec(url) ?? /filename="([^"]+)"/.exec(url);
-  return m ? decodeURIComponent(m[1]) : null;
-}
 
 export interface HerstelUitkomst {
   orderId: number;

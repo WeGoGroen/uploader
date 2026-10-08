@@ -1,4 +1,6 @@
 import { getOptionalRedis } from "@/lib/redis";
+// Tijdslimiet en herkansing bij 429 voor elke aanroep hieronder; zie lib/server-fetch.ts.
+import { serverFetch as fetch } from "@/lib/server-fetch";
 
 // Google Calendar-koppeling — in tegenstelling tot Dropbox/ClickUp is dit
 // bewust PER TEAMLID: iedereen ziet zijn eigen agenda, dus iedereen logt
