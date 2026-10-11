@@ -25,7 +25,13 @@ export const MEDIA_STAPPEN: MediaStap[] = [
     naam: "Foto's",
     uitleg: "Interieur- en gevelfoto's",
     map: "In/Raw/Photo's",
-    accept: "image/*",
+    // RAW staat er met extensie bij, om dezelfde reden als bij video: een
+    // browser kent het type van een .ARW of .CR3 vaak niet, en dan staat het
+    // bestand grijs onder "image/*". De Foto Edit Agent in het control center
+    // stuurt deze map door Imagen AI, en die werkt het liefst op RAW. Dezelfde
+    // lijst als RAW in lib/media-pad.ts.
+    accept:
+      "image/*,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.raf,.orf,.rw2,.dng,.pef,.srw,.erf,.mrw,.3fr,.fff,.iiq,.mos,.mef,.dcr,.kdc,.x3f,.gpr",
   },
   {
     key: "video",
