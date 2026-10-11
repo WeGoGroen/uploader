@@ -6,6 +6,7 @@ import {
   folderExists,
   getSharedAccessToken,
   kopieer,
+  kopieerBatch,
   leesDeellink,
   listFolderFiles,
   saveUrl,
@@ -171,34 +172,35 @@ async function verdeel(
   }
 
   const basis = inhoud.pad.toLowerCase().replace(/\/+$/, "");
-  const werk = keuzes.slice(0, 1500);
-  let volgende = 0;
-  const werker = async () => {
-    for (;;) {
-      const k = werk[volgende++];
-      if (!k) return;
-      const naam = (k.naam ?? "").trim();
-      const bron = (k.pad ?? "").trim();
-      const submap = (k.submap ?? "").trim();
-      // De bron moet in de gedeelde map liggen, en de naam moet bij dat pad horen
-      // (het pad is in kleine letters, de naam houdt zijn schrijfwijze).
-      const binnen =
-        !bron.includes("..") &&
-        (bron.toLowerCase() === basis || bron.toLowerCase().startsWith(`${basis}/`)) &&
-        bron.toLowerCase().split("/").pop() === naam.toLowerCase();
-      const doel = binnen ? mediaDoelPad(projectmap, submap, naam, "aanlevering") : null;
-      if (!doel) {
-        overgeslagen.push({ naam: naam || bron, reden: binnen ? `past niet in ${submap}` : "ligt niet in deze link" });
-        continue;
-      }
-      try {
-        const uit = await kopieer(token, bron, doel);
-        geplaatst.push({ naam, submap, pad: doel, uitkomst: uit });
-      } catch (err) {
-        overgeslagen.push({ naam, reden: err instanceof Error ? err.message.slice(0, 160) : "kopiëren mislukt" });
-      }
+  const paren: { naam: string; submap: string; van: string; naar: string }[] = [];
+  for (const k of keuzes.slice(0, 1000)) {
+    const naam = (k.naam ?? "").trim();
+    const bron = (k.pad ?? "").trim();
+    const submap = (k.submap ?? "").trim();
+    // De bron moet in de gedeelde map liggen, en de naam moet bij dat pad horen
+    // (het pad is in kleine letters, de naam houdt zijn schrijfwijze).
+    const binnen =
+      !bron.includes("..") &&
+      (bron.toLowerCase() === basis || bron.toLowerCase().startsWith(`${basis}/`)) &&
+      bron.toLowerCase().split("/").pop() === naam.toLowerCase();
+    const doel = binnen ? mediaDoelPad(projectmap, submap, naam, "aanlevering") : null;
+    if (!doel) {
+      overgeslagen.push({ naam: naam || bron, reden: binnen ? `past niet in ${submap}` : "ligt niet in deze link" });
+      continue;
     }
-  };
-  await Promise.all(Array.from({ length: Math.min(6, werk.length) }, () => werker()));
+    paren.push({ naam, submap, van: bron, naar: doel });
+  }
+
+  /*
+    Eén batch en geen losse kopieën tegelijk. Hier liepen eerst zes copy_v2's
+    naast elkaar, en Dropbox staat per namespace maar één schrijfactie tegelijk
+    toe: "429 too_many_write_operations" bij de eerste echte shoot.
+  */
+  const uitkomsten = await kopieerBatch(token, paren);
+  paren.forEach((p, i) => {
+    const u = uitkomsten[i] ?? { fout: "geen antwoord van Dropbox" };
+    if (typeof u === "string") geplaatst.push({ naam: p.naam, submap: p.submap, pad: p.naar, uitkomst: u });
+    else overgeslagen.push({ naam: p.naam, reden: u.fout });
+  });
   return { ok: true, geplaatst, overgeslagen };
 }
