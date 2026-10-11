@@ -86,7 +86,7 @@ export type MediaSubmap = (typeof MEDIA_SUBMAPPEN)[number];
  * originelen stilletjes weg — precies het soort verruiming waar niemand een
  * melding van krijgt.
  */
-export const AANLEVER_SUBMAPPEN = ["In/Raw/360", "In/Raw/Video"] as const;
+export const AANLEVER_SUBMAPPEN = ["In/Raw/360", "In/Raw/Video", "In/Raw/Photo's"] as const;
 
 export type AanleverSubmap = (typeof AANLEVER_SUBMAPPEN)[number];
 
@@ -97,6 +97,23 @@ export type Schrijfsoort = "oplevering" | "aanlevering";
     daar: schrijft hij iets anders weg, dan klopt er iets niet en is weigeren
     beter dan het ergens neerzetten. */
 const BEELD = /\.(jpe?g|png|tiff?|webp|insp|heic|heif)$/i;
+
+/**
+ * Wat een fotograaf aanlevert in In/Raw/Photo's: beeld zoals hierboven, plus
+ * camera-RAW. De Foto Edit Agent in het control center stuurt die door Imagen,
+ * en een shoot komt meestal als RAW binnen — zonder deze lijst kon de
+ * aanlevering vanuit het control center (Media → Uploaden) geen enkele RAW
+ * kwijt. Alleen in die ene map: in OUT of in In/Raw/360 hoort geen RAW.
+ */
+const FOTO_RAW = /\.(cr2|cr3|crw|nef|nrw|arw|srf|sr2|raf|orf|rw2|dng|pef|srw|erf|mrw|3fr|fff|iiq|mos|mef|dcr|kdc|x3f|gpr)$/i;
+
+/**
+ * Een 360-video van een Insta360. Mag alleen als aanlevering in In/Raw/360
+ * staan, naast de panorama's van dezelfde rondgang; de nadir-agent leest hem
+ * niet (die neemt alleen beeld), maar zo raakt hij niet zoek in de Video-map,
+ * waar de montage hem als gewone clip zou meenemen.
+ */
+const VIDEO_360 = /\.insv$/i;
 
 /** Wat de videomontage oplevert. Alleen in OUT/Video — zie magInSubmap. */
 const VIDEO = /\.(mp4|mov)$/i;
@@ -184,8 +201,11 @@ export function mediaBestandsnaam(ruw: string, submap = ""): string | null {
  * verruiming die niemand opmerkt is precies wat deze grenzen moeten voorkomen.
  */
 export function magInSubmap(naam: string, submap: string): boolean {
-  const isVideomap = VIDEO_SUBMAPPEN.includes(submap.toLowerCase());
-  return isVideomap ? VIDEO.test(naam) : BEELD.test(naam);
+  const map = submap.toLowerCase();
+  if (VIDEO_SUBMAPPEN.includes(map)) return VIDEO.test(naam);
+  if (map === "in/raw/photo's") return BEELD.test(naam) || FOTO_RAW.test(naam);
+  if (map === "in/raw/360") return BEELD.test(naam) || VIDEO_360.test(naam);
+  return BEELD.test(naam);
 }
 
 /** Het volledige pad, of null als een van de drie delen niet deugt. */
