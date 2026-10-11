@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useIkBen } from "@/components/RechtenProvider";
-import { enqueue, getServerSnapshot, getSnapshot, subscribe } from "@/lib/upload-queue";
+import { enqueue, getServerSnapshot, getSnapshot, probeerOpnieuw, subscribe } from "@/lib/upload-queue";
 import { MEDIA_STAPPEN, type MediaStap } from "@/lib/media-folders";
+import { KOP_BYTES, herkenOpNaam, herkenUitKop, leesKop, type Herkenning } from "@/lib/media-herkennen";
 import { leesbareOmvang, type StapInhoud } from "@/lib/media-inhoud";
 import { relatieveTijd } from "@/lib/relatieve-tijd";
 import { tijdslimiet } from "@/lib/tijdslimiet";
@@ -32,7 +33,34 @@ function houseNumber(a: {
   return [a.huisnummer, a.huisletter ?? "", a.huisnummertoevoeging ? `-${a.huisnummertoevoeging}` : ""].join("");
 }
 
-type Stap = "adres" | "photos" | "video" | "360" | "klaar";
+type Stap = "adres" | "upload" | "klaar";
+
+/** Koppen tegelijk lezen bij het herkennen. Lokaal en snel; een paar honderd
+    RAW's mogen de kiezer niet laten haperen, maar ook niet alles in één keer
+    in het geheugen trekken. */
+const HERKENNERS = 8;
+
+/** Wat er van een gekozen bestand overbleef nadat het niet meeging. */
+interface Overgeslagen {
+  naam: string;
+  reden: string;
+}
+
+/**
+ * Welke soort een bestand is: eerst aan de naam, en alleen bij beeld (een JPEG
+ * kan een foto en een panorama zijn) aan de eerste bytes. Een kop die niet te
+ * lezen is maakt er een foto van — nooit een betaalde 360-bewerking.
+ */
+async function herkenBestand(file: File): Promise<Herkenning> {
+  const opNaam = herkenOpNaam(file.name);
+  if (opNaam !== "kijken") return opNaam;
+  try {
+    const kop = new Uint8Array(await file.slice(0, KOP_BYTES).arrayBuffer());
+    return herkenUitKop(file.name, leesKop(kop));
+  } catch {
+    return herkenUitKop(file.name, null);
+  }
+}
 
 /** Zo vaak kijken we in Dropbox zolang de pagina in beeld is. */
 const DROPBOX_KIJK_MS = 15_000;
@@ -187,17 +215,20 @@ export default function MediaFlow() {
     resizeObserverRef.current = ro;
   };
 
-  const huidige: MediaStap | null = MEDIA_STAPPEN.find((s) => s.key === stap) ?? null;
-  const stapIndex = huidige ? MEDIA_STAPPEN.indexOf(huidige) : -1;
+  // Bestanden die gekozen zijn maar niet meegingen, en waarom. Alleen voor
+  // deze keer kiezen: na een ander adres hoort de lijst er niet meer bij.
+  const [overgeslagen, setOvergeslagen] = useState<Overgeslagen[]>([]);
+  // Hoeveel er nog herkend moet worden voordat het de wachtrij in gaat.
+  const [herkennen, setHerkennen] = useState(0);
+  // Waarom een bestand in zijn kolom staat ("RAW", "panorama 2:1 (…)"), per
+  // submap en naam. Alleen voor wat op dit apparaat gekozen is.
+  const [redenen, setRedenen] = useState<Record<string, string>>({});
+  const [sleepErover, setSleepErover] = useState(false);
 
   const alleTaken = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const takenVanOpname = useMemo(
     () => alleTaken.filter((t) => t.folderPath === (folder?.path ?? "")),
     [alleTaken, folder]
-  );
-  const taken = useMemo(
-    () => (huidige ? takenVanOpname.filter((t) => t.folder === huidige.map) : []),
-    [takenVanOpname, huidige]
   );
 
   const { stand: dropbox, fout: dropboxFout } = useDropboxInhoud(folder?.path ?? null);
@@ -241,13 +272,13 @@ export default function MediaFlow() {
   // aan de render en kan het effect dus ook niet opnieuw aanzetten.
   const mapGeprobeerdVoor = useRef<string | null>(null);
   useEffect(() => {
-    if (!address || folder || !huidige) return;
+    if (!address || folder || stap === "adres") return;
     const sleutel = `${address.straatnaam} ${houseNumber(address)}, ${address.woonplaatsnaam}`;
     if (mapGeprobeerdVoor.current === sleutel) return;
     mapGeprobeerdVoor.current = sleutel;
     void zorgVoorMap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address, huidige, folder]);
+  }, [address, stap, folder]);
 
   // Eén id per opname, zodat de server dezelfde opname bijwerkt i.p.v. bij
   // elke hartslag een nieuwe aan te maken. Hangt aan de projectmap: dat is
@@ -278,15 +309,15 @@ export default function MediaFlow() {
   // opzoeken. Alleen zinvol zodra de map bestaat — dat is het moment waarop er
   // ook echt iets te hervatten valt.
   useEffect(() => {
-    if (!address || !folder || !huidige) return;
+    if (!address || !folder || stap === "adres") return;
     bewaarMediaSessie({
       folderPath: folder.path,
       folderUrl: folder.url,
       subfolders: folder.subfolders ?? [],
       address,
-      stap: huidige.key,
+      stap: "upload",
     });
-  }, [address, folder, huidige]);
+  }, [address, folder, stap]);
 
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -361,6 +392,8 @@ export default function MediaFlow() {
     setAddress(null);
     setFolder(null);
     setFolderError(null);
+    setOvergeslagen([]);
+    setRedenen({});
     // Nieuw adres: de poging-rem weer vrijgeven.
     mapGeprobeerdVoor.current = null;
     try {
@@ -369,7 +402,7 @@ export default function MediaFlow() {
       const gevonden: AddressDetails | null = data.details ?? null;
       setAddress(gevonden);
       // Adres staat vast: door naar de eerste soort.
-      if (gevonden) setStap("photos");
+      if (gevonden) setStap("upload");
     } finally {
       setLoadingAddress(false);
     }
@@ -440,10 +473,44 @@ export default function MediaFlow() {
    * await verderging. Gevolg: je koos foto's en er gebeurde niets.
    */
   async function kiesBestanden(bestanden: File[]) {
-    if (bestanden.length === 0 || !huidige) return;
-    const doel = await zorgVoorMap();
+    if (bestanden.length === 0) return;
+    setHerkennen((n) => n + bestanden.length);
+    // De map en de herkenning tegelijk: het klaarzetten van de map kost een
+    // paar Dropbox-rondes, het herkennen alleen lokaal lezen.
+    const mapKlaar = zorgVoorMap();
+    const uitslag: Herkenning[] = new Array(bestanden.length);
+    let volgende = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(HERKENNERS, bestanden.length) }, async () => {
+        while (volgende < bestanden.length) {
+          const i = volgende++;
+          uitslag[i] = await herkenBestand(bestanden[i]);
+          setHerkennen((n) => n - 1);
+        }
+      })
+    );
+    const doel = await mapKlaar;
+    const weg: Overgeslagen[] = [];
+    const nieuweRedenen: Record<string, string> = {};
+    bestanden.forEach((file, i) => {
+      const { soort, reden } = uitslag[i];
+      const stapVan = soort ? MEDIA_STAPPEN.find((st) => st.soort === soort) : undefined;
+      if (!stapVan) {
+        weg.push({ naam: file.name, reden });
+        return;
+      }
+      if (!doel) return;
+      nieuweRedenen[`${stapVan.map}/${file.name}`] = reden;
+      enqueue(doel.path, stapVan.map, file, account);
+    });
+    // Zonder map gaat er niets de wachtrij in; de balk bovenaan zegt dan al
+    // waarom (folderError), en een lijst "overgeslagen" zou het verkeerde
+    // verhaal vertellen.
     if (!doel) return;
-    for (const file of bestanden) enqueue(doel.path, huidige.map, file, account);
+    setRedenen((r) => ({ ...r, ...nieuweRedenen }));
+    if (weg.length > 0) {
+      setOvergeslagen((o) => [...o.filter((x) => !weg.some((w) => w.naam === x.naam)), ...weg]);
+    }
   }
 
   /**
@@ -457,7 +524,9 @@ export default function MediaFlow() {
     setQuery("");
     setSuggestions([]);
     setNearby(null);
-    setStap((sessie.stap as Stap) ?? "photos");
+    // Oudere opnames bewaarden de stap waar je stond (foto's, video, 360);
+    // die bestaan niet meer, alles staat nu op één scherm.
+    setStap("upload");
     window.scrollTo(0, 0);
   }
 
@@ -474,14 +543,15 @@ export default function MediaFlow() {
     setAddress(null);
     setFolder(null);
     setFolderError(null);
+    setOvergeslagen([]);
+    setRedenen({});
   }
 
-  function volgende() {
-    const volgend = MEDIA_STAPPEN[stapIndex + 1];
-    // Bij de laatste stap is de opname afgerond; zonder dit blijft hij als
-    // "niet afgemaakt" gelden en krijg je er een herinnering over.
-    if (!volgend && melding) meldAfgerond(melding);
-    setStap(volgend ? volgend.key : "klaar");
+  function naarKlaar() {
+    // Hier is de opname afgerond; zonder dit blijft hij als "niet afgemaakt"
+    // gelden en krijg je er een herinnering over.
+    if (melding) meldAfgerond(melding);
+    setStap("klaar");
     window.scrollTo(0, 0);
   }
 
@@ -506,11 +576,6 @@ export default function MediaFlow() {
     window.scrollTo(0, 0);
   }
 
-  function vorige() {
-    const vorig = MEDIA_STAPPEN[stapIndex - 1];
-    setStap(vorig ? vorig.key : "adres");
-    window.scrollTo(0, 0);
-  }
 
   const bezigTotaal = takenVanOpname.filter((t) => t.dropbox === "uploading").length;
   // Voor het slotscherm: alles wat er voor deze opname in Dropbox staat.
@@ -590,13 +655,6 @@ export default function MediaFlow() {
         status: r.bezig > 0 ? ("bezig" as const) : r.mislukt > 0 ? ("mislukt" as const) : ("open" as const),
       }));
   }, [alleTaken, sessies]);
-  // Alleen de mappen waar deze flow daadwerkelijk in uploadt. "In" en "In/Raw"
-  // zijn tussenlagen en zeggen de opnemer niets, en "OUT" is van de bewerker —
-  // die erbij zetten zou drie mappen tonen die hier altijd leeg blijven.
-  const mediaSubmappen = (folder?.subfolders ?? []).filter((naam) =>
-    MEDIA_STAPPEN.some((st) => st.map === naam)
-  );
-
   function renderDropboxBalk() {
     return (
       <div className={`dbx-strip${folder ? " is-ready" : ""}`}>
@@ -621,10 +679,7 @@ export default function MediaFlow() {
                 <span className="dbx-strip-check" aria-hidden="true">
                   ✓
                 </span>
-                <span className="dbx-folder-path">
-                  {folder.path}
-                  {huidige ? `/${huidige.map}` : ""}
-                </span>
+                <span className="dbx-folder-path">{folder.path}/In/Raw</span>
               </>
             ) : (
               "Map wordt klaargezet…"
@@ -641,50 +696,14 @@ export default function MediaFlow() {
           )}
         </div>
 
-        {/* Welke mappen er klaarstaan, met per map hoeveel er al in zit. Zo is
-            te zien dat de structuur er is zonder Dropbox te openen. */}
-        {folder && mediaSubmappen.length > 0 && (
-          <div className="dbx-strip-docs">
-            {mediaSubmappen.map((naam) => {
-              const stapVanMap = MEDIA_STAPPEN.find((st) => st.map === naam);
-              const aantal = stapVanMap ? aantalVoor(stapVanMap) : 0;
-              const actief = stapVanMap && huidige && stapVanMap.key === huidige.key;
-              return (
-                <div key={naam} className={`dbx-strip-doc-row${aantal > 0 ? " is-done" : ""}`}>
-                  {aantal > 0 ? (
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  ) : (
-                    <span className="dbx-strip-doc-empty" aria-hidden="true" />
-                  )}
-                  {/* Alleen de laatste maplaag: "In/Raw" staat al in het pad
-                      hierboven, en drie keer herhalen duwt de naam die je zoekt
-                      op een smal scherm buiten beeld. */}
-                  <span className="dbx-strip-doc-label">
-                    {naam.split("/").pop()}
-                    {actief && <span className="dbx-strip-doc-now">hier</span>}
-                  </span>
-                  <span className="dbx-strip-doc-status">
-                    {aantal > 0 ? `${aantal} bestand${aantal === 1 ? "" : "en"}` : "leeg"}
-                    {stapVanMap && (dropbox?.stappen[stapVanMap.key]?.bytes ?? 0) > 0
-                      ? ` · ${leesbareOmvang(dropbox!.stappen[stapVanMap.key].bytes)}`
-                      : ""}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
     );
   }
 
   /**
-   * Wat er per onderdeel nog loopt. Staat onder de Dropbox-balk in de vaste
-   * kop, zodat een video die nog omhoog gaat in beeld blijft terwijl je al bij
-   * 360 bezig bent — anders lijkt het alsof die upload gestopt is zodra je
-   * doorklikt.
+   * Wat er per onderdeel nog loopt. Op het slotscherm, in de vaste kop: daar
+   * staan de kolommen niet meer in beeld, en zonder dit lijkt een video die
+   * nog omhoog gaat gestopt zodra je op "Klaar" tikt.
    */
   function renderVoortgangPerOnderdeel() {
     const regels = MEDIA_STAPPEN.map((st) => {
@@ -730,30 +749,6 @@ export default function MediaFlow() {
     );
   }
 
-  /** Waar je in de flow bent: 1 Foto's → 2 Video → 3 360. */
-  function renderStappen() {
-    return (
-      <ol className="media-steps" aria-label="Stappen">
-        {MEDIA_STAPPEN.map((s, i) => {
-          const gedaan = stap === "klaar" || i < stapIndex;
-          const nu = s.key === stap;
-          const aantal = aantalVoor(s);
-          return (
-            <li key={s.key} className={`media-step${nu ? " is-now" : ""}${gedaan ? " is-done" : ""}`}>
-              <span className="media-step-nr" aria-hidden="true">
-                {i + 1}
-              </span>
-              <span className="media-step-label">
-                {s.naam}
-                {aantal > 0 && <span className="media-step-count">{aantal}</span>}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
-    );
-  }
-
   // ---------- Stap 1: adres ----------
   if (stap === "adres" || !address) {
     return (
@@ -774,8 +769,8 @@ export default function MediaFlow() {
             <section className="addr-find" aria-label="Adres zoeken">
               <h1>Upload media</h1>
               <p className="lede">
-                Kies het pand. Daarna doorloop je in drie stappen de foto&apos;s, de video en de
-                360-opnames.
+                Kies het pand. Daarna upload je alles in één keer: foto&apos;s, video en 360 worden
+                vanzelf over de juiste mappen verdeeld.
               </p>
 
               {lopendeOpnames.length > 0 && (
@@ -853,8 +848,6 @@ export default function MediaFlow() {
                   </ul>
                 </div>
               )}
-
-              {renderStappen()}
 
               <button className="btn btn-primary btn-block" onClick={startNearbySearch} disabled={locating}>
                 {locating && <span className="spinner on-accent" />}
@@ -947,7 +940,7 @@ export default function MediaFlow() {
       <>
         <div className="pinned-head" ref={pinnedHeadRef}>
           <div className="topline">
-            <button className="btn-back" onClick={() => setStap("360")}>
+            <button className="btn-back" onClick={() => setStap("upload")}>
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
@@ -963,7 +956,6 @@ export default function MediaFlow() {
         <div className="pinned-head-spacer" style={{ height: pinnedHeadHeight }} />
 
         <div className="mt-scherm">
-          {renderStappen()}
           {(() => {
             // Zelfde opbouw als de upload-pop-ups bij NEN en Energielabel: de
             // uitkomst in de kop, en per soort één regel met de uitkomst rechts.
@@ -1019,7 +1011,7 @@ export default function MediaFlow() {
                   : !nogNietBekeken && totaalInDropbox === 0
                     ? "Ga terug om alsnog bestanden te kiezen"
                     : eersteMislukt
-                      ? `Ga terug naar ${eersteMislukt.s.naam} om ze opnieuw te kiezen`
+                      ? `Ga terug om ze bij ${eersteMislukt.s.naam} opnieuw te proberen`
                       : null;
 
             return (
@@ -1085,29 +1077,37 @@ export default function MediaFlow() {
     );
   }
 
-  // ---------- Stap 2/3/4: per soort uploaden ----------
-  const soort = huidige!;
-  const stapInDropbox = dropbox?.stappen[soort.key] ?? null;
-  const klaar = taken.filter((t) => t.dropbox === "done").length;
-  const mislukt = taken.filter((t) => t.dropbox === "error").length;
-  const laatste = stapIndex === MEDIA_STAPPEN.length - 1;
+  // ---------- Uploaden: één knop, drie kolommen ----------
+  const telbaar = takenVanOpname.filter((t) => MEDIA_STAPPEN.some((st) => st.map === t.folder));
+  const klaarTotaal = telbaar.filter((t) => t.dropbox === "done").length;
+  const misluktTotaal = telbaar.filter((t) => t.dropbox === "error").length;
+  const pctTotaal =
+    telbaar.length > 0
+      ? Math.round(
+          telbaar.reduce((tot, t) => tot + (t.dropbox === "done" ? 100 : t.dropbox === "error" ? 0 : t.pct), 0) /
+            telbaar.length
+        )
+      : 0;
+  const nogTeGaan = telbaar
+    .filter((t) => t.dropbox === "uploading" && t.etaSeconds != null)
+    .reduce((max, t) => Math.max(max, t.etaSeconds ?? 0), 0);
+  const ietsGekozen = telbaar.length > 0 || herkennen > 0;
 
   return (
     <>
       <div className="pinned-head" ref={pinnedHeadRef}>
         <div className="topline">
-          <button className="btn-back" onClick={vorige}>
+          <button className="btn-back" onClick={opnieuwBeginnen}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            {stapIndex === 0 ? "Ander adres" : "Vorige"}
+            Ander adres
           </button>
           <h2 style={{ fontSize: 17 }}>
             {address.straatnaam} {houseNumber(address)}
           </h2>
         </div>
         {renderDropboxBalk()}
-        {renderVoortgangPerOnderdeel()}
       </div>
       <div className="pinned-head-spacer" style={{ height: pinnedHeadHeight }} />
 
@@ -1115,16 +1115,20 @@ export default function MediaFlow() {
         className="pad"
         style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}
       >
-        {renderStappen()}
+        <div>
+          <h1>Media uploaden</h1>
+          <p className="lede">
+            Kies alles van deze opname in één keer. De uploader herkent zelf wat een foto, video of
+            360-opname is en zet het in de juiste map.
+          </p>
+        </div>
 
-        <h1>{soort.naam}</h1>
-        <p className="lede">{soort.uitleg}</p>
-
+        {/* Geen `accept`: zie MEDIA_STAPPEN. Wat er niet hoort laat de
+            herkenning liggen, met de reden erbij. */}
         <input
           ref={inputRef}
           type="file"
           multiple
-          accept={soort.accept}
           hidden
           onChange={(e) => {
             // Eerst kopiëren, dan pas het veld leegmaken — zie kiesBestanden.
@@ -1133,126 +1137,179 @@ export default function MediaFlow() {
             void kiesBestanden(gekozen);
           }}
         />
-        {/* Uploadknop in Dropbox-vorm: het logo, de actie en de bestemming
-            eronder. Bewust Dropbox-blauw en niet het groen van de app —
-            "Volgende" staat op dezelfde pagina en dat is een heel andere
-            handeling; twee groene knoppen naast elkaar nodigen uit tot de
-            verkeerde tik. */}
-        {/* Bewust niet uitgeschakeld terwijl de map klaargezet wordt. Dat
-            klaarzetten kost tijd — er wordt gezocht of het adres al een map
-            heeft, de submappen worden aangemaakt en er komt een deellink bij —
-            en al die tijd stond de opnemer met zijn telefoon in de hand te
-            wachten tot hij überhaupt bestanden mócht kiezen. Kiezen kan
-            gewoon: kiesBestanden wacht zelf op het pad voordat het de
-            bestanden in de wachtrij zet. */}
+        {/* Eén knop voor de hele opname. Dropbox-blauw en niet het groen van
+            de app: "Klaar" staat onderaan in groen en is een heel andere
+            handeling. Niet uitgeschakeld terwijl de map klaargezet wordt —
+            kiesBestanden wacht daar zelf op. Op een computer mag je de
+            bestanden er ook op slepen. */}
         <button
           type="button"
-          className="btn-dropbox"
+          className={`media-upknop${ietsGekozen ? " is-compact" : ""}${sleepErover ? " is-sleep" : ""}`}
           onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setSleepErover(true);
+          }}
+          onDragLeave={() => setSleepErover(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setSleepErover(false);
+            void kiesBestanden([...e.dataTransfer.files]);
+          }}
         >
-          <span className="btn-dropbox-mark" aria-hidden="true">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M7 3 2 6.3 7 9.6 2 12.9l5 3.3 5-3.3 5 3.3 5-3.3-5-3.3 5-3.3-5-3.3-5 3.3-5-3.3Zm5 15 5-3.3v2.2L12 20l-5-3.1v-2.2l5 3.3Z"
-                fill="currentColor"
-              />
+          <span className="media-upknop-icoon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 16V4M6.5 9.5 12 4l5.5 5.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
             </svg>
           </span>
-          <span className="btn-dropbox-tekst">
-            <strong>{folderBusy ? "Map klaarzetten…" : `${soort.naam} kiezen`}</strong>
-            <span className="btn-dropbox-doel">
-              {folder ? `naar ${folder.path}/${soort.map}` : "naar Dropbox"}
-            </span>
-          </span>
-          {/* Rechts een expliciete actie i.p.v. een los pijltje: op een tablet
-              is dat de plek waar de duim landt, en "Uploaden" zegt wat er
-              gebeurt terwijl een pijl geraden moet worden. */}
-          <span className="btn-dropbox-actie" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path d="M12 17V5M7 10l5-5 5 5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M5 19h14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-            </svg>
-            Uploaden
+          <span className="media-upknop-tekst">{ietsGekozen ? "Meer uploaden" : "Uploaden"}</span>
+          <span className="media-upknop-sub">
+            Foto&apos;s, video en 360 — alles door elkaar, we verdelen het zelf
           </span>
         </button>
 
-        {/* De tweede weg: de Dropbox-app. Die uploadt door met het scherm uit
-            of de iPad in de tas — een webpagina wordt dan door iOS stilgezet.
-            De link opent precies deze submap; wat er binnenkomt verschijnt
-            hieronder vanzelf, want die stand komt uit Dropbox zelf. */}
-        {stapInDropbox?.webUrl && (
-          <a className="btn-dbx-app" href={stapInDropbox.webUrl} target="_blank" rel="noopener noreferrer">
-            <span className="btn-dbx-app-tekst">
-              <strong>Via de Dropbox-app aanleveren</strong>
-              <span>Uploadt door op de achtergrond, ook als het scherm uitgaat.</span>
-            </span>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M6 4h6v6M12 4 4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </a>
-        )}
-
-        {/* Wat er echt staat, ongeacht langs welke weg het kwam. */}
-        {stapInDropbox && (
-          <p className="media-dbx-stand">
-            In Dropbox:{" "}
-            <strong>
-              {aantalVoor(soort)} bestand{aantalVoor(soort) === 1 ? "" : "en"}
-            </strong>
-            {stapInDropbox.bytes > 0 && ` · ${leesbareOmvang(stapInDropbox.bytes)}`}
-            {stapInDropbox.laatste && ` · laatste binnen: ${relatieveTijd(Date.parse(stapInDropbox.laatste))}`}
-          </p>
-        )}
-
-        {taken.length > 0 && (
-          <p className="media-hint">
-            Vanaf dit apparaat: {klaar}/{taken.length} geüpload{mislukt > 0 ? ` · ${mislukt} mislukt` : ""}
-          </p>
-        )}
-
-        {taken.length > 0 && (
-          <ul className="media-files">
-            {taken.map((t) => (
-              <li
-                key={t.id}
-                className={
-                  t.dropbox === "error" ? "is-error" : t.dropbox === "done" ? "is-done" : undefined
-                }
-              >
-                <span className="media-file-name">{t.name}</span>
-                {/* Ook bij "klaar" het percentage tonen. Een los vinkje liet in
-                    het midden of het bestand hélemaal over was; 100% is het
-                    antwoord op de vraag die je stelt terwijl je staat te
-                    wachten. */}
-                <span className="media-file-state">
-                  {t.dropbox === "error" ? (
-                    "mislukt"
-                  ) : t.dropbox === "done" ? (
-                    <>
-                      <span className="media-file-check" aria-hidden="true">
-                        ✓
-                      </span>
-                      100%
-                    </>
-                  ) : (
-                    `${t.pct}%`
-                  )}
+        {ietsGekozen && (
+          <div className="media-totaal">
+            <div className="media-totaal-tekst">
+              <span>
+                {herkennen > 0 ? (
+                  <>
+                    <span className="spinner" /> {herkennen} bestand{herkennen === 1 ? "" : "en"} herkennen…
+                  </>
+                ) : (
+                  <>
+                    <b>{klaarTotaal}</b> van <b>{telbaar.length}</b> in Dropbox
+                    {misluktTotaal > 0 && <span className="media-totaal-fout"> · {misluktTotaal} mislukt</span>}
+                  </>
+                )}
+              </span>
+              {bezigTotaal > 0 && (
+                <span>
+                  {bezigTotaal} bezig
+                  {nogTeGaan > 0 && ` · nog ± ${Math.max(1, Math.round(nogTeGaan / 60))} min`}
                 </span>
-              </li>
-            ))}
-          </ul>
+              )}
+            </div>
+            <span className="up-bar">
+              <span className="up-bar-fill" style={{ width: `${pctTotaal}%` }} />
+            </span>
+          </div>
         )}
 
-        <div className="form-foot" style={{ marginTop: 16 }}>
-          <button className="btn btn-quiet" onClick={vorige}>
-            {stapIndex === 0 ? "Ander adres" : "Vorige"}
+        <div className="media-kolommen">
+          {MEDIA_STAPPEN.map((st) => {
+            const eigen = takenVanOpname.filter((t) => t.folder === st.map);
+            const klaar = eigen.filter((t) => t.dropbox === "done").length;
+            const mislukt = eigen.filter((t) => t.dropbox === "error");
+            const pct =
+              eigen.length > 0
+                ? Math.round(
+                    eigen.reduce((tot, t) => tot + (t.dropbox === "done" ? 100 : t.dropbox === "error" ? 0 : t.pct), 0) /
+                      eigen.length
+                  )
+                : 0;
+            const inDropbox = dropbox?.stappen[st.key] ?? null;
+            return (
+              <section key={st.key} className="media-kolom" aria-label={st.naam}>
+                <header className="media-kolom-kop">
+                  <div className="media-kolom-rij">
+                    <span className="media-kolom-titel">
+                      {st.naam}
+                      {eigen.length > 0 && klaar === eigen.length && (
+                        <span className="media-kolom-ok" aria-hidden="true">
+                          {" "}
+                          ✓
+                        </span>
+                      )}
+                    </span>
+                    <span className="media-kolom-tel">
+                      {eigen.length > 0 ? `${klaar}/${eigen.length}` : aantalVoor(st)}
+                    </span>
+                  </div>
+                  <span className="media-kolom-map">naar {st.map}</span>
+                  {eigen.length > 0 && (
+                    <span className="up-bar media-kolom-bar">
+                      <span
+                        className={`up-bar-fill${mislukt.length > 0 ? " is-bad" : ""}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </span>
+                  )}
+                </header>
+
+                {eigen.length === 0 ? (
+                  <p className="media-kolom-leeg">{st.uitleg}</p>
+                ) : (
+                  <ul className="media-kolom-lijst">
+                    {eigen.map((t) => (
+                      <li key={t.id}>
+                        <span className="media-kolom-r1">
+                          <span className="media-kolom-naam">{t.name}</span>
+                          {/* Ook bij "klaar" het percentage: 100% is het antwoord
+                              op de vraag die je stelt terwijl je staat te wachten. */}
+                          <span className={`media-kolom-st is-${t.dropbox}`}>
+                            {t.dropbox === "error" ? "mislukt" : t.dropbox === "done" ? "✓ 100%" : `${t.pct}%`}
+                          </span>
+                        </span>
+                        {redenen[`${st.map}/${t.name}`] && (
+                          <span className="media-kolom-r2">{redenen[`${st.map}/${t.name}`]}</span>
+                        )}
+                        {t.dropbox === "uploading" && t.pct > 0 && (
+                          <span className="up-bar media-kolom-bar-klein">
+                            <span className="up-bar-fill" style={{ width: `${t.pct}%` }} />
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {/* Wat er echt staat, ongeacht langs welke weg het kwam — ook
+                    van een eerdere keer of via de Dropbox-app. */}
+                {inDropbox && inDropbox.aantal > 0 && (
+                  <p className="media-kolom-dbx">
+                    In Dropbox: <strong>{aantalVoor(st)}</strong> · {leesbareOmvang(inDropbox.bytes)}
+                    {inDropbox.laatste && ` · ${relatieveTijd(Date.parse(inDropbox.laatste))}`}
+                  </p>
+                )}
+
+                {mislukt.length > 0 && (
+                  <button
+                    type="button"
+                    className="media-kolom-opnieuw"
+                    onClick={() => void probeerOpnieuw(mislukt.map((t) => t.id))}
+                  >
+                    ↻ Mislukte opnieuw proberen
+                  </button>
+                )}
+              </section>
+            );
+          })}
+        </div>
+
+        {overgeslagen.length > 0 && (
+          <details className="media-overgeslagen">
+            <summary>Niet meegenomen ({overgeslagen.length})</summary>
+            <ul>
+              {overgeslagen.map((o) => (
+                <li key={o.naam}>
+                  <b>{o.naam}</b> — {o.reden}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
+        <div className="form-foot">
+          <button className="btn btn-quiet" onClick={opnieuwBeginnen}>
+            Ander adres
           </button>
-          {/* Overslaan mag: niet elke opname heeft alle drie de soorten. De
-              uploads lopen op de achtergrond door als je verdergaat. */}
-          <button className="btn btn-primary" onClick={volgende}>
-            {/* Niet "Afronden": dat is de knop op het slotscherm zelf. Deze
-                brengt je daarheen, naar het overzicht van wat er staat. */}
-            {laatste ? "Klaar →" : taken.length === 0 ? "Overslaan →" : "Volgende →"}
+          {/* Niet "Afronden": dat is de knop op het slotscherm zelf. Deze
+              brengt je daarheen, naar het overzicht van wat er staat. De
+              uploads lopen op de achtergrond door. */}
+          <button className="btn btn-primary" onClick={naarKlaar}>
+            Klaar →
           </button>
         </div>
       </div>
