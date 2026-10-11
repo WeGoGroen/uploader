@@ -86,7 +86,7 @@ export type MediaSubmap = (typeof MEDIA_SUBMAPPEN)[number];
  * originelen stilletjes weg — precies het soort verruiming waar niemand een
  * melding van krijgt.
  */
-export const AANLEVER_SUBMAPPEN = ["In/Raw/360", "In/Raw/Video"] as const;
+export const AANLEVER_SUBMAPPEN = ["In/Raw/360", "In/Raw/Video", "In/Raw/Photo's"] as const;
 
 export type AanleverSubmap = (typeof AANLEVER_SUBMAPPEN)[number];
 
@@ -97,6 +97,21 @@ export type Schrijfsoort = "oplevering" | "aanlevering";
     daar: schrijft hij iets anders weg, dan klopt er iets niet en is weigeren
     beter dan het ergens neerzetten. */
 const BEELD = /\.(jpe?g|png|tiff?|webp|insp|heic|heif)$/i;
+
+/**
+ * Camera-RAW, alleen voor de invoermap van de fotografie.
+ *
+ * De Foto Edit Agent in het control center stuurt wat hier landt door Imagen
+ * AI, en Imagen werkt het liefst op RAW. Een RAW is geen uitvoer van welke
+ * agent dan ook, dus hij hoort niet bij BEELD: dan kon de nadir-agent er ook
+ * een in OUT/360 zetten. Dezelfde lijst als `RAW` in lib/media/imagen/formaten.ts
+ * van het control center — staat hij hier krapper, dan weigert de uploadpagina
+ * daar foto's die de agent wél had verwerkt.
+ */
+const RAW = /\.(cr2|cr3|crw|nef|nrw|arw|srf|sr2|raf|orf|rw2|dng|pef|srw|erf|mrw|3fr|fff|iiq|mos|mef|dcr|kdc|x3f|gpr)$/i;
+
+/** De invoermap van de fotografie: daar mag naast gewoon beeld ook RAW in. */
+const FOTO_INVOER = "in/raw/photo's";
 
 /** Wat de videomontage oplevert. Alleen in OUT/Video — zie magInSubmap. */
 const VIDEO = /\.(mp4|mov)$/i;
@@ -184,8 +199,10 @@ export function mediaBestandsnaam(ruw: string, submap = ""): string | null {
  * verruiming die niemand opmerkt is precies wat deze grenzen moeten voorkomen.
  */
 export function magInSubmap(naam: string, submap: string): boolean {
-  const isVideomap = VIDEO_SUBMAPPEN.includes(submap.toLowerCase());
-  return isVideomap ? VIDEO.test(naam) : BEELD.test(naam);
+  const map = submap.toLowerCase();
+  if (VIDEO_SUBMAPPEN.includes(map)) return VIDEO.test(naam);
+  if (map === FOTO_INVOER) return BEELD.test(naam) || RAW.test(naam);
+  return BEELD.test(naam);
 }
 
 /** Het volledige pad, of null als een van de drie delen niet deugt. */
