@@ -90,6 +90,11 @@ describe("isMediaSubmap", () => {
     expect(isMediaSubmap("OUT/Photo's")).toBe(true);
     expect(isMediaSubmap("out/photo's")).toBe(true);
     expect(isMediaSubmap("OUT/Photos")).toBe(false);
+    // De bewaarplek van Imagens versie als iemand een foto bijwerkt.
+    expect(isMediaSubmap("OUT/_controle/Photo's")).toBe(true);
+    expect(
+      mediaDoelPad("/Automatie Media/Dam 5, Amsterdam", "OUT/_controle/Photo's", "DSC01199-HDR.jpg")
+    ).toBe("/Automatie Media/Dam 5, Amsterdam/OUT/_controle/Photo's/DSC01199-HDR.jpg");
     expect(
       mediaDoelPad("/Automatie Media/Dam 5, Amsterdam", "OUT/Photo's", "DSC01199-HDR.jpg")
     ).toBe("/Automatie Media/Dam 5, Amsterdam/OUT/Photo's/DSC01199-HDR.jpg");
