@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
-import { dropboxPost, getMetadata, getSharedAccessToken } from "@/lib/dropbox";
+import { getSharedAccessToken, listFolderFiles, verplaatsBatch } from "@/lib/dropbox";
 import { isMediaProjectmap, mediaHernoemPaden } from "@/lib/media-pad";
 
 export const maxDuration = 120;
@@ -19,6 +19,9 @@ export const maxDuration = 120;
  * keuken van tag, dan moet "Keuken 2" "Keuken 1" worden terwijl die naam nog
  * bezet is. Overschrijven doet deze route nooit — er gaat dan een eindfoto
  * verloren — dus zonder tussenstap zou zo'n reeks halverwege vastlopen.
+ *
+ * Beide stappen gaan als batch naar Dropbox (files/move_batch_v2), zodat ook
+ * vijftig foto's binnen seconden klaar zijn.
  *
  * Grenzen, net als bij media-plaatsen: alleen een projectmap onder Automatie
  * Media, alleen in OUT/Photo's, alleen gewone beeldnamen, nooit naar een naam
@@ -85,18 +88,20 @@ export async function POST(request: Request) {
 
   /*
     Bezet door een bestand dat niet meeverhuist: weigeren vóór er iets
-    verplaatst is. Dropbox kijkt niet naar hoofdletters, dus wij ook niet.
+    verplaatst is. Eén listing van de map in plaats van een vraag per bestand —
+    alle doelen staan in dezelfde map. Dropbox kijkt niet naar hoofdletters,
+    dus wij ook niet.
   */
+  const map = reeks[0].naar.slice(0, reeks[0].naar.lastIndexOf("/"));
   const verhuist = new Set(reeks.map((p) => p.van.toLowerCase()));
   try {
+    const bezet = new Set((await listFolderFiles(token, map)).map((b) => `${map}/${b.name}`.toLowerCase()));
     for (const p of reeks) {
-      if (verhuist.has(p.naar.toLowerCase())) continue;
-      if (await getMetadata(token, p.naar)) {
-        return NextResponse.json(
-          { error: `${p.naar.slice(p.naar.lastIndexOf("/") + 1)} bestaat al — er wordt niets overschreven` },
-          { status: 409 }
-        );
-      }
+      if (verhuist.has(p.naar.toLowerCase()) || !bezet.has(p.naar.toLowerCase())) continue;
+      return NextResponse.json(
+        { error: `${p.naar.slice(p.naar.lastIndexOf("/") + 1)} bestaat al — er wordt niets overschreven` },
+        { status: 409 }
+      );
     }
   } catch (err) {
     return NextResponse.json(
@@ -105,41 +110,58 @@ export async function POST(request: Request) {
     );
   }
 
-  const verplaats = async (van: string, naar: string) => {
-    const res = await dropboxPost(token, "/files/move_v2", { from_path: van, to_path: naar, autorename: false });
-    if (!res.ok) throw new Error(`move ${res.status}: ${(await res.text().catch(() => "")).slice(0, 150)}`);
-  };
-
+  /*
+    Beide stappen als batch (files/move_batch_v2): één schrijfactie per stap,
+    klaar in seconden. Achter elkaar met move_v2 kostte het ruim een seconde per
+    foto per stap — bij 44 foto's langer dan het control center wacht.
+  */
+  const foutVan = (u: unknown, standaard: string) =>
+    typeof u === "object" && u && "fout" in u ? String((u as { fout: string }).fout) : standaard;
   const stempel = Date.now().toString(36);
   const uitslag: { van: string; naar: string; gelukt: boolean; fout?: string }[] = [];
-  const tijdelijk: (string | null)[] = [];
+  const tijdelijk = reeks.map((p, i) => `${map}/.hernoem-${stempel}-${i}${p.van.slice(p.van.lastIndexOf("."))}`);
 
-  // Stap 1: alles naar een tijdelijke naam in dezelfde map.
-  for (let i = 0; i < reeks.length; i++) {
-    const p = reeks[i];
-    const map = p.van.slice(0, p.van.lastIndexOf("/"));
-    const tmp = `${map}/.hernoem-${stempel}-${i}${p.van.slice(p.van.lastIndexOf("."))}`;
-    try {
-      await verplaats(p.van, tmp);
-      tijdelijk.push(tmp);
-    } catch (err) {
-      tijdelijk.push(null);
-      uitslag[i] = { van: lijst[i].van!, naar: lijst[i].naar!, gelukt: false, fout: err instanceof Error ? err.message : "mislukt" };
-    }
-  }
+  try {
+    // Stap 1: alles naar een tijdelijke naam in dezelfde map.
+    const stap1 = await verplaatsBatch(token, reeks.map((p, i) => ({ van: p.van, naar: tijdelijk[i] })), 50_000);
+    const verder: number[] = [];
+    stap1.forEach((u, i) => {
+      if (u === "verplaatst") verder.push(i);
+      else
+        uitslag[i] = {
+          van: lijst[i].van!,
+          naar: lijst[i].naar!,
+          gelukt: false,
+          fout: u === "bezig" ? "Dropbox nog bezig met de tijdelijke naam" : foutVan(u, "mislukt"),
+        };
+    });
 
-  // Stap 2: van de tijdelijke naam naar de eindnaam. Lukt dat niet, dan terug
-  // naar de oude naam, zodat er nooit een foto onder een tijdelijke naam blijft.
-  for (let i = 0; i < reeks.length; i++) {
-    const tmp = tijdelijk[i];
-    if (!tmp) continue;
-    try {
-      await verplaats(tmp, reeks[i].naar);
-      uitslag[i] = { van: lijst[i].van!, naar: lijst[i].naar!, gelukt: true };
-    } catch (err) {
-      await verplaats(tmp, reeks[i].van).catch(() => {});
-      uitslag[i] = { van: lijst[i].van!, naar: lijst[i].naar!, gelukt: false, fout: err instanceof Error ? err.message : "mislukt" };
+    // Stap 2: van de tijdelijke naam naar de eindnaam.
+    const stap2 = await verplaatsBatch(token, verder.map((i) => ({ van: tijdelijk[i], naar: reeks[i].naar })), 50_000);
+    const terug: number[] = [];
+    verder.forEach((i, j) => {
+      const u = stap2[j];
+      if (u === "verplaatst") uitslag[i] = { van: lijst[i].van!, naar: lijst[i].naar!, gelukt: true };
+      else {
+        if (u !== "bezig") terug.push(i);
+        uitslag[i] = {
+          van: lijst[i].van!,
+          naar: lijst[i].naar!,
+          gelukt: false,
+          fout: u === "bezig" ? "Dropbox nog bezig met de eindnaam" : foutVan(u, "mislukt"),
+        };
+      }
+    });
+
+    // Lukte de eindnaam niet, dan terug naar de oude naam: nooit een foto onder een tijdelijke naam laten staan.
+    if (terug.length > 0) {
+      await verplaatsBatch(token, terug.map((i) => ({ van: tijdelijk[i], naar: reeks[i].van }))).catch(() => []);
     }
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message.slice(0, 200) : "Dropbox kon niet verplaatsen" },
+      { status: 502 }
+    );
   }
 
   const mislukt = uitslag.filter((u) => !u.gelukt).length;
