@@ -5,6 +5,7 @@ import {
   isMediaSubmap,
   mediaBestandsnaam,
   mediaDoelPad,
+  mediaHernoemPaden,
   mediaVrijgeefPaden,
 } from "@/lib/media-pad";
 
@@ -332,5 +333,29 @@ describe("In/Raw/Photo's — foto's aangeleverd via Media → Uploaden in het co
     expect(mediaDoelPad(adres, "In/Raw/360", "VID_20261011_1.insv", "aanlevering")).not.toBeNull();
     expect(mediaDoelPad(adres, "In/Raw/Video", "VID_20261011_1.insv", "aanlevering")).toBeNull();
     expect(mediaDoelPad(adres, "OUT/360", "VID_20261011_1.insv")).toBeNull();
+  });
+});
+
+describe("mediaHernoemPaden", () => {
+  const adres = "/Automatie Media/Dam 5, Amsterdam";
+
+  it("hernoemt binnen OUT/Photo's naar adres, ruimte en nummer", () => {
+    expect(mediaHernoemPaden(adres, "OUT/Photo's", "DSC02537-HDR.jpg", "Dam 5, Amsterdam - Keuken 2.jpg")).toEqual({
+      van: `${adres}/OUT/Photo's/DSC02537-HDR.jpg`,
+      naar: `${adres}/OUT/Photo's/Dam 5, Amsterdam - Keuken 2.jpg`,
+    });
+  });
+
+  it("weigert elke andere map — ook de andere uitvoermappen en de invoer", () => {
+    for (const sub of ["OUT/360", "OUT/Video", "In/Raw/Photo's", "OUT/_controle/Photo's"]) {
+      expect(mediaHernoemPaden(adres, sub, "a.jpg", "b.jpg")).toBeNull();
+    }
+  });
+
+  it("weigert een naam die na het opschonen iets anders zou worden, of geen beeld is", () => {
+    expect(mediaHernoemPaden(adres, "OUT/Photo's", "a.jpg", "../b.jpg")).toBeNull();
+    expect(mediaHernoemPaden(adres, "OUT/Photo's", "a.jpg", "b/c.jpg")).toBeNull();
+    expect(mediaHernoemPaden(adres, "OUT/Photo's", "a.jpg", "keuken.pdf")).toBeNull();
+    expect(mediaHernoemPaden("/Automatie Energielabels/Dam 5", "OUT/Photo's", "a.jpg", "b.jpg")).toBeNull();
   });
 });

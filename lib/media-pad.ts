@@ -256,3 +256,32 @@ export function mediaVrijgeefPaden(
   if (!van || !naar) return null;
   return { van, naar };
 }
+
+/**
+ * De mappen waarin een machine bestanden mag hernoemen: alleen de uitvoer van
+ * de fotografie. Daar zet het control center de eindfoto's om naar
+ * "<adres> - <ruimte> <nummer>.jpg" zodra bekend is wat erop staat.
+ *
+ * Een eigen, korte lijst en geen hergebruik van MEDIA_SUBMAPPEN: hernoemen in
+ * OUT/360 of OUT/Video zou de bestandsnamen breken waar de nadir- en de
+ * video-agent hun werk aan terugvinden. En nooit in de invoermap — daar staan
+ * de originelen onder de naam van de camera.
+ */
+export const HERNOEM_SUBMAPPEN = ["OUT/Photo's"] as const;
+
+/** Van en naar binnen dezelfde map, of null als een van de delen niet deugt. */
+export function mediaHernoemPaden(
+  projectmap: string,
+  submap: string,
+  van: string,
+  naar: string
+): { van: string; naar: string } | null {
+  if (!HERNOEM_SUBMAPPEN.some((m) => m.toLowerCase() === submap.toLowerCase())) return null;
+  const a = mediaDoelPad(projectmap, submap, van);
+  const b = mediaDoelPad(projectmap, submap, naar);
+  if (!a || !b) return null;
+  // Na het opschonen moet de naam dezelfde zijn als gevraagd: anders hernoemt
+  // de route naar iets anders dan het control center denkt.
+  if (a !== `${projectmap}/${submap}/${van}` || b !== `${projectmap}/${submap}/${naar}`) return null;
+  return { van: a, naar: b };
+}
