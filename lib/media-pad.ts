@@ -32,6 +32,13 @@ export const MEDIA_HOOFDMAP = "Automatie Media";
  * bewerkte foto's bij Imagen staan met "submap moet een van OUT/360,
  * OUT/360/review, out/Omgevingsfoto's zijn".
  *
+ * "OUT/_controle/Photo's" bewaart de versie die Imagen afleverde zodra iemand
+ * een foto in het control center bijwerkt (belichting, kleur, …). De bijgewerkte
+ * versie overschrijft OUT/Photo's; zonder dit origineel zou elke volgende
+ * aanpassing een bewerking op een bewerking zijn, en "herstellen" onmogelijk.
+ * Buiten OUT/Photo's om dezelfde reden als OUT/_controle/360: de deellink van de
+ * klant neemt submappen mee.
+ *
  * "OUT/Video" is de uitvoermap van de Video Edit Agent in het control center:
  * die monteert de clips uit In/Raw/Video automatisch en zet de video hier neer.
  * Het is de enige submap waar een video in mag, en er mag daar niets anders in
@@ -48,6 +55,7 @@ export const MEDIA_SUBMAPPEN = [
   "OUT/360/review",
   "OUT/_controle/360",
   "OUT/Photo's",
+  "OUT/_controle/Photo's",
   "OUT/Video",
   "OUT/_controle/Video",
   "out/Omgevingsfoto's",
