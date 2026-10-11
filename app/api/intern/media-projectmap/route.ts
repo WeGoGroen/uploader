@@ -4,6 +4,7 @@ import {
   MEDIA_PROJECT_SUBFOLDERS,
   createFolder,
   ensureProjectFolder,
+  findProjectFolder,
   folderExists,
   getSharedAccessToken,
   maakSubmappen,
@@ -78,9 +79,15 @@ export async function POST(request: Request) {
   }
 
   try {
+    // Vooraf kijken of hij er al stond, zodat het scherm "bestaande map" kan
+    // zeggen — juist dan moet je opletten dat het het goede pand is.
+    const bestond = await getSharedAccessToken()
+      .then((token) => findProjectFolder(token, "media", woonplaats, straatEnNummer))
+      .then((m) => Boolean(m))
+      .catch(() => false);
     const map = await ensureProjectFolder("media", woonplaats, straatEnNummer);
     if (!map) return NextResponse.json({ error: "Dropbox niet gekoppeld" }, { status: 503 });
-    return NextResponse.json({ ok: true, pad: map.path });
+    return NextResponse.json({ ok: true, pad: map.path, naam: map.path.split("/").pop() ?? "", bestond });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message.slice(0, 200) : "map aanmaken mislukt" },

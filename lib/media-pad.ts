@@ -113,6 +113,14 @@ const RAW = /\.(cr2|cr3|crw|nef|nrw|arw|srf|sr2|raf|orf|rw2|dng|pef|srw|erf|mrw|
 /** De invoermap van de fotografie: daar mag naast gewoon beeld ook RAW in. */
 const FOTO_INVOER = "in/raw/photo's";
 
+/**
+ * Een 360-video van een Insta360. Mag alleen als aanlevering in In/Raw/360
+ * staan, naast de panorama's van dezelfde rondgang; de nadir-agent leest hem
+ * niet (die neemt alleen beeld), maar zo raakt hij niet zoek in de Video-map,
+ * waar de montage hem als gewone clip zou meenemen.
+ */
+const VIDEO_360 = /\.insv$/i;
+
 /** Wat de videomontage oplevert. Alleen in OUT/Video — zie magInSubmap. */
 const VIDEO = /\.(mp4|mov)$/i;
 
@@ -202,6 +210,7 @@ export function magInSubmap(naam: string, submap: string): boolean {
   const map = submap.toLowerCase();
   if (VIDEO_SUBMAPPEN.includes(map)) return VIDEO.test(naam);
   if (map === FOTO_INVOER) return BEELD.test(naam) || RAW.test(naam);
+  if (map === "in/raw/360") return BEELD.test(naam) || VIDEO_360.test(naam);
   return BEELD.test(naam);
 }
 

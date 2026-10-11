@@ -304,3 +304,28 @@ describe("mediaVrijgeefPaden", () => {
     expect(paden?.van.startsWith("/Automatie Media/Dam 5, Amsterdam/OUT/360/")).toBe(false);
   });
 });
+
+describe("In/Raw/Photo's — foto's aangeleverd via Media → Uploaden in het control center", () => {
+  const adres = "/Automatie Media/Dam 5, Amsterdam";
+
+  it("laat een RAW en een JPEG toe bij een aanlevering", () => {
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "DSC01234.ARW", "aanlevering")).toBe(
+      `${adres}/In/Raw/Photo's/DSC01234.ARW`
+    );
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "IMG_0001.CR3", "aanlevering")).not.toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "voorgevel.jpg", "aanlevering")).not.toBeNull();
+  });
+
+  it("weigert de fotomap zonder aanlevering, en een clip of RAW op de verkeerde plek", () => {
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "DSC01234.ARW")).toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "C0001.MP4", "aanlevering")).toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/360", "DSC01234.ARW", "aanlevering")).toBeNull();
+    expect(mediaDoelPad(adres, "OUT/Photo's", "DSC01234.ARW")).toBeNull();
+  });
+
+  it("laat een 360-video van een Insta360 alleen in In/Raw/360 toe", () => {
+    expect(mediaDoelPad(adres, "In/Raw/360", "VID_20261011_1.insv", "aanlevering")).not.toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Video", "VID_20261011_1.insv", "aanlevering")).toBeNull();
+    expect(mediaDoelPad(adres, "OUT/360", "VID_20261011_1.insv")).toBeNull();
+  });
+});
