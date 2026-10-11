@@ -224,6 +224,33 @@ describe("In/Raw/Video — clips aangeleverd via het Business Control Center", (
   });
 });
 
+describe("In/Raw/Photo's — een shoot aangeleverd via het Business Control Center", () => {
+  const adres = "/Automatie Media/Dam 5, Amsterdam";
+
+  it("laat RAW en JPEG toe bij een aanlevering", () => {
+    /*
+      Hier liep de fotografie-uploadpagina van het control center op vast: elke
+      foto kreeg "submap moet een van OUT/360, … zijn — kreeg submap In/Raw/Photo's",
+      er kwam geen shoot in de administratie en er ging niets naar Imagen.
+    */
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "DSC01199.ARW", "aanlevering")).toBe(
+      `${adres}/In/Raw/Photo's/DSC01199.ARW`
+    );
+    expect(mediaDoelPad(adres, "in/raw/photo's", "IMG_1.CR3", "aanlevering")).not.toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "voor.jpg", "aanlevering")).not.toBeNull();
+  });
+
+  it("blijft dicht voor de agent zelf, en voor video", () => {
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "DSC01199.ARW")).toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "C3680.MP4", "aanlevering")).toBeNull();
+  });
+
+  it("laat RAW nergens anders toe", () => {
+    expect(mediaDoelPad(adres, "OUT/Photo's", "DSC01199.ARW")).toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/360", "DSC01199.ARW", "aanlevering")).toBeNull();
+  });
+});
+
 describe("OUT/Video — de montage van de Video Edit Agent", () => {
   const adres = "/Automatie Media/Dam 5, Amsterdam";
 
