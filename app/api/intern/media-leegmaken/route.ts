@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
 import { DROPBOX_API_BASE, dropboxPost, folderExists, getSharedAccessToken, verwijderBatch } from "@/lib/dropbox";
-import { isAanleverSubmap, isMediaProjectmap } from "@/lib/media-pad";
+import { isAanleverSubmap, isLeegmaakUitvoer, isMediaProjectmap } from "@/lib/media-pad";
 
 export const maxDuration = 60;
 
@@ -15,6 +15,10 @@ export const maxDuration = 60;
  * aanlevermap van een bestaande projectmap. De map zelf blijft staan, de
  * uitvoermappen (OUT) en de rest van het adres worden nooit geraakt.
  *
+ * Met `soort: "uitvoer"` ook de uitvoer van de fotografie (OUT/Photo's en
+ * OUT/_controle/Photo's), en dan alleen dat: zie LEEGMAAK_UITVOER. Dat is voor
+ * een shoot die met andere instellingen opnieuw door Imagen gaat.
+ *
  * Verwijderd is bij Dropbox niet weg: alles staat daarna in "Verwijderde
  * bestanden" en is terug te zetten. De route geeft de paden terug, zodat het
  * control center zijn eigen wachtrijen voor deze bestanden kan opruimen.
@@ -23,15 +27,23 @@ export async function POST(request: Request) {
   if (!isInternRequest(request)) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }
-  const body = (await request.json().catch(() => null)) as { projectmap?: string; submap?: string } | null;
+  const body = (await request.json().catch(() => null)) as { projectmap?: string; submap?: string; soort?: string } | null;
   const projectmap = body?.projectmap?.trim() ?? "";
   const submap = body?.submap?.trim() ?? "";
+  const uitvoer = body?.soort === "uitvoer";
 
   if (!isMediaProjectmap(projectmap)) {
     return NextResponse.json({ error: `alleen een projectmap onder /Automatie Media — kreeg "${projectmap}"` }, { status: 400 });
   }
-  if (!isAanleverSubmap(submap)) {
-    return NextResponse.json({ error: `alleen een aanlevermap (In/Raw/…) mag leeg — kreeg "${submap}"` }, { status: 400 });
+  if (uitvoer ? !isLeegmaakUitvoer(submap) : !isAanleverSubmap(submap)) {
+    return NextResponse.json(
+      {
+        error: uitvoer
+          ? `alleen OUT/Photo's of OUT/_controle/Photo's mag als uitvoer leeg — kreeg "${submap}"`
+          : `alleen een aanlevermap (In/Raw/…) mag leeg — kreeg "${submap}"`,
+      },
+      { status: 400 }
+    );
   }
 
   try {

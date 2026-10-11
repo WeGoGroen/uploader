@@ -285,3 +285,20 @@ export function mediaHernoemPaden(
   if (a !== `${projectmap}/${submap}/${van}` || b !== `${projectmap}/${submap}/${naar}`) return null;
   return { van: a, naar: b };
 }
+
+/**
+ * Uitvoermappen die het control center mag leegmaken: alleen die van de
+ * fotografie, en alleen om een shoot opnieuw door Imagen te halen. Anders
+ * blijven de eindfoto's van de vorige bewerking naast de nieuwe staan, en dan
+ * krijgt de klant beide in zijn deellink.
+ *
+ * Apart van AANLEVER_SUBMAPPEN en met een eigen `soort` in de route: wie een
+ * aanlevermap leeg wil, kan zo nooit per ongeluk een oplevering wissen, en
+ * andersom. Verwijderd is bij Dropbox niet weg — het staat in "Verwijderde
+ * bestanden".
+ */
+export const LEEGMAAK_UITVOER = ["OUT/Photo's", "OUT/_controle/Photo's"] as const;
+
+export function isLeegmaakUitvoer(submap: string): boolean {
+  return LEEGMAAK_UITVOER.some((m) => m.toLowerCase() === submap.toLowerCase());
+}

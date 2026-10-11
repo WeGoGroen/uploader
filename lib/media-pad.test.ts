@@ -5,6 +5,7 @@ import {
   isMediaSubmap,
   mediaBestandsnaam,
   mediaDoelPad,
+  isLeegmaakUitvoer,
   mediaHernoemPaden,
   mediaVrijgeefPaden,
 } from "@/lib/media-pad";
@@ -357,5 +358,13 @@ describe("mediaHernoemPaden", () => {
     expect(mediaHernoemPaden(adres, "OUT/Photo's", "a.jpg", "b/c.jpg")).toBeNull();
     expect(mediaHernoemPaden(adres, "OUT/Photo's", "a.jpg", "keuken.pdf")).toBeNull();
     expect(mediaHernoemPaden("/Automatie Energielabels/Dam 5", "OUT/Photo's", "a.jpg", "b.jpg")).toBeNull();
+  });
+});
+
+describe("isLeegmaakUitvoer", () => {
+  it("laat alleen de uitvoer van de fotografie toe", () => {
+    expect(isLeegmaakUitvoer("OUT/Photo's")).toBe(true);
+    expect(isLeegmaakUitvoer("out/_controle/photo's")).toBe(true);
+    for (const sub of ["OUT/360", "OUT/Video", "In/Raw/Photo's", "OUT", ""]) expect(isLeegmaakUitvoer(sub)).toBe(false);
   });
 });
