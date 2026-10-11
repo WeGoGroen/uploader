@@ -99,13 +99,19 @@ export type Schrijfsoort = "oplevering" | "aanlevering";
 const BEELD = /\.(jpe?g|png|tiff?|webp|insp|heic|heif)$/i;
 
 /**
- * Wat een fotograaf aanlevert in In/Raw/Photo's: beeld zoals hierboven, plus
- * camera-RAW. De Foto Edit Agent in het control center stuurt die door Imagen,
- * en een shoot komt meestal als RAW binnen — zonder deze lijst kon de
- * aanlevering vanuit het control center (Media → Uploaden) geen enkele RAW
- * kwijt. Alleen in die ene map: in OUT of in In/Raw/360 hoort geen RAW.
+ * Camera-RAW, alleen voor de invoermap van de fotografie.
+ *
+ * De Foto Edit Agent in het control center stuurt wat hier landt door Imagen
+ * AI, en Imagen werkt het liefst op RAW. Een RAW is geen uitvoer van welke
+ * agent dan ook, dus hij hoort niet bij BEELD: dan kon de nadir-agent er ook
+ * een in OUT/360 zetten. Dezelfde lijst als `RAW` in lib/media/imagen/formaten.ts
+ * van het control center — staat hij hier krapper, dan weigert de uploadpagina
+ * daar foto's die de agent wél had verwerkt.
  */
-const FOTO_RAW = /\.(cr2|cr3|crw|nef|nrw|arw|srf|sr2|raf|orf|rw2|dng|pef|srw|erf|mrw|3fr|fff|iiq|mos|mef|dcr|kdc|x3f|gpr)$/i;
+const RAW = /\.(cr2|cr3|crw|nef|nrw|arw|srf|sr2|raf|orf|rw2|dng|pef|srw|erf|mrw|3fr|fff|iiq|mos|mef|dcr|kdc|x3f|gpr)$/i;
+
+/** De invoermap van de fotografie: daar mag naast gewoon beeld ook RAW in. */
+const FOTO_INVOER = "in/raw/photo's";
 
 /**
  * Een 360-video van een Insta360. Mag alleen als aanlevering in In/Raw/360
@@ -203,7 +209,7 @@ export function mediaBestandsnaam(ruw: string, submap = ""): string | null {
 export function magInSubmap(naam: string, submap: string): boolean {
   const map = submap.toLowerCase();
   if (VIDEO_SUBMAPPEN.includes(map)) return VIDEO.test(naam);
-  if (map === "in/raw/photo's") return BEELD.test(naam) || FOTO_RAW.test(naam);
+  if (map === FOTO_INVOER) return BEELD.test(naam) || RAW.test(naam);
   if (map === "in/raw/360") return BEELD.test(naam) || VIDEO_360.test(naam);
   return BEELD.test(naam);
 }
