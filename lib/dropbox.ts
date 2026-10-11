@@ -1740,6 +1740,50 @@ export async function kopieerBatch(
   });
 }
 
+export type VerplaatsUitkomst = "verplaatst" | "bezig" | { fout: string };
+
+/**
+ * Veel bestanden in één keer verplaatsen of hernoemen: files/move_batch_v2.
+ *
+ * Zelfde reden als bij kopieerBatch: losse move_v2's achter elkaar kostten
+ * ruim een seconde per stuk. Op Herengracht 518 (44 eindfoto's, twee rondes)
+ * liep het hernoemen daardoor tegen de twee minuten aan, en gaf het control
+ * center het op terwijl Dropbox nog bezig was. Nooit overschrijven
+ * (autorename uit); de uitkomst per paar, in dezelfde volgorde.
+ */
+export async function verplaatsBatch(
+  accessToken: string,
+  paren: { van: string; naar: string }[],
+  maxWachtMs = 45_000
+): Promise<VerplaatsUitkomst[]> {
+  if (paren.length === 0) return [];
+  const res = await dropboxPost(accessToken, "/files/move_batch_v2", {
+    entries: paren.map((p) => ({ from_path: p.van, to_path: p.naar })),
+    autorename: false,
+    allow_ownership_transfer: false,
+  });
+  if (!res.ok) {
+    throw new DropboxApiError(res.status, `Dropbox files/move_batch_v2 failed: ${res.status} ${await res.text().catch(() => "")}`);
+  }
+  type Regel = { ".tag": string; failure?: unknown };
+  let data = (await res.json()) as { ".tag": string; async_job_id?: string; entries?: Regel[] };
+  const id = data.async_job_id;
+  const begin = Date.now();
+  while (data[".tag"] === "async_job_id" || data[".tag"] === "in_progress") {
+    if (Date.now() - begin > maxWachtMs) return paren.map(() => "bezig" as const);
+    await new Promise((r) => setTimeout(r, 1000));
+    const check = await dropboxPost(accessToken, "/files/move_batch/check_v2", { async_job_id: id ?? "" });
+    if (!check.ok) {
+      throw new DropboxApiError(check.status, `Dropbox move_batch/check_v2 failed: ${check.status} ${await check.text().catch(() => "")}`);
+    }
+    data = (await check.json()) as typeof data;
+  }
+  if (data[".tag"] === "failed") throw new Error(`Dropbox kon niet verplaatsen: ${JSON.stringify(data).slice(0, 200)}`);
+  return (data.entries ?? []).map((e): VerplaatsUitkomst =>
+    e[".tag"] === "success" ? "verplaatst" : { fout: `verplaatsen mislukt: ${JSON.stringify(e.failure ?? e).slice(0, 140)}` }
+  );
+}
+
 /**
  * Bestanden naar de prullenbak van Dropbox: files/delete_batch.
  *
