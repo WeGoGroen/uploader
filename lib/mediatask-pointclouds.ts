@@ -260,6 +260,23 @@ export async function leesOrderTijd(orderId: number): Promise<number | null> {
   return t ? Number(t) : null;
 }
 
+/**
+ * Aanmaakmomenten voor een hele rij orders in één Redis-ronde. Ontbreekt er
+ * een, dan is die order niet via de uploader gemaakt (of langer geleden dan
+ * we het bewaren).
+ */
+export async function leesOrderTijden(orderIds: number[]): Promise<Map<number, number>> {
+  const redis = getOptionalRedis();
+  const uit = new Map<number, number>();
+  if (!redis || orderIds.length === 0) return uit;
+  const ruw = await redis.mget(orderIds.map((id) => `${TIJD_PREFIX}${id}`)).catch(() => [] as (string | null)[]);
+  orderIds.forEach((id, i) => {
+    const t = Number(ruw[i]);
+    if (ruw[i] && Number.isFinite(t)) uit.set(id, t);
+  });
+  return uit;
+}
+
 export async function leesOrderPad(orderId: number): Promise<string | null> {
   const redis = getOptionalRedis();
   if (!redis) return null;

@@ -1,6 +1,8 @@
 import { getOptionalRedis } from "@/lib/redis";
 
-export const CACHE_KEY = "clickup:taaknamen";
+// v2: sinds de taken mét aanmaakmoment worden bewaard; de oude sleutel
+// bevatte alleen namen.
+export const CACHE_KEY = "clickup:taken:v2";
 /**
  * Kort cachen. Deze lijst wordt bij élke dashboardlading opgehaald, en met
  * meerdere opnemers tegelijk zou dat bij vijf pagina's een veelvoud aan

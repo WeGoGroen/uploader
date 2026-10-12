@@ -14,6 +14,8 @@ export interface MeerMenuItem {
   label: string;
   /** Korte uitleg onder het label: wat er gebeurt als je erop tikt. */
   uitleg?: string;
+  /** Maakt er een aan/uit-keuze van met een vinkje; weglaten = gewone actie. */
+  aan?: boolean;
   onClick: () => void;
 }
 
@@ -75,13 +77,19 @@ export default function MeerMenu({
             <button
               key={item.label}
               type="button"
-              role="menuitem"
+              role={item.aan === undefined ? "menuitem" : "menuitemcheckbox"}
+              aria-checked={item.aan}
               className="user-menu-item"
               onClick={() => {
                 setOpen(false);
                 item.onClick();
               }}
             >
+              {item.aan !== undefined && (
+                <span className={`meer-menu-vink${item.aan ? " is-aan" : ""}`} aria-hidden="true">
+                  {item.aan ? "✓" : ""}
+                </span>
+              )}
               <span className="meer-menu-tekst">
                 <b>{item.label}</b>
                 {item.uitleg && <span>{item.uitleg}</span>}

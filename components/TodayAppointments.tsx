@@ -2,9 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { extractGrossFloorArea, extractKlant, matchServices } from "@/lib/calendar-services";
-import { calendarLocationToBagQuery, sameAddress, splitAddress } from "@/lib/address-format";
+import { adresSleutel, calendarLocationToBagQuery, sameAddress, splitAddress } from "@/lib/address-format";
 import { checkBagAddress, type BagCheckResult } from "@/lib/bag-check";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
+import {
+  energielabelStatus,
+  isRecent,
+  nenStatus,
+  recenteClickUpTaak,
+  recenteMediataskOrder,
+  type ClickUpTaakSamenvatting,
+  type DienstStatus,
+  type MediataskOrderSamenvatting,
+} from "@/lib/afspraak-status";
+import MeerMenu from "@/components/MeerMenu";
 
 interface CalendarEvent {
   id: string;
@@ -15,14 +26,51 @@ interface CalendarEvent {
   end: string | null;
 }
 
-interface MediataskOrderSummary {
-  address?: string;
-}
-
 // ClickUp geeft geen los "adres"-veld terug in de tasklijst — de taaknaam
 // zelf IS het adres (zo aangemaakt bij het versturen), dus daarop matchen.
 
-type DraftRecord = Pick<ServerDraftRecord, "straatnaam" | "status" | "clickupTaskUrl" | "heeftMediatask">;
+type DraftRecord = Pick<
+  ServerDraftRecord,
+  "straatnaam" | "status" | "clickupTaskUrl" | "heeftMediatask" | "incompleteDocs" | "updatedAt"
+>;
+
+type Dienst = "energielabel" | "nen";
+type KlaarMeldingen = Record<Dienst, Set<string>>;
+
+/** De handmatige "al gedaan"-meldingen per dienst; null als ophalen mislukt. */
+async function haalKlaarMeldingen(): Promise<KlaarMeldingen | null> {
+  try {
+    const res = await fetch("/api/klaar-melden", { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { energielabel?: string[]; nen?: string[]; straten?: string[] };
+    return { energielabel: new Set(data.energielabel ?? data.straten ?? []), nen: new Set(data.nen ?? []) };
+  } catch {
+    return null;
+  }
+}
+
+/** Het label op een kaartje per status; null = geen statuslabel. */
+function statusLabel(dienst: Dienst, status: DienstStatus): { tekst: string; klasse: string } | null {
+  const naam = dienst === "nen" ? "NEN2580" : "Energielabel";
+  switch (status) {
+    case "geupload":
+      return { tekst: dienst === "nen" ? "NEN2580 ingediend" : "Energielabel geüpload", klasse: "is-uploaded" };
+    case "elders":
+      return {
+        tekst: dienst === "nen" ? "In Mediatask · buiten uploader" : "In ClickUp · buiten uploader",
+        klasse: "is-uploaded",
+      };
+    case "handmatig":
+      return { tekst: `${naam} al gedaan · handmatig`, klasse: "is-uploaded" };
+    case "onaf":
+      return {
+        tekst: dienst === "nen" ? "NEN2580: concept, nog niet ingediend" : "Bijlages ontbreken",
+        klasse: "is-warning",
+      };
+    default:
+      return null;
+  }
+}
 
 function formatTime(iso: string | null): string {
   if (!iso || iso.length === 10) return "";
@@ -60,8 +108,10 @@ export default function TodayAppointments({
 }) {
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);
   const [drafts, setDrafts] = useState<DraftRecord[]>([]);
-  const [mediataskOrders, setMediataskOrders] = useState<MediataskOrderSummary[]>([]);
-  const [clickupTaskNames, setClickupTaskNames] = useState<string[]>([]);
+  const [mediataskOrders, setMediataskOrders] = useState<MediataskOrderSamenvatting[]>([]);
+  const [clickupTaken, setClickupTaken] = useState<ClickUpTaakSamenvatting[]>([]);
+  const [klaar, setKlaar] = useState<KlaarMeldingen>({ energielabel: new Set(), nen: new Set() });
+  const [meldBezig, setMeldBezig] = useState<string | null>(null);
   const [connected, setConnected] = useState(true);
   // Welke "Bedoelde je?"-suggestie al is aangeklikt, per adres — anders
   // blijft dat blok na de keuze gewoon zichtbaar staan, want de BAG-uitslag
@@ -103,11 +153,30 @@ export default function TodayAppointments({
         .catch(() => {});
     } else {
       fetch("/api/clickup/tasks", { cache: "no-store" })
-        .then((res) => (res.ok ? res.json() : { names: [] }))
-        .then((data) => setClickupTaskNames(data.names ?? []))
+        .then((res) => (res.ok ? res.json() : { tasks: [] }))
+        .then((data) => setClickupTaken(data.tasks ?? []))
         .catch(() => {});
     }
+    if (context !== "media") void haalKlaarMeldingen().then((m) => m && setKlaar(m));
   }, [context]);
+
+  function laadKlaarMeldingen() {
+    void haalKlaarMeldingen().then((m) => m && setKlaar(m));
+  }
+
+  async function zetKlaar(street: string, dienst: Dienst, aan: boolean) {
+    setMeldBezig(street);
+    try {
+      await fetch("/api/klaar-melden", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ street, dienst, klaar: aan }),
+      });
+      laadKlaarMeldingen();
+    } finally {
+      setMeldBezig(null);
+    }
+  }
 
   // Controleer per afspraak of het adres in de BAG bestaat — een adres met
   // een typefout (of een niet-bestaand adres) valt zo meteen op in de lijst,
@@ -154,20 +223,31 @@ export default function TodayAppointments({
   // Er kunnen meerdere concept-records voor hetzelfde adres bestaan (bv. een
   // opnieuw gestarte zoekopdracht) — als ÉÉN daarvan al geüpload is, telt
   // dat, ook als een ander (later aangeraakt) concept nog openstaat.
+  // Alleen recente concepten: een opname van vorig jaar op hetzelfde adres
+  // zegt niets over de afspraak van vandaag (zie lib/afspraak-status.ts).
   function findDraft(street: string): DraftRecord | null {
-    const matches = drafts.filter((d) => sameAddress(d.straatnaam, street));
+    const matches = drafts.filter((d) => isRecent(d.updatedAt) && sameAddress(d.straatnaam, street));
     if (!matches.length) return null;
     return (
       matches.find((d) => d.status === "uploaded" || !!d.heeftMediatask) ?? matches[0]
     );
   }
 
-  function hasMediataskOrder(street: string): boolean {
-    return mediataskOrders.some((o) => !!o.address && sameAddress(o.address, street));
-  }
-
-  function hasClickUpTask(street: string): boolean {
-    return clickupTaskNames.some((name) => sameAddress(name, street));
+  function statusVoor(street: string, draft: DraftRecord | null): DienstStatus {
+    if (context === "media") return null;
+    const handmatig = klaar[context].has(adresSleutel(street));
+    return context === "energielabel"
+      ? energielabelStatus({
+          taak: recenteClickUpTaak(clickupTaken, street),
+          conceptGeupload: draft?.status === "uploaded" || !!draft?.clickupTaskUrl,
+          bijlagesOntbreken: (draft?.incompleteDocs ?? []).length > 0,
+          handmatig,
+        })
+      : nenStatus({
+          order: recenteMediataskOrder(mediataskOrders, street),
+          conceptMetOrder: !!draft?.heeftMediatask,
+          handmatig,
+        });
   }
 
   return (
@@ -201,16 +281,15 @@ export default function TodayAppointments({
               : context === "energielabel"
                 ? services.nen && !services.energielabel
                 : services.energielabel && !services.nen;
-          const alreadyUploaded =
-            context === "media"
-              ? false
-              : context === "energielabel"
-                ? hasClickUpTask(street) || draft?.status === "uploaded" || !!draft?.clickupTaskUrl
-                : hasMediataskOrder(street) || !!draft?.heeftMediatask;
+          // Alleen recent werk telt; "onaf" (concept, ontbrekende bijlages)
+          // blijft juist opvallen, want daar moet nog iets gebeuren.
+          const status = statusVoor(street, draft);
+          const alreadyUploaded = status !== null && status !== "onaf";
+          const label = context === "media" ? null : statusLabel(context, status);
           const isDimmed = otherServiceOnly || alreadyUploaded;
 
           return (
-            <li key={e.id}>
+            <li key={e.id} className={context === "media" ? undefined : "today-appt-item"}>
               <button
                 className={`today-appt-card${isDimmed ? " is-dimmed" : ""}`}
                 onClick={() => onPick(bagQuery, klant, extractGrossFloorArea(e.description))}
@@ -220,14 +299,12 @@ export default function TodayAppointments({
                   <span className="today-appt-street">{street}</span>
                 </span>
                 {cityLine && <span className="today-appt-city">{cityLine}</span>}
-                {alreadyUploaded ? (
+                {alreadyUploaded || label ? (
                   // Geen BAG-waarschuwing meer bij al geüploade adressen: de
                   // opname is dan al gelukt, dus er valt niets meer te doen.
                   <span className="today-appt-services">
                     {klant && <span className="today-appt-service-tag is-makelaar">{klant}</span>}
-                    <span className="today-appt-service-tag is-uploaded">
-                      {context === "nen" ? "NEN2580 geüpload" : "Energielabel geüpload"}
-                    </span>
+                    {label && <span className={`today-appt-service-tag ${label.klasse}`}>{label.tekst}</span>}
                   </span>
                 ) : (
                   (services.energielabel || services.nen || klant || bagMissing) && (
@@ -240,6 +317,26 @@ export default function TodayAppointments({
                   )
                 )}
               </button>
+
+              {/* Zelfde ⋯-menu als op het dashboard: met de hand markeren dat
+                  een dienst voor dit adres al gedaan is. */}
+              {context !== "media" && (
+                <span className="today-appt-item-meer">
+                  <MeerMenu
+                    label={`Meer opties voor ${street}`}
+                    bezig={meldBezig === street}
+                    items={(["nen", "energielabel"] as const).map((d) => {
+                      const aan = klaar[d].has(adresSleutel(street));
+                      return {
+                        label: d === "nen" ? "NEN2580 al gedaan" : "Energielabel al gedaan",
+                        uitleg: aan ? "Tik om terug te draaien" : "Markeert deze afspraak als klaar",
+                        aan,
+                        onClick: () => zetKlaar(street, d, !aan),
+                      };
+                    })}
+                  />
+                </span>
+              )}
 
               {/* Adres bestaat niet in de BAG: meteen de gevonden gelijkende
                   adressen aanbieden (één tik = doorgaan met het juiste adres),
