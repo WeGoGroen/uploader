@@ -10,7 +10,12 @@ import {
 } from "@/lib/mediatask";
 import { getFolderLinkWithCount, getSharedAccessToken } from "@/lib/dropbox";
 import { bouwOrderOpmerking, type OpmerkingMap } from "@/lib/mediatask-opmerking";
-import { bewaarOrderPad, stuurScansVanuitDropbox, type ScanUitkomst } from "@/lib/mediatask-pointclouds";
+import {
+  bewaarOrderPad,
+  leesOrderTijden,
+  stuurScansVanuitDropbox,
+  type ScanUitkomst,
+} from "@/lib/mediatask-pointclouds";
 import { stuurMediaVanuitDropboxMap, type MediaUitkomst } from "@/lib/mediatask-media";
 
 // Twee doorgangen per scan over honderden MB's passen niet in een minuut.
@@ -27,13 +32,20 @@ export const maxDuration = 300;
  * tweede. Uitgekleed, omdat het antwoord daarvoor niet meer nodig heeft dan
  * het adres — wie wat gedaan heeft, met welk bureau en welke deadline, hoort
  * niet in de browser van iedereen terecht te komen.
+ *
+ * `viaUploaderOp` zegt wanneer de uploader de order aanmaakte (null = niet via
+ * de uploader). Mediatask geeft zelf geen aanmaakdatum mee; zonder dit valt
+ * een order van vandaag niet te onderscheiden van een van vorig jaar.
  */
 export async function GET() {
   try {
-    const orders = (await listOrders()).map((o) => ({
+    const lijst = await listOrders();
+    const tijden = await leesOrderTijden(lijst.map((o) => o.id));
+    const orders = lijst.map((o) => ({
       id: o.id,
       address: o.address,
       state: o.state,
+      viaUploaderOp: tijden.get(o.id) ?? null,
     }));
     return NextResponse.json({ orders });
   } catch (err) {
