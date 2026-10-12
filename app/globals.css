@@ -381,6 +381,29 @@ h2 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.02em; }
    afspraak met twee diensten rechts buiten de kaart. */
 .draft-actions.today-appt-actions { flex: 1 1 100%; min-width: 0; flex-wrap: wrap; gap: 10px; }
 .today-appt-actions > .btn { flex: 0 1 auto; min-width: 0; white-space: normal; text-align: center; }
+/* De puntjes rechts uitlijnen, los van de hoofdknoppen. */
+.today-appt-meer { margin-left: auto; }
+
+/* ⋯-knop met uitklapmenu (components/MeerMenu). */
+.meer { position: relative; flex: none; }
+.meer-knop {
+  display: grid; place-items: center; width: 40px; height: 40px;
+  border: 1px solid var(--rule-strong); border-radius: 999px;
+  background: var(--paper); color: var(--ink-faint); cursor: pointer;
+}
+.meer-knop:hover, .meer-knop[aria-expanded="true"] { background: var(--inset); color: var(--ink); }
+.meer-knop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.meer-knop .spinner { width: 14px; height: 14px; }
+.meer-menu {
+  position: absolute; z-index: 40; right: 0; top: calc(100% + 6px); min-width: 270px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; padding: 6px;
+  box-shadow: 0 14px 34px rgba(20, 30, 24, 0.22);
+}
+.meer-menu .user-menu-item { min-height: 48px; }
+.meer-menu-tekst { display: flex; flex-direction: column; gap: 1px; }
+.meer-menu-tekst b { font-weight: 600; }
+.meer-menu-tekst span { font-size: 12px; color: var(--ink-faint); }
+.scanstatus-lijst .meer-knop { width: 36px; height: 36px; }
 .btn-refresh .spin { animation: btn-refresh-spin 0.8s linear infinite; }
 @keyframes btn-refresh-spin { to { transform: rotate(360deg); } }
 
@@ -770,6 +793,31 @@ select:focus-visible, textarea:focus-visible {
 .compass-modal .dbx-strip-docs { grid-template-columns: 1fr; }
 /* Rode rand zolang er geen makelaar gekozen is — doorklikken kan dan niet. */
 .compass-modal.is-invalid { border: 2px solid var(--bad); }
+/* Spoed-schakelaar in "Klopt dit?" (NEN): één tik in plaats van via
+   "Aanpassen". Oranje als hij aan staat, zodat spoed niet ongemerkt meegaat. */
+.prio-schakel {
+  display: flex; align-items: center; gap: 14px; margin-top: 12px; padding: 12px 14px;
+  border: 1px solid var(--rule-strong); border-radius: 12px; background: var(--paper); cursor: pointer;
+}
+.prio-schakel.is-aan { border-color: #e8b44c; background: var(--warn-wash); }
+.prio-schakel.is-vast { cursor: default; opacity: 0.7; }
+.prio-tekst { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.prio-tekst b { font-size: 15px; font-weight: 650; }
+.prio-tekst span { font-size: 12.5px; color: var(--ink-faint); }
+.prio-switch {
+  appearance: none; flex: none; width: 52px; height: 30px; margin: 0;
+  border-radius: 999px; background: var(--rule-strong); position: relative; cursor: pointer;
+  transition: background 0.15s;
+}
+.prio-switch::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 0.15s;
+}
+.prio-switch:checked { background: #c98a12; }
+.prio-switch:checked::after { transform: translateX(22px); }
+.prio-switch:disabled { cursor: default; }
+.prio-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .prio-switch, .prio-switch::after { transition: none; } }
 /* Ontbrekende makelaar in de vinklijst: opvallend rood i.p.v. een groen vinkje. */
 .dbx-strip-doc-row.is-warning-row { color: var(--bad); font-weight: 700; }
 .dbx-strip-doc-row.is-warning-row .dbx-strip-doc-status { color: var(--bad); font-weight: 700; }
@@ -1649,97 +1697,64 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
 .up-lost { font-size: 12px; color: var(--bad); line-height: 1.4; }
 
 /* ---------- Upload media ---------- */
-/* Waar je in de flow bent: adres → foto's → video → 360. Geen klikbare tabs:
-   de volgorde is de bedoeling, en met losse tabs sla je zonder het te merken
-   een soort over. */
-.media-steps {
-  list-style: none; display: flex; flex-wrap: wrap; gap: 8px;
-  margin: 0 0 16px; padding: 0; counter-reset: stap;
-}
-.media-step {
-  display: inline-flex; align-items: center; gap: 7px;
-  border: 1px solid var(--rule); border-radius: 999px; padding: 6px 13px 6px 10px;
-  font-size: 13px; font-weight: 600; color: var(--ink-faint); background: var(--paper);
-}
-.media-step.is-now { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-text); }
-.media-step.is-done { border-color: var(--rule-strong); color: var(--ink-soft); }
-.media-step-nr {
-  flex: none; width: 18px; height: 18px; border-radius: 50%;
-  display: grid; place-items: center; font-size: 11px; font-weight: 700;
-  background: var(--inset-2); color: var(--ink-soft);
-}
-.media-step.is-now .media-step-nr { background: var(--accent); color: #fff; }
-.media-step.is-done .media-step-nr { background: var(--ok-wash); color: var(--ok); }
-.media-step-label { display: inline-flex; align-items: center; gap: 6px; }
-.media-step-count {
-  min-width: 18px; text-align: center; border-radius: 999px; padding: 1px 6px;
-  background: var(--accent); color: #fff; font-size: 11px; font-variant-numeric: tabular-nums;
-}
-
-/* Uploadknop in Dropbox-vorm. Dropbox-blauw (#0061fe) haalt met witte tekst
-   5,1:1 — ruim boven AA — en onderscheidt zich van de groene "Volgende"
-   ernaast, zodat uploaden en doorgaan niet op elkaar lijken. */
-.btn-dropbox {
-  display: flex; align-items: center; gap: 14px; width: 100%;
-  min-height: 68px; padding: 12px 16px; text-align: left;
-  border: 0; border-radius: var(--r-sm); cursor: pointer;
+/* Eén uploadknop voor de hele opname: over de volle breedte, zodat hij op een
+   iPad niet te missen is, maar niet hoog — eronder moeten de drie kolommen in
+   beeld blijven. Dropbox-blauw (#0061fe) haalt met witte tekst 5,1:1 en
+   onderscheidt zich van de groene "Klaar" onderaan. */
+.media-upknop {
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
+  column-gap: 16px; align-items: center; width: 100%;
+  min-height: 96px; padding: 16px 22px; text-align: left;
+  border: 0; border-radius: var(--r); cursor: pointer;
   background: #0061fe; color: #fff; font: inherit;
+  box-shadow: 0 0 0 5px #e3ecff;
 }
-.btn-dropbox:hover { background: #0050d0; }
-.btn-dropbox:active { background: #0046b8; }
-.btn-dropbox:disabled { opacity: 0.6; cursor: default; }
-.btn-dropbox-mark {
-  flex: none; width: 40px; height: 40px; border-radius: 10px;
-  display: grid; place-items: center;
-  background: rgba(255, 255, 255, 0.16);
+.media-upknop:hover { background: #0050d0; }
+.media-upknop:active { background: #0046b8; }
+.media-upknop.is-sleep { background: #0046b8; box-shadow: 0 0 0 5px #b9cfff; }
+.media-upknop.is-compact { min-height: 68px; padding: 12px 18px; box-shadow: none; }
+.media-upknop-icoon {
+  grid-row: 1 / span 2; width: 52px; height: 52px; border-radius: 50%;
+  display: grid; place-items: center; background: rgba(255, 255, 255, 0.18);
 }
-.btn-dropbox-tekst { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.btn-dropbox-tekst strong { font-size: 16px; font-weight: 650; }
-/* De bestemming staat op de knop zelf: je ziet vóór het tikken waar de
-   bestanden heen gaan, i.p.v. dat achteraf in de balk te moeten nalezen. */
-.btn-dropbox-doel {
-  font-size: 12px; opacity: 0.85; font-family: var(--mono);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.media-upknop-icoon svg { width: 28px; height: 28px; }
+.media-upknop.is-compact .media-upknop-icoon { width: 40px; height: 40px; }
+.media-upknop.is-compact .media-upknop-icoon svg { width: 22px; height: 22px; }
+.media-upknop-tekst { font-size: 24px; font-weight: 750; letter-spacing: -0.01em; align-self: end; }
+.media-upknop.is-compact .media-upknop-tekst { font-size: 18px; }
+.media-upknop-sub { font-size: 13.5px; opacity: 0.88; align-self: start; }
+
+.media-totaal { display: flex; flex-direction: column; gap: 6px; }
+.media-totaal-tekst {
+  display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+  font-size: 13px; color: var(--ink-soft); font-variant-numeric: tabular-nums;
 }
-.btn-dropbox-actie {
-  flex: none; display: inline-flex; align-items: center; gap: 6px;
-  padding: 9px 14px; border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18); font-size: 13.5px; font-weight: 700;
+.media-totaal-tekst b { color: var(--ink); }
+.media-totaal-fout { color: var(--bad); font-weight: 650; }
+
+/* Foto's, video en 360 naast elkaar, zoals in het control center; op een
+   telefoon onder elkaar. */
+.media-kolommen { display: grid; gap: 14px; grid-template-columns: 1fr; }
+@media (min-width: 900px) { .media-kolommen { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.media-kolom {
+  display: flex; flex-direction: column; min-width: 0; min-height: 180px;
+  border: 1px solid var(--rule); border-radius: var(--r-sm); overflow: hidden; background: var(--paper);
 }
-.btn-dropbox:hover .btn-dropbox-actie { background: rgba(255, 255, 255, 0.28); }
-/* De tweede weg naar Dropbox: bewust ondergeschikt aan de grote blauwe knop
-   (omlijnd, niet gevuld), maar in hetzelfde blauw — het is dezelfde bestemming,
-   alleen een ander vervoermiddel. */
-.btn-dbx-app {
-  display: flex; align-items: center; gap: 12px; width: 100%;
-  margin-top: 10px; padding: 11px 14px; border-radius: var(--r-sm);
-  border: 1.5px solid #0061fe; color: #0050d0; background: transparent;
-  text-decoration: none;
+.media-kolom-kop {
+  display: flex; flex-direction: column; gap: 2px; padding: 12px 14px;
+  background: var(--inset); border-bottom: 1px solid var(--rule);
 }
-.btn-dbx-app:hover { background: rgba(0, 97, 254, 0.06); }
-.btn-dbx-app-tekst { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.btn-dbx-app-tekst strong { font-size: 14.5px; font-weight: 650; }
-.btn-dbx-app-tekst span { font-size: 12.5px; color: var(--ink-soft); }
-.media-dbx-stand { margin: 12px 0 0; font-size: 13.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
-.media-dbx-stand strong { color: var(--ink); }
-.media-hint { margin: 10px 0 0; font-size: 13px; color: var(--ink-faint); line-height: 1.45; }
-.media-files { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.media-files li {
-  display: flex; gap: 10px; align-items: center; font-size: 13px;
-  color: var(--ink-soft); padding: 5px 8px; border-radius: 7px;
+.media-kolom-rij { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.media-kolom-titel { font-size: 15px; font-weight: 700; }
+.media-kolom-ok { color: var(--ok); }
+.media-kolom-tel { font-size: 12.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.media-kolom-map { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); }
+.media-kolom-bar { height: 4px; margin-top: 8px; }
+.up-bar-fill.is-bad { background: var(--bad); }
+.media-kolom-leeg {
+  flex: 1; display: grid; place-items: center; margin: 0; padding: 24px 14px;
+  font-size: 13px; color: var(--ink-faint); text-align: center;
 }
-.media-files li.is-error { color: var(--bad); }
-/* Afgerond staat groen met een vinkje ervoor: in een lange lijst zie je zo
-   in één blik hoeveel er al binnen is en waar het nog loopt. */
-.media-files li.is-done { color: var(--ok); background: var(--ok-wash); }
-.media-files li.is-done .media-file-state { font-weight: 700; }
-.media-file-check { margin-right: 5px; }
-.media-file-name { flex: 1; overflow-wrap: anywhere; }
-.media-file-state { flex: none; font-variant-numeric: tabular-nums; font-weight: 650; }
-/* Mislukt: de reden onder de naam, en een knop die groot genoeg is om op een
-   iPad met een duim te raken. */
-.media-files li.is-error { background: var(--bad-wash); }
-.media-file-fout { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; line-height: 1.4; }
 .media-retry-btn {
   min-height: 40px; padding: 6px 14px; border-radius: 999px;
   border: 1px solid var(--bad); background: #fff; color: var(--bad);
@@ -1753,6 +1768,38 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
   background: var(--bad-wash); color: var(--bad); font-size: 13px; line-height: 1.45;
 }
 .media-retry-all span { flex: 1 1 220px; }
+.media-kolom-lijst {
+  list-style: none; margin: 0; padding: 10px 14px; flex: 1;
+  display: flex; flex-direction: column; gap: 10px; max-height: 26rem; overflow-y: auto;
+}
+.media-kolom-lijst li { display: flex; flex-direction: column; font-size: 13px; }
+.media-kolom-r1 { display: flex; justify-content: space-between; gap: 8px; }
+.media-kolom-naam { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-kolom-r2 { font-size: 11.5px; color: var(--ink-faint); }
+.media-kolom-st { flex: none; font-variant-numeric: tabular-nums; color: var(--ink-faint); }
+.media-kolom-st.is-done { color: var(--ok); font-weight: 650; }
+.media-kolom-st.is-error { color: var(--bad); font-weight: 700; }
+.media-kolom-bar-klein { height: 3px; margin-top: 4px; }
+.media-kolom-dbx {
+  margin: 0; padding: 8px 14px; border-top: 1px solid var(--rule);
+  font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums;
+}
+.media-kolom-dbx strong { color: var(--ink); }
+.media-kolom-opnieuw {
+  border: 0; border-top: 1px solid var(--rule); background: none; cursor: pointer;
+  padding: 10px 14px; text-align: left; font: inherit; font-size: 13px; font-weight: 650;
+  color: var(--accent-text);
+}
+.media-kolom-opnieuw:hover { background: var(--inset); }
+.media-kolom-opnieuw:disabled { opacity: 0.6; cursor: default; }
+.media-kolom-r2.media-kolom-fout { color: var(--bad); }
+
+.media-overgeslagen {
+  background: var(--warn-wash); color: var(--warn); border-radius: var(--r-sm);
+  padding: 10px 14px; font-size: 13px;
+}
+.media-overgeslagen summary { cursor: pointer; font-weight: 650; }
+.media-overgeslagen ul { margin: 6px 0 0; padding-left: 18px; }
 
 /* Lopende media-opnames op de adresstap: de wachtrij loopt door als je
    wegklikt, dus dit is de weg terug — zonder herladen, alles komt uit de
@@ -1960,24 +2007,6 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
 .scanstatus-tekst span { font-size: 12px; color: var(--ink-faint); }
 .scanstatus-lijst .btn { flex: none; min-height: 36px; font-size: 12.5px; padding: 0 14px; }
 .scanstatus-acties { flex: none; display: flex; align-items: center; gap: 6px; }
-.scanstatus-meer { position: relative; }
-.scanstatus-meer-knop {
-  display: grid; place-items: center; width: 36px; height: 36px;
-  border: 1px solid var(--rule-strong); border-radius: 999px;
-  background: var(--paper); color: var(--ink-faint); cursor: pointer;
-}
-.scanstatus-meer-knop:hover, .scanstatus-meer-knop[aria-expanded="true"] { background: var(--inset); color: var(--ink); }
-.scanstatus-meer-knop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.scanstatus-meer-knop .spinner { width: 14px; height: 14px; }
-.scanstatus-menu {
-  position: absolute; z-index: 40; right: 0; top: calc(100% + 6px); min-width: 220px;
-  background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; padding: 6px;
-  box-shadow: 0 14px 34px rgba(20, 30, 24, 0.22);
-}
-.scanstatus-menu .user-menu-item { min-height: 48px; }
-.scanstatus-menu-tekst { display: flex; flex-direction: column; gap: 1px; }
-.scanstatus-menu-tekst b { font-weight: 600; }
-.scanstatus-menu-tekst span { font-size: 12px; color: var(--ink-faint); }
 .scanstatus-lijst li.is-goed .scanstatus-icoon { color: #1c7a41; font-weight: 700; }
 
 /* ---------- Instellingen ---------- */

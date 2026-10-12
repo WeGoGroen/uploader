@@ -32,6 +32,13 @@ export const MEDIA_HOOFDMAP = "Automatie Media";
  * bewerkte foto's bij Imagen staan met "submap moet een van OUT/360,
  * OUT/360/review, out/Omgevingsfoto's zijn".
  *
+ * "OUT/_controle/Photo's" bewaart de versie die Imagen afleverde zodra iemand
+ * een foto in het control center bijwerkt (belichting, kleur, …). De bijgewerkte
+ * versie overschrijft OUT/Photo's; zonder dit origineel zou elke volgende
+ * aanpassing een bewerking op een bewerking zijn, en "herstellen" onmogelijk.
+ * Buiten OUT/Photo's om dezelfde reden als OUT/_controle/360: de deellink van de
+ * klant neemt submappen mee.
+ *
  * "OUT/Video" is de uitvoermap van de Video Edit Agent in het control center:
  * die monteert de clips uit In/Raw/Video automatisch en zet de video hier neer.
  * Het is de enige submap waar een video in mag, en er mag daar niets anders in
@@ -48,6 +55,7 @@ export const MEDIA_SUBMAPPEN = [
   "OUT/360/review",
   "OUT/_controle/360",
   "OUT/Photo's",
+  "OUT/_controle/Photo's",
   "OUT/Video",
   "OUT/_controle/Video",
   "out/Omgevingsfoto's",
@@ -86,7 +94,7 @@ export type MediaSubmap = (typeof MEDIA_SUBMAPPEN)[number];
  * originelen stilletjes weg — precies het soort verruiming waar niemand een
  * melding van krijgt.
  */
-export const AANLEVER_SUBMAPPEN = ["In/Raw/360", "In/Raw/Video"] as const;
+export const AANLEVER_SUBMAPPEN = ["In/Raw/360", "In/Raw/Video", "In/Raw/Photo's"] as const;
 
 export type AanleverSubmap = (typeof AANLEVER_SUBMAPPEN)[number];
 
@@ -97,6 +105,29 @@ export type Schrijfsoort = "oplevering" | "aanlevering";
     daar: schrijft hij iets anders weg, dan klopt er iets niet en is weigeren
     beter dan het ergens neerzetten. */
 const BEELD = /\.(jpe?g|png|tiff?|webp|insp|heic|heif)$/i;
+
+/**
+ * Camera-RAW, alleen voor de invoermap van de fotografie.
+ *
+ * De Foto Edit Agent in het control center stuurt wat hier landt door Imagen
+ * AI, en Imagen werkt het liefst op RAW. Een RAW is geen uitvoer van welke
+ * agent dan ook, dus hij hoort niet bij BEELD: dan kon de nadir-agent er ook
+ * een in OUT/360 zetten. Dezelfde lijst als `RAW` in lib/media/imagen/formaten.ts
+ * van het control center — staat hij hier krapper, dan weigert de uploadpagina
+ * daar foto's die de agent wél had verwerkt.
+ */
+const RAW = /\.(cr2|cr3|crw|nef|nrw|arw|srf|sr2|raf|orf|rw2|dng|pef|srw|erf|mrw|3fr|fff|iiq|mos|mef|dcr|kdc|x3f|gpr)$/i;
+
+/** De invoermap van de fotografie: daar mag naast gewoon beeld ook RAW in. */
+const FOTO_INVOER = "in/raw/photo's";
+
+/**
+ * Een 360-video van een Insta360. Mag alleen als aanlevering in In/Raw/360
+ * staan, naast de panorama's van dezelfde rondgang; de nadir-agent leest hem
+ * niet (die neemt alleen beeld), maar zo raakt hij niet zoek in de Video-map,
+ * waar de montage hem als gewone clip zou meenemen.
+ */
+const VIDEO_360 = /\.insv$/i;
 
 /** Wat de videomontage oplevert. Alleen in OUT/Video — zie magInSubmap. */
 const VIDEO = /\.(mp4|mov)$/i;
@@ -184,8 +215,11 @@ export function mediaBestandsnaam(ruw: string, submap = ""): string | null {
  * verruiming die niemand opmerkt is precies wat deze grenzen moeten voorkomen.
  */
 export function magInSubmap(naam: string, submap: string): boolean {
-  const isVideomap = VIDEO_SUBMAPPEN.includes(submap.toLowerCase());
-  return isVideomap ? VIDEO.test(naam) : BEELD.test(naam);
+  const map = submap.toLowerCase();
+  if (VIDEO_SUBMAPPEN.includes(map)) return VIDEO.test(naam);
+  if (map === FOTO_INVOER) return BEELD.test(naam) || RAW.test(naam);
+  if (map === "in/raw/360") return BEELD.test(naam) || VIDEO_360.test(naam);
+  return BEELD.test(naam);
 }
 
 /** Het volledige pad, of null als een van de drie delen niet deugt. */
@@ -221,4 +255,50 @@ export function mediaVrijgeefPaden(
   const naar = mediaDoelPad(projectmap, VRIJGEGEVEN_SUBMAP, bestandsnaam);
   if (!van || !naar) return null;
   return { van, naar };
+}
+
+/**
+ * De mappen waarin een machine bestanden mag hernoemen: alleen de uitvoer van
+ * de fotografie. Daar zet het control center de eindfoto's om naar
+ * "<adres> - <ruimte> <nummer>.jpg" zodra bekend is wat erop staat.
+ *
+ * Een eigen, korte lijst en geen hergebruik van MEDIA_SUBMAPPEN: hernoemen in
+ * OUT/360 of OUT/Video zou de bestandsnamen breken waar de nadir- en de
+ * video-agent hun werk aan terugvinden. En nooit in de invoermap — daar staan
+ * de originelen onder de naam van de camera.
+ */
+export const HERNOEM_SUBMAPPEN = ["OUT/Photo's"] as const;
+
+/** Van en naar binnen dezelfde map, of null als een van de delen niet deugt. */
+export function mediaHernoemPaden(
+  projectmap: string,
+  submap: string,
+  van: string,
+  naar: string
+): { van: string; naar: string } | null {
+  if (!HERNOEM_SUBMAPPEN.some((m) => m.toLowerCase() === submap.toLowerCase())) return null;
+  const a = mediaDoelPad(projectmap, submap, van);
+  const b = mediaDoelPad(projectmap, submap, naar);
+  if (!a || !b) return null;
+  // Na het opschonen moet de naam dezelfde zijn als gevraagd: anders hernoemt
+  // de route naar iets anders dan het control center denkt.
+  if (a !== `${projectmap}/${submap}/${van}` || b !== `${projectmap}/${submap}/${naar}`) return null;
+  return { van: a, naar: b };
+}
+
+/**
+ * Uitvoermappen die het control center mag leegmaken: alleen die van de
+ * fotografie, en alleen om een shoot opnieuw door Imagen te halen. Anders
+ * blijven de eindfoto's van de vorige bewerking naast de nieuwe staan, en dan
+ * krijgt de klant beide in zijn deellink.
+ *
+ * Apart van AANLEVER_SUBMAPPEN en met een eigen `soort` in de route: wie een
+ * aanlevermap leeg wil, kan zo nooit per ongeluk een oplevering wissen, en
+ * andersom. Verwijderd is bij Dropbox niet weg — het staat in "Verwijderde
+ * bestanden".
+ */
+export const LEEGMAAK_UITVOER = ["OUT/Photo's", "OUT/_controle/Photo's"] as const;
+
+export function isLeegmaakUitvoer(submap: string): boolean {
+  return LEEGMAAK_UITVOER.some((m) => m.toLowerCase() === submap.toLowerCase());
 }

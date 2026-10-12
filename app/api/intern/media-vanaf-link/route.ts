@@ -6,6 +6,7 @@ import {
   folderExists,
   getSharedAccessToken,
   kopieer,
+  kopieerBatch,
   leesDeellink,
   listFolderFiles,
   saveUrl,
@@ -36,12 +37,23 @@ const SUBMAP = "In/Raw/Video";
  * Alleen video, alleen naar In/Raw/Video, alleen in een projectmap die al
  * bestaat: dezelfde grenzen als media-plaatsen met soort "aanlevering".
  * Bestaat een clip op het doel al, dan blijft die staan.
+ *
+ * Met `bestanden` erbij verdeelt de route in plaats daarvan een hele shoot:
+ * per bestand (uit media-link-lezen) de submap die het control center koos —
+ * In/Raw/Photo's, In/Raw/Video of In/Raw/360. Dat is Media → Uploaden, waar een
+ * link net als een upload over drie kolommen uiteen gaat. Dezelfde grenzen: de
+ * submap moet een aanlevermap zijn en het bestand moet daar passen
+ * (mediaDoelPad), en de bron moet in de gedeelde map zelf liggen.
  */
 export async function POST(request: Request) {
   if (!isInternRequest(request)) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }
-  const body = (await request.json().catch(() => null)) as { projectmap?: string; link?: string } | null;
+  const body = (await request.json().catch(() => null)) as {
+    projectmap?: string;
+    link?: string;
+    bestanden?: { naam?: string; pad?: string | null; submap?: string }[];
+  } | null;
   const projectmap = body?.projectmap?.trim() ?? "";
   const link = body?.link?.trim() ?? "";
 
@@ -58,6 +70,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `de projectmap ${projectmap} bestaat niet` }, { status: 404 });
     }
     const inhoud = await leesDeellink(token, link);
+
+    if (Array.isArray(body?.bestanden)) {
+      return NextResponse.json(await verdeel(token, projectmap, link, inhoud, body.bestanden));
+    }
 
     const gekopieerd: string[] = [];
     const bestonden: string[] = [];
@@ -113,4 +129,78 @@ export async function POST(request: Request) {
       { status: 502 }
     );
   }
+}
+
+type Keuze = { naam?: string; pad?: string | null; submap?: string };
+type Geplaatst = { naam: string; submap: string; pad: string; uitkomst: "gekopieerd" | "bestond" | "bezig" };
+
+/**
+ * Een shoot uit één link over de aanlevermappen verdelen.
+ *
+ * Zes tegelijk: copy_v2 is per bestand een fractie van een seconde, maar
+ * driehonderd foto's achter elkaar passen niet in de minuut van deze functie.
+ * Een bestand dat niet mag of niet lukt, houdt de rest niet tegen; het komt
+ * terug onder `overgeslagen`, met de reden.
+ */
+async function verdeel(
+  token: string,
+  projectmap: string,
+  link: string,
+  inhoud: Awaited<ReturnType<typeof leesDeellink>>,
+  keuzes: Keuze[]
+) {
+  const geplaatst: Geplaatst[] = [];
+  const overgeslagen: { naam: string; reden: string }[] = [];
+
+  if (!inhoud.pad) {
+    if (inhoud.soort === "folder") throw new Error("deze map staat in een ander Dropbox-account; daar kan alleen een zip van");
+    // Een los bestand van buiten: één keuze, Dropbox haalt hem zelf op.
+    const keuze = keuzes[0];
+    const submap = keuze?.submap?.trim() ?? "";
+    const doel = mediaDoelPad(projectmap, submap, inhoud.naam, "aanlevering");
+    if (!doel) return { ok: true, geplaatst, overgeslagen: [{ naam: inhoud.naam, reden: `past niet in ${submap}` }] };
+    const job = await saveUrl(token, doel, directeDownload(link));
+    let klaar = job.done;
+    for (let i = 0; !klaar && job.jobId && i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const s = await checkSaveUrlJob(token, job.jobId);
+      if (s.status === "failed") throw new Error(`Dropbox kon ${inhoud.naam} niet ophalen: ${s.error ?? "onbekend"}`);
+      klaar = s.status === "complete";
+    }
+    geplaatst.push({ naam: inhoud.naam, submap, pad: doel, uitkomst: klaar ? "gekopieerd" : "bezig" });
+    return { ok: true, geplaatst, overgeslagen };
+  }
+
+  const basis = inhoud.pad.toLowerCase().replace(/\/+$/, "");
+  const paren: { naam: string; submap: string; van: string; naar: string }[] = [];
+  for (const k of keuzes.slice(0, 1000)) {
+    const naam = (k.naam ?? "").trim();
+    const bron = (k.pad ?? "").trim();
+    const submap = (k.submap ?? "").trim();
+    // De bron moet in de gedeelde map liggen, en de naam moet bij dat pad horen
+    // (het pad is in kleine letters, de naam houdt zijn schrijfwijze).
+    const binnen =
+      !bron.includes("..") &&
+      (bron.toLowerCase() === basis || bron.toLowerCase().startsWith(`${basis}/`)) &&
+      bron.toLowerCase().split("/").pop() === naam.toLowerCase();
+    const doel = binnen ? mediaDoelPad(projectmap, submap, naam, "aanlevering") : null;
+    if (!doel) {
+      overgeslagen.push({ naam: naam || bron, reden: binnen ? `past niet in ${submap}` : "ligt niet in deze link" });
+      continue;
+    }
+    paren.push({ naam, submap, van: bron, naar: doel });
+  }
+
+  /*
+    Eén batch en geen losse kopieën tegelijk. Hier liepen eerst zes copy_v2's
+    naast elkaar, en Dropbox staat per namespace maar één schrijfactie tegelijk
+    toe: "429 too_many_write_operations" bij de eerste echte shoot.
+  */
+  const uitkomsten = await kopieerBatch(token, paren);
+  paren.forEach((p, i) => {
+    const u = uitkomsten[i] ?? { fout: "geen antwoord van Dropbox" };
+    if (typeof u === "string") geplaatst.push({ naam: p.naam, submap: p.submap, pad: p.naar, uitkomst: u });
+    else overgeslagen.push({ naam: p.naam, reden: u.fout });
+  });
+  return { ok: true, geplaatst, overgeslagen };
 }

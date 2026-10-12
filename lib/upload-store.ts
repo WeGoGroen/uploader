@@ -45,26 +45,87 @@ export interface BewaardeUpload {
   bewaardOp: number;
 }
 
-function openDb(): Promise<IDBDatabase | null> {
+/**
+ * Zo lang mag de opslag over één handeling doen. Daarna gaan we door alsof er
+ * geen opslag is.
+ *
+ * Safari op de iPad laat IndexedDB soms gewoon hangen: open() of een
+ * transactie geeft dan nooit onsuccess én nooit onerror — bekend na het
+ * terugkomen uit de achtergrond, of als de app lang openstaat. De uploads
+ * wachtten daarop (het bewaren van de sessie vóór het eerste blok), dus de
+ * scan bleef voor altijd op "bezig" bij Dropbox staan terwijl er geen byte
+ * verstuurd werd. Hervatten is een extraatje; de upload zelf mag er nooit op
+ * blijven wachten.
+ */
+const OPSLAG_MS = 4_000;
+
+function binnenTijd<T>(belofte: Promise<T>, terugval: T): Promise<T> {
   return new Promise((resolve) => {
-    if (typeof indexedDB === "undefined") return resolve(null);
-    const req = indexedDB.open(DB_NAAM, 3);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(OPSLAG)) {
-        req.result.createObjectStore(OPSLAG, { keyPath: "id" });
+    const klok = setTimeout(() => resolve(terugval), OPSLAG_MS);
+    belofte.then(
+      (v) => {
+        clearTimeout(klok);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(klok);
+        resolve(terugval);
       }
-      if (!req.result.objectStoreNames.contains(SCANS)) {
-        req.result.createObjectStore(SCANS, { keyPath: "id" });
-      }
-      if (!req.result.objectStoreNames.contains(SESSIES)) {
-        req.result.createObjectStore(SESSIES, { keyPath: "id" });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    // Privémodus of geweigerde opslag: dan werkt de app gewoon door, alleen
-    // zonder hervatten. Nooit de upload zelf laten sneuvelen hierop.
-    req.onerror = () => resolve(null);
+    );
   });
+}
+
+/**
+ * Eén verbinding voor de hele sessie, in plaats van een nieuwe per handeling:
+ * een grote scan bewaart na elk blok zijn voortgang, en tientallen losse
+ * open()-aanroepen is precies waar Safari over struikelt. Valt de verbinding
+ * weg of blijft open() hangen, dan proberen we het de volgende keer opnieuw.
+ */
+let verbinding: Promise<IDBDatabase | null> | null = null;
+
+function openDb(): Promise<IDBDatabase | null> {
+  if (verbinding) return verbinding;
+  const poging = binnenTijd(
+    new Promise<IDBDatabase | null>((resolve) => {
+      if (typeof indexedDB === "undefined") return resolve(null);
+      const req = indexedDB.open(DB_NAAM, 3);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains(OPSLAG)) {
+          req.result.createObjectStore(OPSLAG, { keyPath: "id" });
+        }
+        if (!req.result.objectStoreNames.contains(SCANS)) {
+          req.result.createObjectStore(SCANS, { keyPath: "id" });
+        }
+        if (!req.result.objectStoreNames.contains(SESSIES)) {
+          req.result.createObjectStore(SESSIES, { keyPath: "id" });
+        }
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        // Safari sluit de verbinding soms zelf; dan bij de volgende keer vers.
+        db.onclose = () => {
+          verbinding = null;
+        };
+        db.onversionchange = () => {
+          db.close();
+          verbinding = null;
+        };
+        resolve(db);
+      };
+      // Privémodus of geweigerde opslag: dan werkt de app gewoon door, alleen
+      // zonder hervatten. Nooit de upload zelf laten sneuvelen hierop.
+      req.onerror = () => resolve(null);
+      req.onblocked = () => resolve(null);
+    }),
+    null
+  ).then((db) => {
+    // Geen verbinding gekregen: niet onthouden, zodat een latere poging het
+    // opnieuw mag proberen.
+    if (!db) verbinding = null;
+    return db;
+  });
+  verbinding = poging;
+  return poging;
 }
 
 async function metOpslag<T>(
@@ -74,16 +135,21 @@ async function metOpslag<T>(
 ): Promise<T | null> {
   const db = await openDb();
   if (!db) return null;
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction(naam, modus);
-      const req = fn(tx.objectStore(naam));
-      req.onsuccess = () => resolve(req.result as T);
-      req.onerror = () => resolve(null);
-    } catch {
-      resolve(null);
-    }
-  });
+  return binnenTijd(
+    new Promise<T | null>((resolve) => {
+      try {
+        const tx = db.transaction(naam, modus);
+        const req = fn(tx.objectStore(naam));
+        req.onsuccess = () => resolve(req.result as T);
+        req.onerror = () => resolve(null);
+      } catch {
+        // Een gesloten verbinding gooit hier; de volgende keer vers openen.
+        verbinding = null;
+        resolve(null);
+      }
+    }),
+    null
+  );
 }
 
 export async function bewaarUpload(u: Omit<BewaardeUpload, "bewaardOp">): Promise<void> {

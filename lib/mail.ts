@@ -41,7 +41,7 @@ export async function stuurMail(
   // verandert.
   const naar = (aanOverride?.length
     ? aanOverride
-    : (process.env.ALERT_EMAIL ?? "floris@wegogroen.nl,yannick@wegogroen.nl").split(",")
+    : (process.env.ALERT_EMAIL ?? "info@wegogroen.nl,yannick@wegogroen.nl").split(",")
   )
     .map((a) => a.trim())
     .filter(Boolean);

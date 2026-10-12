@@ -1,12 +1,19 @@
+import type { MediaSoort } from "@/lib/media-herkennen";
+
 /**
- * De drie stappen van een media-opname, in de volgorde waarin ze in het veld
- * gedaan worden: eerst foto's, dan video, dan 360. Eén bron voor de stappen,
- * de knoppen en de Dropbox-submap, zodat een naam die hier verandert niet
+ * De drie soorten van een media-opname: foto's, video en 360. Eén bron voor
+ * de kolommen en de Dropbox-submap, zodat een naam die hier verandert niet
  * stilletjes een tweede map naast de bestaande oplevert.
+ *
+ * Ooit drie stappen na elkaar, met per stap een eigen knop; nu kiest de
+ * opnemer alles in één keer en verdeelt lib/media-herkennen.ts de bestanden.
+ * De sleutel heet daarom nog "stap".
  */
 export interface MediaStap {
   /** Interne sleutel van de stap. */
   key: "photos" | "video" | "360";
+  /** Wat de herkenning teruggeeft voor een bestand dat hier hoort. */
+  soort: MediaSoort;
   naam: string;
   uitleg: string;
   /**
@@ -15,37 +22,35 @@ export interface MediaStap {
    * beschreven.
    */
   map: string;
-  /** Wat de bestandskiezer aanbiedt; leeg = alles toestaan. */
-  accept?: string;
 }
 
+/*
+  Geen bestandsfilter meer per soort. Er is één kiezer voor alles, en die
+  filtert bewust niet: een iPad zet een bestand grijs zodra hij de extensie niet
+  aan een type kan koppelen, en dat gebeurde met RAW (.ARW, .CR3), drone-clips
+  en Insta360 (.insp, .insv). Wat er niet hoort, laat de herkenning liggen —
+  met de reden erbij, in plaats van een grijs bestand zonder uitleg.
+*/
 export const MEDIA_STAPPEN: MediaStap[] = [
   {
     key: "photos",
+    soort: "foto",
     naam: "Foto's",
-    uitleg: "Interieur- en gevelfoto's",
+    uitleg: "RAW en JPEG van de camera",
     map: "In/Raw/Photo's",
-    accept: "image/*",
   },
   {
     key: "video",
+    soort: "video",
     naam: "Video",
-    uitleg: "Rondleidingen en drone-beelden",
+    uitleg: "Clips, MP4 of MOV",
     map: "In/Raw/Video",
-    // De extensies staan er expliciet bij naast "video/*". Een iPad beoordeelt
-    // een bestand in de Bestanden-app op zijn type-aanduiding, en die kent hij
-    // van drone- en camerabestanden lang niet altijd — dan staat de video grijs
-    // en valt hij niet te kiezen. Met de extensies erbij mag hij wél.
-    accept: "video/*,.mov,.mp4,.m4v,.avi,.mts,.m2ts,.mkv,.insv,.lrv,.lrf,.3gp,.mpg,.mpeg,.wmv",
   },
   {
     key: "360",
+    soort: "360",
     naam: "360 graden",
     uitleg: "Panorama's en 360-opnames",
     map: "In/Raw/360",
-    // Geen filter: 360-camera's leveren naast JPG ook eigen formaten (INSP,
-    // INSV) die de browser niet als afbeelding of video herkent en die anders
-    // niet te kiezen zouden zijn.
-    accept: undefined,
   },
 ];

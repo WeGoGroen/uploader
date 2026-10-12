@@ -5,6 +5,8 @@ import {
   isMediaSubmap,
   mediaBestandsnaam,
   mediaDoelPad,
+  isLeegmaakUitvoer,
+  mediaHernoemPaden,
   mediaVrijgeefPaden,
 } from "@/lib/media-pad";
 
@@ -90,6 +92,11 @@ describe("isMediaSubmap", () => {
     expect(isMediaSubmap("OUT/Photo's")).toBe(true);
     expect(isMediaSubmap("out/photo's")).toBe(true);
     expect(isMediaSubmap("OUT/Photos")).toBe(false);
+    // De bewaarplek van Imagens versie als iemand een foto bijwerkt.
+    expect(isMediaSubmap("OUT/_controle/Photo's")).toBe(true);
+    expect(
+      mediaDoelPad("/Automatie Media/Dam 5, Amsterdam", "OUT/_controle/Photo's", "DSC01199-HDR.jpg")
+    ).toBe("/Automatie Media/Dam 5, Amsterdam/OUT/_controle/Photo's/DSC01199-HDR.jpg");
     expect(
       mediaDoelPad("/Automatie Media/Dam 5, Amsterdam", "OUT/Photo's", "DSC01199-HDR.jpg")
     ).toBe("/Automatie Media/Dam 5, Amsterdam/OUT/Photo's/DSC01199-HDR.jpg");
@@ -224,6 +231,33 @@ describe("In/Raw/Video — clips aangeleverd via het Business Control Center", (
   });
 });
 
+describe("In/Raw/Photo's — een shoot aangeleverd via het Business Control Center", () => {
+  const adres = "/Automatie Media/Dam 5, Amsterdam";
+
+  it("laat RAW en JPEG toe bij een aanlevering", () => {
+    /*
+      Hier liep de fotografie-uploadpagina van het control center op vast: elke
+      foto kreeg "submap moet een van OUT/360, … zijn — kreeg submap In/Raw/Photo's",
+      er kwam geen shoot in de administratie en er ging niets naar Imagen.
+    */
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "DSC01199.ARW", "aanlevering")).toBe(
+      `${adres}/In/Raw/Photo's/DSC01199.ARW`
+    );
+    expect(mediaDoelPad(adres, "in/raw/photo's", "IMG_1.CR3", "aanlevering")).not.toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "voor.jpg", "aanlevering")).not.toBeNull();
+  });
+
+  it("blijft dicht voor de agent zelf, en voor video", () => {
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "DSC01199.ARW")).toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "C3680.MP4", "aanlevering")).toBeNull();
+  });
+
+  it("laat RAW nergens anders toe", () => {
+    expect(mediaDoelPad(adres, "OUT/Photo's", "DSC01199.ARW")).toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/360", "DSC01199.ARW", "aanlevering")).toBeNull();
+  });
+});
+
 describe("OUT/Video — de montage van de Video Edit Agent", () => {
   const adres = "/Automatie Media/Dam 5, Amsterdam";
 
@@ -275,5 +309,62 @@ describe("mediaVrijgeefPaden", () => {
   it("de wachtmap ligt buiten OUT/360, zodat een deellink van OUT/360 hem niet meeneemt", () => {
     const paden = mediaVrijgeefPaden("/Automatie Media/Dam 5, Amsterdam", "a.jpg");
     expect(paden?.van.startsWith("/Automatie Media/Dam 5, Amsterdam/OUT/360/")).toBe(false);
+  });
+});
+
+describe("In/Raw/Photo's — foto's aangeleverd via Media → Uploaden in het control center", () => {
+  const adres = "/Automatie Media/Dam 5, Amsterdam";
+
+  it("laat een RAW en een JPEG toe bij een aanlevering", () => {
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "DSC01234.ARW", "aanlevering")).toBe(
+      `${adres}/In/Raw/Photo's/DSC01234.ARW`
+    );
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "IMG_0001.CR3", "aanlevering")).not.toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "voorgevel.jpg", "aanlevering")).not.toBeNull();
+  });
+
+  it("weigert de fotomap zonder aanlevering, en een clip of RAW op de verkeerde plek", () => {
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "DSC01234.ARW")).toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Photo's", "C0001.MP4", "aanlevering")).toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/360", "DSC01234.ARW", "aanlevering")).toBeNull();
+    expect(mediaDoelPad(adres, "OUT/Photo's", "DSC01234.ARW")).toBeNull();
+  });
+
+  it("laat een 360-video van een Insta360 alleen in In/Raw/360 toe", () => {
+    expect(mediaDoelPad(adres, "In/Raw/360", "VID_20261011_1.insv", "aanlevering")).not.toBeNull();
+    expect(mediaDoelPad(adres, "In/Raw/Video", "VID_20261011_1.insv", "aanlevering")).toBeNull();
+    expect(mediaDoelPad(adres, "OUT/360", "VID_20261011_1.insv")).toBeNull();
+  });
+});
+
+describe("mediaHernoemPaden", () => {
+  const adres = "/Automatie Media/Dam 5, Amsterdam";
+
+  it("hernoemt binnen OUT/Photo's naar adres, ruimte en nummer", () => {
+    expect(mediaHernoemPaden(adres, "OUT/Photo's", "DSC02537-HDR.jpg", "Dam 5, Amsterdam - Keuken 2.jpg")).toEqual({
+      van: `${adres}/OUT/Photo's/DSC02537-HDR.jpg`,
+      naar: `${adres}/OUT/Photo's/Dam 5, Amsterdam - Keuken 2.jpg`,
+    });
+  });
+
+  it("weigert elke andere map — ook de andere uitvoermappen en de invoer", () => {
+    for (const sub of ["OUT/360", "OUT/Video", "In/Raw/Photo's", "OUT/_controle/Photo's"]) {
+      expect(mediaHernoemPaden(adres, sub, "a.jpg", "b.jpg")).toBeNull();
+    }
+  });
+
+  it("weigert een naam die na het opschonen iets anders zou worden, of geen beeld is", () => {
+    expect(mediaHernoemPaden(adres, "OUT/Photo's", "a.jpg", "../b.jpg")).toBeNull();
+    expect(mediaHernoemPaden(adres, "OUT/Photo's", "a.jpg", "b/c.jpg")).toBeNull();
+    expect(mediaHernoemPaden(adres, "OUT/Photo's", "a.jpg", "keuken.pdf")).toBeNull();
+    expect(mediaHernoemPaden("/Automatie Energielabels/Dam 5", "OUT/Photo's", "a.jpg", "b.jpg")).toBeNull();
+  });
+});
+
+describe("isLeegmaakUitvoer", () => {
+  it("laat alleen de uitvoer van de fotografie toe", () => {
+    expect(isLeegmaakUitvoer("OUT/Photo's")).toBe(true);
+    expect(isLeegmaakUitvoer("out/_controle/photo's")).toBe(true);
+    for (const sub of ["OUT/360", "OUT/Video", "In/Raw/Photo's", "OUT", ""]) expect(isLeegmaakUitvoer(sub)).toBe(false);
   });
 });

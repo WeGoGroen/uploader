@@ -1702,15 +1702,173 @@ export async function verplaats(accessToken: string, van: string, naar: string):
  * nooit overschrijven, want daar kan een origineel staan.
  */
 export async function kopieer(accessToken: string, van: string, naar: string): Promise<"gekopieerd" | "bestond"> {
-  const res = await fetch(`${DROPBOX_API_BASE}/files/copy_v2`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from_path: van, to_path: naar, autorename: false }),
-  });
+  const res = await dropboxPost(accessToken, "/files/copy_v2", { from_path: van, to_path: naar, autorename: false });
   if (res.ok) return "gekopieerd";
   const body = await res.text().catch(() => "");
   if (res.status === 409 && body.includes("to/conflict")) return "bestond";
   throw new DropboxApiError(res.status, `Dropbox files/copy_v2 failed: ${res.status} ${body}`);
+}
+
+/**
+ * Een Dropbox-aanroep die bij 429 even wacht en het nog eens probeert.
+ *
+ * Dropbox staat per namespace maar één schrijfactie tegelijk toe; wie er
+ * meerdere tegelijk doet krijgt `too_many_write_operations` terug, met
+ * `retry_after` erbij. Dat is geen fout van het verzoek maar een wachtrij, dus
+ * wachten en opnieuw — met een oplopende pauze, want `retry_after` is vaak 0.
+ */
+export async function dropboxPost(
+  accessToken: string,
+  route: string,
+  body: unknown,
+  pogingen = 5
+): Promise<Response> {
+  for (let poging = 1; ; poging++) {
+    const res = await fetch(`${DROPBOX_API_BASE}${route}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.status !== 429 || poging >= pogingen) return res;
+    const tekst = await res.text().catch(() => "");
+    const na = Number(/"retry_after"\s*:\s*(\d+)/.exec(tekst)?.[1] ?? 0);
+    await new Promise((r) => setTimeout(r, Math.max(na * 1000, 500 * 2 ** (poging - 1))));
+  }
+}
+
+export type KopieUitkomst = "gekopieerd" | "bestond" | "bezig" | { fout: string };
+
+/**
+ * Veel bestanden in één keer kopiëren: files/copy_batch_v2.
+ *
+ * Eén batch is voor Dropbox één schrijfactie. Losse copy_v2's tegelijk lopen
+ * tegen de schrijfgrens van de namespace aan (429 too_many_write_operations),
+ * en achter elkaar duren ze bij honderden foto's te lang voor één functie.
+ *
+ * De uitkomst per paar, in dezelfde volgorde. Een bestand dat al op het doel
+ * staat is "bestond" (autorename uit: nooit een origineel overschrijven of
+ * ernaast zetten). Is Dropbox na `maxWachtMs` nog bezig, dan is alles "bezig":
+ * de opdracht loopt bij Dropbox gewoon door.
+ */
+export async function kopieerBatch(
+  accessToken: string,
+  paren: { van: string; naar: string }[],
+  maxWachtMs = 40_000
+): Promise<KopieUitkomst[]> {
+  if (paren.length === 0) return [];
+  const res = await dropboxPost(accessToken, "/files/copy_batch_v2", {
+    entries: paren.map((p) => ({ from_path: p.van, to_path: p.naar })),
+    autorename: false,
+  });
+  if (!res.ok) {
+    throw new DropboxApiError(res.status, `Dropbox files/copy_batch_v2 failed: ${res.status} ${await res.text().catch(() => "")}`);
+  }
+  type Regel = { ".tag": string; failure?: unknown };
+  let data = (await res.json()) as { ".tag": string; async_job_id?: string; entries?: Regel[] };
+
+  const begin = Date.now();
+  while (data[".tag"] === "async_job_id" || data[".tag"] === "in_progress") {
+    if (Date.now() - begin > maxWachtMs) return paren.map(() => "bezig" as const);
+    await new Promise((r) => setTimeout(r, 1500));
+    const check = await dropboxPost(accessToken, "/files/copy_batch/check_v2", {
+      async_job_id: data.async_job_id ?? "",
+    });
+    if (!check.ok) {
+      throw new DropboxApiError(check.status, `Dropbox copy_batch/check_v2 failed: ${check.status} ${await check.text().catch(() => "")}`);
+    }
+    const id = data.async_job_id;
+    data = (await check.json()) as typeof data;
+    if (!data.async_job_id) data.async_job_id = id;
+  }
+  if (data[".tag"] === "failed") {
+    throw new Error(`Dropbox-kopie mislukte: ${JSON.stringify(data).slice(0, 200)}`);
+  }
+
+  return (data.entries ?? []).map((e): KopieUitkomst => {
+    if (e[".tag"] === "success") return "gekopieerd";
+    const fout = JSON.stringify(e.failure ?? e);
+    if (fout.includes("conflict")) return "bestond";
+    return { fout: fout.includes("too_many_write_operations") ? "Dropbox had het te druk — probeer de link opnieuw" : `kopiëren mislukt: ${fout.slice(0, 140)}` };
+  });
+}
+
+export type VerplaatsUitkomst = "verplaatst" | "bezig" | { fout: string };
+
+/**
+ * Veel bestanden in één keer verplaatsen of hernoemen: files/move_batch_v2.
+ *
+ * Zelfde reden als bij kopieerBatch: losse move_v2's achter elkaar kostten
+ * ruim een seconde per stuk. Op Herengracht 518 (44 eindfoto's, twee rondes)
+ * liep het hernoemen daardoor tegen de twee minuten aan, en gaf het control
+ * center het op terwijl Dropbox nog bezig was. Nooit overschrijven
+ * (autorename uit); de uitkomst per paar, in dezelfde volgorde.
+ */
+export async function verplaatsBatch(
+  accessToken: string,
+  paren: { van: string; naar: string }[],
+  maxWachtMs = 45_000
+): Promise<VerplaatsUitkomst[]> {
+  if (paren.length === 0) return [];
+  const res = await dropboxPost(accessToken, "/files/move_batch_v2", {
+    entries: paren.map((p) => ({ from_path: p.van, to_path: p.naar })),
+    autorename: false,
+    allow_ownership_transfer: false,
+  });
+  if (!res.ok) {
+    throw new DropboxApiError(res.status, `Dropbox files/move_batch_v2 failed: ${res.status} ${await res.text().catch(() => "")}`);
+  }
+  type Regel = { ".tag": string; failure?: unknown };
+  let data = (await res.json()) as { ".tag": string; async_job_id?: string; entries?: Regel[] };
+  const id = data.async_job_id;
+  const begin = Date.now();
+  while (data[".tag"] === "async_job_id" || data[".tag"] === "in_progress") {
+    if (Date.now() - begin > maxWachtMs) return paren.map(() => "bezig" as const);
+    await new Promise((r) => setTimeout(r, 1000));
+    const check = await dropboxPost(accessToken, "/files/move_batch/check_v2", { async_job_id: id ?? "" });
+    if (!check.ok) {
+      throw new DropboxApiError(check.status, `Dropbox move_batch/check_v2 failed: ${check.status} ${await check.text().catch(() => "")}`);
+    }
+    data = (await check.json()) as typeof data;
+  }
+  if (data[".tag"] === "failed") throw new Error(`Dropbox kon niet verplaatsen: ${JSON.stringify(data).slice(0, 200)}`);
+  return (data.entries ?? []).map((e): VerplaatsUitkomst =>
+    e[".tag"] === "success" ? "verplaatst" : { fout: `verplaatsen mislukt: ${JSON.stringify(e.failure ?? e).slice(0, 140)}` }
+  );
+}
+
+/**
+ * Bestanden naar de prullenbak van Dropbox: files/delete_batch.
+ *
+ * Eén schrijfactie, net als bij kopiëren. Verwijderd is bij Dropbox niet weg:
+ * het staat nog in "Verwijderde bestanden" en is terug te zetten.
+ */
+export async function verwijderBatch(
+  accessToken: string,
+  paden: string[],
+  maxWachtMs = 40_000
+): Promise<{ verwijderd: number; bezig: boolean; mislukt: number }> {
+  if (paden.length === 0) return { verwijderd: 0, bezig: false, mislukt: 0 };
+  const res = await dropboxPost(accessToken, "/files/delete_batch", { entries: paden.map((path) => ({ path })) });
+  if (!res.ok) {
+    throw new DropboxApiError(res.status, `Dropbox files/delete_batch failed: ${res.status} ${await res.text().catch(() => "")}`);
+  }
+  type Regel = { ".tag": string };
+  let data = (await res.json()) as { ".tag": string; async_job_id?: string; entries?: Regel[] };
+  const id = data.async_job_id;
+  const begin = Date.now();
+  while (data[".tag"] === "async_job_id" || data[".tag"] === "in_progress") {
+    if (Date.now() - begin > maxWachtMs) return { verwijderd: 0, bezig: true, mislukt: 0 };
+    await new Promise((r) => setTimeout(r, 1500));
+    const check = await dropboxPost(accessToken, "/files/delete_batch/check", { async_job_id: id ?? "" });
+    if (!check.ok) {
+      throw new DropboxApiError(check.status, `Dropbox delete_batch/check failed: ${check.status} ${await check.text().catch(() => "")}`);
+    }
+    data = (await check.json()) as typeof data;
+  }
+  if (data[".tag"] === "failed") throw new Error(`Dropbox kon niet verwijderen: ${JSON.stringify(data).slice(0, 200)}`);
+  const regels = data.entries ?? [];
+  const verwijderd = regels.filter((r) => r[".tag"] === "success").length;
+  return { verwijderd, bezig: false, mislukt: regels.length - verwijderd };
 }
 
 /** Wat er achter een deellink zit. `pad` alleen als de link naar iets in dit account wijst. */
