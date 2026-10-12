@@ -485,22 +485,36 @@ export async function getFolderLists(
  * geen foutmelding, gewoon dubbel werk. Vijf pagina's dekt bij dat volume
  * ruim twee weken.
  */
-export async function getRecentTaskNames(
+/**
+ * De meest recente taken van de lijst, met hun aanmaakmoment. Het moment is
+ * nodig om oude taken te kunnen negeren: een pand dat vorig jaar een label
+ * kreeg staat hier nog steeds, en mag een afspraak van vandaag niet groen
+ * kleuren (zie lib/afspraak-status.ts).
+ */
+export async function getRecentTasks(
   accessToken: string,
   listId: string,
   maxPaginas = 5
-): Promise<string[]> {
-  const namen: string[] = [];
+): Promise<{ name: string; created: number | null }[]> {
+  const taken: { name: string; created: number | null }[] = [];
   for (let pagina = 0; pagina < maxPaginas; pagina++) {
-    const data = await clickupFetch<{ tasks: { name: string }[]; last_page?: boolean }>(
+    const data = await clickupFetch<{
+      tasks: { name: string; date_created?: string }[];
+      last_page?: boolean;
+    }>(
       accessToken,
       `/list/${listId}/task?archived=false&order_by=created&reverse=true&subtasks=false&page=${pagina}`
     );
-    namen.push(...data.tasks.map((t) => t.name));
+    taken.push(
+      ...data.tasks.map((t) => {
+        const created = Number(t.date_created);
+        return { name: t.name, created: Number.isFinite(created) && created > 0 ? created : null };
+      })
+    );
     // ClickUp meldt zelf wanneer het op is; anders stoppen bij een halve pagina.
     if (data.last_page || data.tasks.length === 0) break;
   }
-  return namen;
+  return taken;
 }
 
 interface RawClickUpField {

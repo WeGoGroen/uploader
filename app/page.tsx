@@ -10,10 +10,16 @@ import UploadPanel from "@/components/UploadPanel";
 import { useRechten } from "@/components/RechtenProvider";
 import ScanStatusKaart from "@/components/ScanStatus";
 import MeerMenu from "@/components/MeerMenu";
-
-interface MediataskOrderSummary {
-  address?: string;
-}
+import {
+  energielabelStatus,
+  isRecent,
+  nenStatus,
+  recenteClickUpTaak,
+  recenteMediataskOrder,
+  type ClickUpTaakSamenvatting,
+  type DienstStatus,
+  type MediataskOrderSamenvatting,
+} from "@/lib/afspraak-status";
 
 interface CalendarEvent {
   id: string;
@@ -38,6 +44,9 @@ type DraftRecord = Pick<
   | "updatedAt"
   | "heeftMediatask"
 >;
+
+type KlaarMeldingen = Record<"energielabel" | "nen", Set<string>>;
+const GEEN_MELDINGEN: KlaarMeldingen = { energielabel: new Set(), nen: new Set() };
 
 /**
  * De uploadpagina's sturen wie er geen recht op heeft hierheen met
@@ -87,27 +96,36 @@ function StatusPill({
   label,
   tone,
   href,
+  bron,
+  title,
 }: {
   label: string;
-  tone: "ok" | "busy" | "off";
+  tone: "ok" | "busy" | "off" | "elders" | "handmatig";
   href?: string;
+  /** Waar de status vandaan komt, klein achter het label ("buiten uploader"). */
+  bron?: string;
+  title?: string;
 }) {
+  const metDot = tone === "busy" || tone === "off";
   const cls = tone === "busy" ? "is-busy" : "is-off";
-  const inhoud =
-    tone === "ok" ? (
-      label
-    ) : (
-      <>
-        <span className={`dot ${cls}`} />
-        {label}
-      </>
-    );
-  const klasse = tone === "ok" ? "pill is-ok" : "pill";
-  const stijl = tone === "ok" ? undefined : { display: "inline-flex", alignItems: "center", gap: 6 };
+  const inhoud = metDot ? (
+    <>
+      <span className={`dot ${cls}`} />
+      {label}
+    </>
+  ) : (
+    <>
+      {label}
+      {bron && <span className="pill-bron">· {bron}</span>}
+    </>
+  );
+  const klasse =
+    tone === "ok" ? "pill is-ok" : tone === "elders" ? "pill is-elders" : tone === "handmatig" ? "pill is-handmatig" : "pill";
+  const stijl = metDot ? { display: "inline-flex", alignItems: "center", gap: 6 } : undefined;
 
   if (!href) {
     return (
-      <span className={klasse} style={stijl}>
+      <span className={klasse} style={stijl} title={title}>
         {inhoud}
       </span>
     );
@@ -117,7 +135,7 @@ function StatusPill({
       href={href}
       className={klasse}
       style={{ ...(stijl ?? {}), textDecoration: "none" }}
-      title="Openen — bijvoorbeeld om nog iets toe te voegen of na te kijken"
+      title={title ?? "Openen — bijvoorbeeld om nog iets toe te voegen of na te kijken"}
     >
       {inhoud}
     </a>
@@ -134,12 +152,12 @@ export default function Dashboard() {
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);
   const [calendarError, setCalendarError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<DraftRecord[] | null>(null);
-  const [mediataskOrders, setMediataskOrders] = useState<MediataskOrderSummary[]>([]);
-  const [clickupTaskNames, setClickupTaskNames] = useState<string[]>([]);
+  const [mediataskOrders, setMediataskOrders] = useState<MediataskOrderSamenvatting[]>([]);
+  const [clickupTaken, setClickupTaken] = useState<ClickUpTaakSamenvatting[]>([]);
   // Handmatige "toch al gedaan"-bevestigingen — het vangnet voor als de
   // automatische matching een echt afgeronde opname mist (net iets andere
   // adresschrijfwijze bij het starten). Zie lib/klaar-meldingen.ts.
-  const [klaarMeldingen, setKlaarMeldingen] = useState<Set<string>>(new Set());
+  const [klaarMeldingen, setKlaarMeldingen] = useState<KlaarMeldingen>(GEEN_MELDINGEN);
   const [meldBezig, setMeldBezig] = useState<string | null>(null);
   // Wie er op dit apparaat actief is: het af-te-maken-paneel toont alleen
   // diens werk. De rest van het dashboard blijft over iedereen gaan.
@@ -158,7 +176,7 @@ export default function Dashboard() {
   // niet vooraf: zo zet deze functie niets synchroon als hij vanuit een effect
   // draait, en knippert de melding niet weg en terug bij elke verversing.
   const load = useCallback(async () => {
-    const [evts, drafts, orders, taskNames, klaarGemeld] = await Promise.all([
+    const [evts, drafts, orders, taken, klaarGemeld] = await Promise.all([
       fetch("/api/calendar/today", { cache: "no-store" })
         .then(async (res) => {
           if (!res.ok) {
@@ -180,31 +198,36 @@ export default function Dashboard() {
         .catch(() => [] as DraftRecord[]),
       fetch("/api/mediatask/orders", { cache: "no-store" })
         .then((res) => (res.ok ? res.json() : { orders: [] }))
-        .then((data) => (data.orders ?? []) as MediataskOrderSummary[])
-        .catch(() => [] as MediataskOrderSummary[]),
+        .then((data) => (data.orders ?? []) as MediataskOrderSamenvatting[])
+        .catch(() => [] as MediataskOrderSamenvatting[]),
       fetch("/api/clickup/tasks", { cache: "no-store" })
-        .then((res) => (res.ok ? res.json() : { names: [] }))
-        .then((data) => (data.names ?? []) as string[])
-        .catch(() => [] as string[]),
+        .then((res) => (res.ok ? res.json() : { tasks: [] }))
+        .then((data) => (data.tasks ?? []) as ClickUpTaakSamenvatting[])
+        .catch(() => [] as ClickUpTaakSamenvatting[]),
       fetch("/api/klaar-melden", { cache: "no-store" })
-        .then((res) => (res.ok ? res.json() : { straten: [] }))
-        .then((data) => new Set((data.straten ?? []) as string[]))
-        .catch(() => new Set<string>()),
+        .then((res) => (res.ok ? res.json() : {}))
+        .then(
+          (data: { energielabel?: string[]; nen?: string[]; straten?: string[] }): KlaarMeldingen => ({
+            energielabel: new Set(data.energielabel ?? data.straten ?? []),
+            nen: new Set(data.nen ?? []),
+          })
+        )
+        .catch(() => GEEN_MELDINGEN),
     ]);
     setEvents(evts);
     setDrafts(drafts);
     setMediataskOrders(orders);
-    setClickupTaskNames(taskNames);
+    setClickupTaken(taken);
     setKlaarMeldingen(klaarGemeld);
   }, []);
 
-  async function meldKlaar(street: string) {
+  async function zetKlaar(street: string, dienst: "energielabel" | "nen", klaar: boolean) {
     setMeldBezig(street);
     try {
       await fetch("/api/klaar-melden", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ street }),
+        body: JSON.stringify({ street, dienst, klaar }),
       });
       await load();
     } finally {
@@ -262,8 +285,11 @@ export default function Dashboard() {
   // opnieuw gestarte zoekopdracht) — als ÉÉN daarvan al geüpload is, telt
   // dat, ook als een ander (later aangeraakt) concept nog openstaat. Zonder
   // deze voorkeur kan een verlopen concept de echte upload-status verbergen.
+  //
+  // Alleen recente concepten: een opname van vorig jaar op hetzelfde adres
+  // zegt niets over de afspraak van vandaag (zie lib/afspraak-status.ts).
   function findDraft(street: string): DraftRecord | null {
-    const matches = (drafts ?? []).filter((d) => sameAddress(d.straatnaam, street));
+    const matches = (drafts ?? []).filter((d) => isRecent(d.updatedAt) && sameAddress(d.straatnaam, street));
     if (!matches.length) return null;
     return (
       matches.find((d) => d.status === "uploaded" || !!d.clickupTaskUrl) ??
@@ -272,22 +298,10 @@ export default function Dashboard() {
     );
   }
 
-  // Real-time bij Mediatask zelf checken (niet alleen onze eigen concept-
-  // administratie, die kan achterlopen) of er al een NEN2580-order bestaat.
-  function hasMediataskOrder(street: string): boolean {
-    return mediataskOrders.some((o) => !!o.address && sameAddress(o.address, street));
-  }
-
-  // Real-time bij ClickUp zelf checken (niet alleen onze eigen concept-
-  // administratie, die kan achterlopen) of er al een energielabel-taak bestaat.
-  function hasClickUpTask(street: string): boolean {
-    return clickupTaskNames.some((name) => sameAddress(name, street));
-  }
-
   // Vangnet, zie lib/klaar-meldingen.ts: een expliciete "ik heb dit echt
   // gedaan"-bevestiging telt net zo goed mee als een automatische match.
-  function isHandmatigKlaarGemeld(street: string): boolean {
-    return klaarMeldingen.has(adresSleutel(splitAddress(street).street));
+  function isHandmatigKlaarGemeld(street: string, dienst: "energielabel" | "nen"): boolean {
+    return klaarMeldingen[dienst].has(adresSleutel(splitAddress(street).street));
   }
 
   return (
@@ -376,12 +390,27 @@ export default function Dashboard() {
                 // onafgerond, óók al bestaat de taak. Anders staat er een
                 // groen vinkje op werk dat nog gedaan moet worden.
                 const incompleteDocs = draft?.incompleteDocs ?? [];
-                const energielabelDone =
-                  isHandmatigKlaarGemeld(statusStreet) ||
-                  (incompleteDocs.length === 0 &&
-                    (hasClickUpTask(statusStreet) || draft?.status === "uploaded" || !!draft?.clickupTaskUrl));
+                // Real-time bij ClickUp en Mediatask zelf gecheckt (onze eigen
+                // concept-administratie kan achterlopen), maar alleen recent
+                // werk telt — en per dienst: via de uploader, elders gemaakt,
+                // nog niet af, of met de hand gemarkeerd.
+                const elHandmatig = isHandmatigKlaarGemeld(statusStreet, "energielabel");
+                const nenHandmatig = isHandmatigKlaarGemeld(statusStreet, "nen");
+                const elStatus: DienstStatus = energielabelStatus({
+                  taak: recenteClickUpTaak(clickupTaken, statusStreet),
+                  conceptGeupload: draft?.status === "uploaded" || !!draft?.clickupTaskUrl,
+                  bijlagesOntbreken: incompleteDocs.length > 0,
+                  handmatig: elHandmatig,
+                });
+                const nenOrder = recenteMediataskOrder(mediataskOrders, statusStreet);
+                const nStatus: DienstStatus = nenStatus({
+                  order: nenOrder,
+                  conceptMetOrder: !!draft?.heeftMediatask,
+                  handmatig: nenHandmatig,
+                });
+                const energielabelDone = elStatus !== null && elStatus !== "onaf";
                 const energielabelStarted = !!draft;
-                const nenDone = hasMediataskOrder(statusStreet) || !!draft?.heeftMediatask;
+                const nenDone = nStatus !== null && nStatus !== "onaf";
                 const time = formatTime(e.start);
                 const gedetecteerd = detectServices(e.summary, e.description);
                 // De agenda zegt wat er op dit adres moet gebeuren; de rechten
@@ -469,60 +498,96 @@ export default function Dashboard() {
                     </div>
                     <div className="draft-actions today-appt-actions">
                       {services.energielabel &&
-                        (energielabelDone ? (
-                          <StatusPill
-                            label="Energielabel geüpload"
-                            tone="ok"
-                            href={
-                              draft
-                                ? `/energielabel?draft=${draft.id}`
-                                : `/energielabel?addr=${encodeURIComponent(bagQuery)}`
-                            }
-                          />
-                        ) : incompleteDocs.length > 0 ? (
-                          <a
-                            href={`/energielabel?draft=${draft!.id}`}
-                            className="today-appt-service-tag is-warning"
-                            title={`Niet in ClickUp gekomen: ${incompleteDocs.join(", ")}`}
-                          >
-                            ⚠ Bijlages ontbreken ({incompleteDocs.length}) — afmaken
-                          </a>
-                        ) : energielabelStarted ? (
-                          <StatusPill label="Energielabel: concept" tone="busy" />
-                        ) : (
-                          <a href={`/energielabel?addr=${encodeURIComponent(bagQuery)}`} className="btn btn-quiet">
-                            Energielabel starten
-                          </a>
-                        ))}
+                        (() => {
+                          const elUrl = draft
+                            ? `/energielabel?draft=${draft.id}`
+                            : `/energielabel?addr=${encodeURIComponent(bagQuery)}`;
+                          if (elStatus === "geupload")
+                            return <StatusPill label="Energielabel geüpload" tone="ok" href={elUrl} />;
+                          if (elStatus === "elders")
+                            return (
+                              <StatusPill
+                                label="In ClickUp"
+                                bron="buiten uploader"
+                                tone="elders"
+                                title="Er staat recent een taak voor dit adres in ClickUp, maar die is niet via de uploader gemaakt"
+                              />
+                            );
+                          if (elStatus === "handmatig")
+                            return <StatusPill label="Energielabel al gedaan" bron="handmatig" tone="handmatig" />;
+                          if (elStatus === "onaf")
+                            return (
+                              <a
+                                href={`/energielabel?draft=${draft!.id}`}
+                                className="today-appt-service-tag is-warning"
+                                title={`Niet in ClickUp gekomen: ${incompleteDocs.join(", ")}`}
+                              >
+                                ⚠ Bijlages ontbreken ({incompleteDocs.length}) — afmaken
+                              </a>
+                            );
+                          return energielabelStarted ? (
+                            <StatusPill label="Energielabel: concept" tone="busy" />
+                          ) : (
+                            <a href={elUrl} className="btn btn-quiet">
+                              Energielabel starten
+                            </a>
+                          );
+                        })()}
                       {services.nen &&
                         (() => {
                           const nenUrl = `/nen?addr=${encodeURIComponent(bagQuery)}${klant ? `&klant=${encodeURIComponent(klant)}` : ""}${grossFloorArea ? `&m2=${grossFloorArea}` : ""}`;
-                          return nenDone ? (
-                            <StatusPill label="NEN2580 geüpload" tone="ok" href={nenUrl} />
-                          ) : (
+                          if (nStatus === "geupload")
+                            return <StatusPill label="NEN2580 ingediend" tone="ok" href={nenUrl} />;
+                          if (nStatus === "elders")
+                            return (
+                              <StatusPill
+                                label="In Mediatask"
+                                bron="buiten uploader"
+                                tone="elders"
+                                title="Er loopt een order voor dit adres bij Mediatask, maar die is niet via de uploader gemaakt"
+                              />
+                            );
+                          if (nStatus === "handmatig")
+                            return <StatusPill label="NEN2580 al gedaan" bron="handmatig" tone="handmatig" />;
+                          if (nStatus === "onaf")
+                            return (
+                              <StatusPill
+                                label="NEN2580: concept, nog niet ingediend"
+                                tone="busy"
+                                href={nenUrl}
+                                title="De order staat bij Mediatask als concept — open hem om af te ronden en in te dienen"
+                              />
+                            );
+                          return (
                             <a href={nenUrl} className="btn btn-quiet">
                               NEN2580 uploaden
                             </a>
                           );
                         })()}
-                      {/* "Toch al gedaan?" zat als losse knop tussen de hoofdknoppen
-                          in. Het is een uitzondering, geen vervolgstap, dus het
-                          hoort achter de puntjes en niet naast "starten". */}
-                      {services.energielabel && !energielabelDone && incompleteDocs.length === 0 && !energielabelStarted && (
-                        <span className="today-appt-meer">
-                          <MeerMenu
-                            label={`Meer opties voor ${street}`}
-                            bezig={meldBezig === statusStreet}
-                            items={[
-                              {
-                                label: "Energielabel al gedaan",
-                                uitleg: "Al geüpload, maar staat hier nog open",
-                                onClick: () => meldKlaar(statusStreet),
-                              },
-                            ]}
-                          />
-                        </span>
-                      )}
+                      {/* Het ⋯-menu staat bij élke afspraak: een uitzondering,
+                          geen vervolgstap, dus achter de puntjes en niet naast
+                          "starten". Een vinkje laat zien wat al met de hand
+                          gemarkeerd is; nog eens tikken draait het terug. */}
+                      <span className="today-appt-meer">
+                        <MeerMenu
+                          label={`Meer opties voor ${street}`}
+                          bezig={meldBezig === statusStreet}
+                          items={[
+                            {
+                              label: "NEN2580 al gedaan",
+                              uitleg: nenHandmatig ? "Tik om terug te draaien" : "Markeert deze afspraak als klaar",
+                              aan: nenHandmatig,
+                              onClick: () => zetKlaar(statusStreet, "nen", !nenHandmatig),
+                            },
+                            {
+                              label: "Energielabel al gedaan",
+                              uitleg: elHandmatig ? "Tik om terug te draaien" : "Markeert deze afspraak als klaar",
+                              aan: elHandmatig,
+                              onClick: () => zetKlaar(statusStreet, "energielabel", !elHandmatig),
+                            },
+                          ]}
+                        />
+                      </span>
                     </div>
                   </div>
                 );
