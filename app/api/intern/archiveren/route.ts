@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { root?: string; mappen?: string[]; droog?: boolean; terug?: boolean }
+    | { root?: string; mappen?: string[]; droog?: boolean; terug?: boolean; maand?: string }
     | null;
 
   const root = body?.root?.replace(/\/+$/, "") ?? "";
@@ -48,6 +48,8 @@ export async function POST(request: Request) {
     const uitkomst = await archiveerProjectmappen(token, root, mappen, {
       droog: body?.droog === true,
       terug,
+      // Optioneel: de maandmap in het archief, bv. "2026-10 Oktober".
+      maand: typeof body?.maand === "string" ? body.maand : undefined,
     });
     return NextResponse.json({ ok: uitkomst.mislukt.length === 0, ...uitkomst });
   } catch (err) {

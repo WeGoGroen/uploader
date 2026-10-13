@@ -1,4 +1,5 @@
 import { getOptionalRedis } from "@/lib/redis";
+import { isMaandMap } from "@/lib/archief-maand";
 import { fetchProjectPhotos } from "@/lib/streetview";
 import { BIJLAGE_G_BESTANDSNAAM, bijlageGInhoud } from "@/lib/bijlage-g-sjabloon";
 import { mapnaamPastBijAdres, parseProjectFolderName } from "@/lib/projectmap-match";
@@ -290,8 +291,10 @@ export function projectFolderPath(
  * bij het volgende werk een tweede, lege map naast de bestaande en staan de
  * foto's in de ene en het label in de andere.
  */
+export { isMaandMap, maandMapNaam } from "@/lib/archief-maand";
 export const ARCHIEF_MAP = "Afgerond";
 const ARCHIEF_LOWER = ARCHIEF_MAP.toLowerCase();
+
 
 /**
  * Splitst het pad ná de hoofdmap in "welke projectmap" en "wat daarbinnen".
@@ -299,7 +302,11 @@ const ARCHIEF_LOWER = ARCHIEF_MAP.toLowerCase();
  * verschil onzichtbaar voor de tellers hieronder.
  */
 function projectDelen(delen: string[]): { sleutel: string; binnen: string[] } | null {
-  const zonderArchief = delen[0] === ARCHIEF_LOWER ? delen.slice(1) : delen;
+  let zonderArchief = delen[0] === ARCHIEF_LOWER ? delen.slice(1) : delen;
+  // Sinds de indeling per maand kan er nog een niveau tussen zitten.
+  if (delen[0] === ARCHIEF_LOWER && zonderArchief[0] && isMaandMap(zonderArchief[0])) {
+    zonderArchief = zonderArchief.slice(1);
+  }
   if (!zonderArchief[0]) return null;
   return { sleutel: zonderArchief[0], binnen: zonderArchief.slice(1) };
 }
@@ -1356,11 +1363,48 @@ export async function findProjectFolder(
 
   // Eerst waar het werk staat, dan het archief. In die volgorde, want een
   // lopende opname hoort zwaarder te wegen dan een afgeronde met dezelfde naam.
-  return metHerkansing(
-    async () =>
-      (await zoekInEenMap(accessToken, root, naam)) ??
-      (await zoekInEenMap(accessToken, `${root}/${ARCHIEF_MAP}`, naam))
-  );
+  const archief = `${root}/${ARCHIEF_MAP}`;
+  return metHerkansing(async () => {
+    const direct =
+      (await zoekInEenMap(accessToken, root, naam)) ?? (await zoekInEenMap(accessToken, archief, naam));
+    if (direct) return direct;
+
+    // Dan de maandmappen in het archief, de nieuwste eerst.
+    for (const maand of await maandMappen(accessToken, archief)) {
+      const gevonden = await zoekInEenMap(accessToken, maand, naam);
+      if (gevonden) return gevonden;
+    }
+    return null;
+  });
+}
+
+/** De maandmappen in een archief, nieuwste eerst; leeg als er (nog) geen archief is. */
+export async function maandMappen(accessToken: string, archief: string): Promise<string[]> {
+  const uit: string[] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const res: Response = await fetch(`${DROPBOX_API_BASE}/files/list_folder${cursor ? "/continue" : ""}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(cursor ? { cursor } : { path: archief, recursive: false }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      if (res.status === 409 && body.includes("path/not_found")) return [];
+      throw new DropboxApiError(res.status, `Dropbox list_folder failed: ${res.status} ${body}`);
+    }
+    const data = (await res.json()) as {
+      entries: { ".tag": string; name: string; path_display?: string }[];
+      cursor: string;
+      has_more: boolean;
+    };
+    for (const e of data.entries) {
+      if (e[".tag"] === "folder" && isMaandMap(e.name)) uit.push(e.path_display ?? `${archief}/${e.name}`);
+    }
+    if (!data.has_more) break;
+    cursor = data.cursor;
+  }
+  return uit.sort().reverse();
 }
 
 /**
@@ -1451,7 +1495,7 @@ const STATUS_HASH = "sharepoint:mapstatus";
  * die wél gelukt waren. Het adres verandert niet, de plek wel.
  */
 export function statusVeld(root: string, naam: string): string {
-  const hoofdmap = root.replace(new RegExp(`/${ARCHIEF_MAP}$`, "i"), "");
+  const hoofdmap = root.replace(new RegExp(`/${ARCHIEF_MAP}(/\\d{4}-\\d{2}[^/]*)?$`, "i"), "");
   return `${hoofdmap}/${stripStatusMarker(naam)}`.toLowerCase();
 }
 
@@ -1936,9 +1980,11 @@ export async function archiveerProjectmappen(
   accessToken: string,
   root: string,
   paden: string[],
-  opties: { droog?: boolean; terug?: boolean } = {}
+  opties: { droog?: boolean; terug?: boolean; maand?: string } = {}
 ): Promise<ArchiveerUitkomst> {
-  const archief = `${root}/${ARCHIEF_MAP}`;
+  // Met een maand gaat het in de maandmap van het archief ("Afgerond/2026-10 Oktober").
+  const maand = opties.maand && isMaandMap(opties.maand) ? opties.maand.trim() : null;
+  const archief = maand ? `${root}/${ARCHIEF_MAP}/${maand}` : `${root}/${ARCHIEF_MAP}`;
   // Dezelfde verplaatsing, andere kant op. Terughalen is niet zeldzaam: een
   // map die op de verkeerde grond is gearchiveerd (bv. een status die toch
   // niet als afgerond telt) hoort terug te kunnen zonder handwerk in Dropbox.
