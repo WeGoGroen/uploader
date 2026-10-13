@@ -1387,6 +1387,9 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
 .doc-file-yes { border: 0; background: var(--bad); color: #fff; }
 .doc-file-yes:disabled { opacity: 0.6; cursor: default; }
 .doc-file-no { border: 1px solid var(--rule-strong); background: var(--paper); color: var(--ink); }
+/* Op de opnamelijst: grotere knoppen, het gaat om meer dan één bestand. */
+.opname-confirm { flex-basis: 100%; font-size: 13px; }
+.opname-confirm .doc-file-yes, .opname-confirm .doc-file-no { min-height: 40px; padding: 0 14px; font-size: 13px; }
 
 /* ---- groter, zoombaar bovenaanzicht ---- */
 .scan-modal.is-wide { max-width: 1400px; }
@@ -1767,6 +1770,19 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
   flex: 1; display: grid; place-items: center; margin: 0; padding: 24px 14px;
   font-size: 13px; color: var(--ink-faint); text-align: center;
 }
+.media-retry-btn {
+  min-height: 40px; padding: 6px 14px; border-radius: 999px;
+  border: 1px solid var(--bad); background: #fff; color: var(--bad);
+  font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; white-space: nowrap;
+}
+.media-retry-btn:hover:not(:disabled) { background: var(--bad); color: #fff; }
+.media-retry-btn:disabled { opacity: 0.6; cursor: default; }
+.media-retry-all {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin: 12px 0 0; padding: 10px 12px; border-radius: 10px;
+  background: var(--bad-wash); color: var(--bad); font-size: 13px; line-height: 1.45;
+}
+.media-retry-all span { flex: 1 1 220px; }
 .media-kolom-lijst {
   list-style: none; margin: 0; padding: 10px 14px; flex: 1;
   display: flex; flex-direction: column; gap: 10px; max-height: 26rem; overflow-y: auto;
@@ -1790,6 +1806,8 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
   color: var(--accent-text);
 }
 .media-kolom-opnieuw:hover { background: var(--inset); }
+.media-kolom-opnieuw:disabled { opacity: 0.6; cursor: default; }
+.media-kolom-r2.media-kolom-fout { color: var(--bad); }
 
 .media-overgeslagen {
   background: var(--warn-wash); color: var(--warn); border-radius: var(--r-sm);

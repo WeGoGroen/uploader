@@ -42,3 +42,6 @@ next-env.d.ts
 
 # ClickUp veld-dump (bevat geen secrets, wel interne veldnamen)
 clickup-fields.json
+
+# Het voorbeeldbestand hoort wél in git: geen waarden, alleen de namen.
+!.env.example

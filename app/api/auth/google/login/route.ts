@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authScope } from "@/lib/google-calendar";
 import { resolveActiveAccountName } from "@/lib/active-account";
+import { startOAuthState } from "@/lib/oauth-state";
 
 export async function GET(request: Request) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -27,10 +28,12 @@ export async function GET(request: Request) {
   // dit account de app al eerder had geautoriseerd zonder offline access.
   authorizeUrl.searchParams.set("access_type", "offline");
   authorizeUrl.searchParams.set("prompt", "consent");
-  // state draagt de actieve ClickUp-accountnaam mee door de hele OAuth-flow
-  // heen, zodat de callback weet voor wíé dit Google-token bedoeld is —
-  // essentieel om agenda's per teamlid gescheiden te houden.
-  authorizeUrl.searchParams.set("state", accountName);
-
-  return NextResponse.redirect(authorizeUrl.toString());
+  // Een willekeurige state, ook in een cookie (zie lib/oauth-state.ts). Voor
+  // wíé het token is, haalt de callback uit de sessie van deze browser; dat
+  // stond eerst in de state zelf, en die kon iedereen invullen.
+  const response = NextResponse.redirect(authorizeUrl.toString());
+  const state = startOAuthState("google", response);
+  authorizeUrl.searchParams.set("state", state);
+  response.headers.set("Location", authorizeUrl.toString());
+  return response;
 }

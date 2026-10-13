@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, authConfig, isValidSession } from "@/lib/auth";
+import { SESSION_COOKIE, magAchtergrondtaakDraaien } from "@/lib/auth";
 import { archiveerOudeOpnames, getDraft, listDraftsByStatus, saveDraft } from "@/lib/drafts";
 import { attachOneDocument } from "@/lib/attachments";
 import { requireClickUpConfig } from "@/lib/clickup";
@@ -32,10 +32,10 @@ const MAX_POGINGEN = 5;
  * die hoeven niet meer in de lijsten mee te tellen.
  */
 export async function GET(request: Request) {
-  const { secret } = authConfig();
-  const cronSecret = process.env.CRON_SECRET;
-  const viaCron = !!cronSecret && request.headers.get("authorization") === `Bearer ${cronSecret}`;
-  const viaSessie = await isValidSession(secret, (await cookies()).get(SESSION_COOKIE)?.value);
+  const { viaCron, viaSessie } = await magAchtergrondtaakDraaien(
+    request,
+    (await cookies()).get(SESSION_COOKIE)?.value
+  );
   if (!viaCron && !viaSessie) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }

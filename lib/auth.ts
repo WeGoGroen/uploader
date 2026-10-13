@@ -30,9 +30,12 @@ async function sign(secret: string, data: string): Promise<string> {
   return toBase64Url(sig);
 }
 
-/** Maakt een sessiewaarde die tot `expiresAt` (ms sinds epoch) geldig is. */
-export async function createSessionValue(secret: string, expiresAt: number): Promise<string> {
-  return `${expiresAt}.${await sign(secret, String(expiresAt))}`;
+/** Vergelijkt twee teksten zonder dat de responstijd verraadt hoe ver ze gelijk zijn. */
+export function gelijkInConstanteTijd(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let verschil = 0;
+  for (let i = 0; i < a.length; i++) verschil |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return verschil === 0;
 }
 
 /**
@@ -104,23 +107,26 @@ export async function leesSessie(secret: string, waarde: string | null | undefin
   }
 }
 
-export async function isValidSession(secret: string, value: string | undefined | null): Promise<boolean> {
-  if (!value) return false;
-  const dot = value.lastIndexOf(".");
-  if (dot < 1) return false;
-  const expiresAt = value.slice(0, dot);
-  const signature = value.slice(dot + 1);
-
-  const expected = await sign(secret, expiresAt);
-  // Lengtes verschillen => zeker ongeldig; anders constante-tijd vergelijking
-  // zodat een aanvaller niet aan de responstijd kan aflezen hoe ver hij is.
-  if (signature.length !== expected.length) return false;
-  let diff = 0;
-  for (let i = 0; i < signature.length; i++) diff |= signature.charCodeAt(i) ^ expected.charCodeAt(i);
-  if (diff !== 0) return false;
-
-  const ts = Number(expiresAt);
-  return Number.isFinite(ts) && ts > Date.now();
+/**
+ * Mag deze aanvraag een van de achtergrondtaken draaien (ochtendcontrole,
+ * herinneringen, herstelwerker)? Via Vercel Cron met het cron-geheim, of met
+ * een geldige sessie om hem met de hand te starten.
+ *
+ * Hier stond isValidSession, en die kende alleen het oude sessieformaat: een
+ * kale vervaldatum met handtekening. Sinds de naam in de sessie zit is de
+ * waarde een stuk JSON, `Number()` daarvan is NaN, en dus gaf hij voor elke
+ * echte sessie `false`. Met de hand draaien kon daardoor niet meer. Het
+ * cron-geheim werd bovendien met `===` vergeleken; nu in constante tijd.
+ */
+export async function magAchtergrondtaakDraaien(
+  request: Request,
+  sessieWaarde: string | null | undefined
+): Promise<{ viaCron: boolean; viaSessie: boolean }> {
+  const cronSecret = process.env.CRON_SECRET;
+  const auth = request.headers.get("authorization") ?? "";
+  const viaCron = !!cronSecret && gelijkInConstanteTijd(auth, `Bearer ${cronSecret}`);
+  const viaSessie = !!(await leesSessie(authConfig().secret, sessieWaarde));
+  return { viaCron, viaSessie };
 }
 
 /**

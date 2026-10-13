@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRechten } from "@/components/RechtenProvider";
 import { opnameLink } from "@/lib/opname-link";
 import { vergeetTakenVoor } from "@/lib/upload-queue";
+import { openstaandeUploads } from "@/lib/upload-store";
 import { taakHoortBij } from "@/lib/upload-overview";
 import { sameAddress } from "@/lib/address-format";
 import { clearDraftLocal } from "@/lib/local-drafts";
@@ -41,6 +43,21 @@ export default function Opnames() {
   const [refreshing, setRefreshing] = useState(false);
   const [verwijderFout, setVerwijderFout] = useState<string | null>(null);
   const [verwijderBezig, setVerwijderBezig] = useState<string | null>(null);
+  /*
+    Welke opname om bevestiging vraagt, en wat er meegaat.
+
+    Eén tik op "Verwijderen" haalde alles weg: de concepten op de server, de
+    kopie op dit apparaat en de bewaarde uploadbestanden. Dat laatste is niet
+    terug te halen: een upload die nog moest slagen, kan daarna nooit meer
+    herkanst worden. Op een iPad is een misklik zo gebeurd, en elders in de app
+    (bestanden in de documentenlijst) vraagt dezelfde handeling al om een
+    tweede tik. Hier nu ook, met erbij wat er precies verdwijnt.
+  */
+  const [bevestig, setBevestig] = useState<{
+    id: string;
+    concepten: number;
+    uploads: number | null;
+  } | null>(null);
   // Kerncijfers over de doorstroom. Bij honderden opnames per maand zegt een
   // lijst weinig; deze getallen wel.
   const [cijfers, setCijfers] = useState<{
@@ -54,14 +71,16 @@ export default function Opnames() {
 
   const rechten = useRechten();
 
+  // De fout pas na het antwoord wissen: dan zet deze functie niets synchroon
+  // als hij vanuit het laad-effect draait.
   const load = useCallback(async () => {
-    setError(null);
     try {
       // Alleen het eigen af te maken werk: het volledige overzicht (iedereen,
       // inclusief afgerond) leeft in het Business Control Center.
       const res = await fetch("/api/drafts?mijn=1", { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Onbekende fout");
+      setError(null);
       setDrafts(data.drafts ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kon concepten niet laden.");
@@ -69,7 +88,17 @@ export default function Opnames() {
   }, []);
 
   useEffect(() => {
-    load().finally(() => setLoading(false));
+    let weg = false;
+    void (async () => {
+      try {
+        await load();
+      } finally {
+        if (!weg) setLoading(false);
+      }
+    })();
+    return () => {
+      weg = true;
+    };
   }, [load]);
 
   useEffect(() => {
@@ -98,16 +127,75 @@ export default function Opnames() {
     kon niet weten waarom. Eén klik ruimt nu op wat het dashboard als één klus
     toont.
   */
-  async function verwijderOpname(gekozen: DraftRecord) {
+  /** Alles wat bij deze opname hoort en samen weggaat. */
+  function hoortSamen(gekozen: DraftRecord): DraftRecord[] {
     const adres = gekozen.straatnaam || gekozen.titel;
-    setVerwijderFout(null);
-    setVerwijderBezig(gekozen.id);
-
-    const samen = (drafts ?? []).filter(
+    return (drafts ?? []).filter(
       (d) =>
         d.id === gekozen.id ||
         (!!adres && !!d.straatnaam && sameAddress(d.straatnaam, adres))
     );
+  }
+
+  async function vraagBevestiging(gekozen: DraftRecord) {
+    const samen = hoortSamen(gekozen);
+    setVerwijderFout(null);
+    setBevestig({ id: gekozen.id, concepten: samen.length, uploads: null });
+    // Hoeveel bestanden er nog op dit apparaat op een upload wachten. Dat is
+    // het deel dat niet terug te halen is, dus dat hoort in de vraag.
+    const adres = gekozen.straatnaam || gekozen.titel;
+    const bewaard = adres
+      ? (await openstaandeUploads().catch(() => [])).filter((u) =>
+          samen.some((d) => taakHoortBij(u, adres, d.soort))
+        ).length
+      : 0;
+    setBevestig((b) => (b?.id === gekozen.id ? { ...b, uploads: bewaard } : b));
+  }
+
+  function renderVerwijderen(d: DraftRecord) {
+    if (bevestig?.id !== d.id) {
+      return (
+        <button
+          className="btn-text"
+          onClick={() => void vraagBevestiging(d)}
+          disabled={verwijderBezig === d.id}
+        >
+          {verwijderBezig === d.id ? "Bezig…" : "Verwijderen"}
+        </button>
+      );
+    }
+    const { concepten, uploads } = bevestig;
+    return (
+      <span className="doc-file-confirm opname-confirm">
+        <span>
+          {concepten === 1 ? "Deze opname" : `${concepten} opnames op dit adres`} verwijderen?
+          {uploads !== null && uploads > 0
+            ? ` Ook ${uploads} bestand${uploads === 1 ? "" : "en"} dat nog niet in Dropbox staat, gaat verloren.`
+            : ""}
+        </span>
+        <button
+          type="button"
+          className="doc-file-yes"
+          disabled={verwijderBezig === d.id}
+          onClick={() => {
+            setBevestig(null);
+            void verwijderOpname(d);
+          }}
+        >
+          Ja, verwijder
+        </button>
+        <button type="button" className="doc-file-no" onClick={() => setBevestig(null)}>
+          Nee
+        </button>
+      </span>
+    );
+  }
+
+  async function verwijderOpname(gekozen: DraftRecord) {
+    setVerwijderFout(null);
+    setVerwijderBezig(gekozen.id);
+
+    const samen = hoortSamen(gekozen);
 
     try {
       const mislukt: string[] = [];
@@ -214,12 +302,12 @@ export default function Opnames() {
           via het menu terug — dat is een omweg voor iets wat één klik hoort te
           zijn. */}
       <header className="topline">
-        <a href="/" className="btn-back">
+        <Link href="/" className="btn-back">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           Terug naar dashboard
-        </a>
+        </Link>
         <span className="eyebrow">Af te maken</span>
       </header>
 
@@ -295,13 +383,7 @@ export default function Opnames() {
                         recht erbij krijgt, of haal hem weg.
                       </span>
                     )}
-                    <button
-                      className="btn-text"
-                      onClick={() => verwijderOpname(d)}
-                      disabled={verwijderBezig === d.id}
-                    >
-                      {verwijderBezig === d.id ? "Bezig…" : "Verwijderen"}
-                    </button>
+                    {renderVerwijderen(d)}
                   </div>
                 </div>
               ))}
@@ -355,13 +437,7 @@ export default function Opnames() {
                         weg te krijgen: deze sectie had geen verwijderknop. Dat
                         is precies het geval waarin je klikt op wat je wél kunt
                         vinden en de regel toch blijft staan. */}
-                    <button
-                      className="btn-text"
-                      onClick={() => verwijderOpname(d)}
-                      disabled={verwijderBezig === d.id}
-                    >
-                      {verwijderBezig === d.id ? "Bezig…" : "Verwijderen"}
-                    </button>
+                    {renderVerwijderen(d)}
                   </div>
                 </div>
               ))}

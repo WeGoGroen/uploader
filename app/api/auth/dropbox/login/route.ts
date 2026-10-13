@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { startOAuthState } from "@/lib/oauth-state";
 
 export async function GET(request: Request) {
   const clientId = process.env.DROPBOX_CLIENT_ID;
@@ -22,5 +23,10 @@ export async function GET(request: Request) {
   // the ~4h access token expiry without asking the user to log in again.
   authorizeUrl.searchParams.set("token_access_type", "offline");
 
-  return NextResponse.redirect(authorizeUrl.toString());
+  // Willekeurige state, ook in een cookie: zie lib/oauth-state.ts.
+  const response = NextResponse.redirect(authorizeUrl.toString());
+  const state = startOAuthState("dropbox", response);
+  authorizeUrl.searchParams.set("state", state);
+  response.headers.set("Location", authorizeUrl.toString());
+  return response;
 }

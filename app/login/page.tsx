@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 /** Lengte van de inlogcode; bij dit aantal cijfers logt de app vanzelf in. */
 const CODE_LENGTH = 4;
@@ -46,7 +46,15 @@ function LoginForm() {
 
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [gekozen, setGekozen] = useState<Account | null>(null);
-  const [code, setCode] = useState("");
+  const [code, setCodeState] = useState("");
+  // De code ook in een ref, zodat een toetsaanslag via het fysieke
+  // toetsenbord (een listener die niet bij elke render opnieuw wordt gezet)
+  // altijd de actuele code ziet.
+  const codeRef = useRef("");
+  const setCode = useCallback((nieuw: string) => {
+    codeRef.current = nieuw;
+    setCodeState(nieuw);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -83,24 +91,25 @@ function LoginForm() {
         setBusy(false);
       }
     },
-    [next]
+    [next, setCode]
   );
 
-  // Zodra de code compleet is meteen inloggen: scheelt een extra tik.
-  useEffect(() => {
-    if (gekozen && code.length === CODE_LENGTH && !busy) void login(gekozen.naam, code);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, gekozen]);
-
+  // Zodra de code compleet is meteen inloggen: scheelt een extra tik. Dat
+  // gebeurt bij de toetsaanslag zelf en niet in een effect op `code`: daar
+  // zette het inloggen synchroon state in de body van het effect.
   function press(digit: string) {
-    if (busy) return;
+    if (busy || !gekozen) return;
+    const huidig = codeRef.current;
+    if (huidig.length >= CODE_LENGTH) return;
     setError(null);
-    setCode((c) => (c.length >= CODE_LENGTH ? c : c + digit));
+    const nieuw = huidig + digit;
+    setCode(nieuw);
+    if (nieuw.length === CODE_LENGTH) void login(gekozen.naam, nieuw);
   }
 
   function backspace() {
     setError(null);
-    setCode((c) => c.slice(0, -1));
+    setCode(codeRef.current.slice(0, -1));
   }
 
   // Ook gewoon met een fysiek toetsenbord te bedienen.

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { draaiControles } from "@/lib/health";
 import { mailBijStoring } from "@/lib/health-mail";
-import { SESSION_COOKIE, authConfig, isValidSession } from "@/lib/auth";
+import { SESSION_COOKIE, magAchtergrondtaakDraaien } from "@/lib/auth";
 import { isInternRequest } from "@/lib/intern-auth";
 import { cookies } from "next/headers";
 
@@ -20,13 +20,11 @@ export const maxDuration = 300;
  * kan worden — en het kan los ingetrokken worden zonder de cron te breken.
  */
 export async function GET(request: Request) {
-  const { secret } = authConfig();
-  const cronSecret = process.env.CRON_SECRET;
-  const auth = request.headers.get("authorization");
-
-  const viaCron = !!cronSecret && auth === `Bearer ${cronSecret}`;
+  const { viaCron, viaSessie } = await magAchtergrondtaakDraaien(
+    request,
+    (await cookies()).get(SESSION_COOKIE)?.value
+  );
   const viaControlCenter = isInternRequest(request);
-  const viaSessie = await isValidSession(secret, (await cookies()).get(SESSION_COOKIE)?.value);
 
   if (!viaCron && !viaSessie && !viaControlCenter) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });

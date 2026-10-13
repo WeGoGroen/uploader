@@ -1,4 +1,4 @@
-import { getOptionalRedis, requireRedis } from "@/lib/redis";
+import { getOptionalRedis, metSlot, requireRedis } from "@/lib/redis";
 
 /**
  * Welke koppelingen bewust uitstaan.
@@ -50,10 +50,17 @@ export async function staatUit(dienst: Koppeling): Promise<boolean> {
 
 export async function zetKoppeling(dienst: Koppeling, uit: boolean): Promise<Koppeling[]> {
   const redis = requireRedis();
-  const huidig = await haalUitgezet();
-  const nieuw = uit
-    ? [...new Set([...huidig, dienst])]
-    : huidig.filter((d) => d !== dienst);
-  await redis.set(KEY, JSON.stringify(nieuw));
-  return nieuw;
+  // Onder een slot en zonder terugval bij het lezen: haalUitgezet() geeft bij
+  // een hapering een lege lijst, en die terugschrijven zou andere uitgezette
+  // koppelingen stilletjes weer aanzetten.
+  return metSlot(redis, KEY, async () => {
+    const ruw = await redis.get(KEY);
+    const lijst = ruw ? (JSON.parse(ruw) as unknown) : [];
+    const huidig = Array.isArray(lijst)
+      ? lijst.filter((d): d is Koppeling => typeof d === "string" && isKoppeling(d))
+      : [];
+    const nieuw = uit ? [...new Set([...huidig, dienst])] : huidig.filter((d) => d !== dienst);
+    await redis.set(KEY, JSON.stringify(nieuw));
+    return nieuw;
+  });
 }

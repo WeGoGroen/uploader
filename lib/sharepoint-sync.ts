@@ -220,12 +220,17 @@ export async function syncSharePointFiles(input: {
   // gespeld adres, of een opname die nooit via de app is aangemaakt. Dan is
   // een nieuwe map naast de bestaande het slechtste antwoord: de bestanden
   // raken verspreid over twee mappen zonder dat iemand het merkt.
+  //
+  // Een zoekfout gaat door als fout en wordt geen "geen_projectmap". Dat
+  // verschil telt: "geen_projectmap" lost zich volgens de afspraak nooit
+  // vanzelf op, dus de agent probeert het niet opnieuw, en in de inhaalronde
+  // maakte een haperend Dropbox er een tweede map naast de echte van.
   let bestaand = await findProjectFolder(
     dropboxToken,
     input.kind,
     input.woonplaats,
     input.addressLine
-  ).catch(() => null);
+  );
 
   if (!bestaand && input.maakProjectmapAan) {
     // Archiefwerk van vóór de app: de projectmap bestond nooit. Aanmaken met
