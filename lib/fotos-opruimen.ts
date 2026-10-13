@@ -40,3 +40,45 @@ export function isProjectmap(pad: string): boolean {
   if (delen.length === 3) return delen[1] === "Afgerond";
   return false;
 }
+
+/** De submap waar de opname-app de gevelfoto's (ClickUp-veld D2) neerzet. */
+export const OPNAMEMAP = "opname formulier";
+
+/**
+ * De foto's die direct in de submap "Opname formulier" staan.
+ *
+ * De opname-app zet de gevelfoto's (D2) daar, naast het opnameformulier. De
+ * controle van het dossier kijkt in "foto's", en zag ze dus niet: 66 projecten
+ * stonden op "foto's ontbreken" terwijl de foto's er wel waren. Na de
+ * oplevering hebben ze daar geen functie meer — de koppeling met ClickUp is bij
+ * het aanmaken van de taak al gelegd — dus verhuizen ze mee naar "foto's".
+ *
+ * Alleen afbeeldingen, en alleen direct in die map: het formulier zelf (PDF)
+ * en wat in een dieper gelegen map staat, blijft waar het is.
+ */
+export function kiesOpnameFotos<T extends { pad: string; naam: string }>(bestanden: T[]): T[] {
+  return bestanden.filter((b) => {
+    const delen = b.pad.split("/");
+    return delen.length === 2 && delen[0].toLowerCase() === OPNAMEMAP && FOTO.test(b.naam);
+  });
+}
+
+/** De submap voor de puntenwolk. */
+export const SCANMAP = "laz";
+
+/** Wat hier als scan geldt: de puntenwolk zelf, niets anders. */
+const SCAN = /\.(las|laz)$/i;
+
+/**
+ * LAS- en LAZ-bestanden die ergens anders in de projectmap staan dan in "LAZ".
+ *
+ * Een scan in de map van MO of los in de projectmap telt voor de controle niet
+ * mee, en dan blijft het dossier op "LAZ-scan ontbreekt" staan terwijl de scan
+ * er is. Alleen .las en .laz: een zip of e57 kan van alles zijn.
+ */
+export function kiesScans<T extends { pad: string; naam: string }>(bestanden: T[]): T[] {
+  return bestanden.filter((b) => {
+    const eerste = b.pad.includes("/") ? b.pad.split("/")[0].toLowerCase() : null;
+    return eerste !== SCANMAP && SCAN.test(b.naam);
+  });
+}

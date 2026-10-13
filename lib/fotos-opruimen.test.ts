@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isProjectmap, kiesLosseFotos } from "@/lib/fotos-opruimen";
+import { isProjectmap, kiesLosseFotos, kiesOpnameFotos, kiesScans } from "@/lib/fotos-opruimen";
 
 /**
  * /api/intern/fotos-opruimen is de enige route in deze app die een bestand van
@@ -69,5 +69,34 @@ describe("isProjectmap", () => {
     expect(isProjectmap("/Automatie NEN2580/Balboastraat 12-3")).toBe(false);
     expect(isProjectmap("/Automatie Energielabels/Balboastraat 12-3/foto's")).toBe(false);
     expect(isProjectmap("/Automatie Energielabels/../Privé")).toBe(false);
+  });
+});
+
+describe("kiesOpnameFotos", () => {
+  it("pakt de gevelfoto's die direct in Opname formulier staan", () => {
+    const uit = kiesOpnameFotos([b("Opname formulier/IMG_1.jpeg"), b("opname formulier/gevel.HEIC")]);
+    expect(uit.map((x) => x.naam)).toEqual(["IMG_1.jpeg", "gevel.HEIC"]);
+  });
+
+  it("laat het formulier zelf en andere mappen staan", () => {
+    const uit = kiesOpnameFotos([
+      b("Opname formulier/Opnameformulier Lumièrestraat 88.pdf"),
+      b("Opname formulier/oud/IMG_2.jpg"),
+      b("Foto's/IMG_3.jpg"),
+      b("IMG_4.jpg"),
+    ]);
+    expect(uit).toEqual([]);
+  });
+});
+
+describe("kiesScans", () => {
+  it("pakt LAS- en LAZ-bestanden buiten de map LAZ", () => {
+    const uit = kiesScans([b("88.laz"), b("Van Eeghenstraat 12-1/scan.LAS"), b("Opname formulier/punt.las")]);
+    expect(uit.map((x) => x.naam)).toEqual(["88.laz", "scan.LAS", "punt.las"]);
+  });
+
+  it("laat staan wat al in LAZ staat, en alles wat geen LAS of LAZ is", () => {
+    const uit = kiesScans([b("LAZ/88.laz"), b("laz/sub/89.las"), b("88.zip"), b("scan.e57"), b("plattegrond.pdf")]);
+    expect(uit).toEqual([]);
   });
 });
