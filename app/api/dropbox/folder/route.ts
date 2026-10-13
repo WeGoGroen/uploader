@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { ensureProjectFolder, getSharedAccessToken, listFolderFiles, uploadFile } from "@/lib/dropbox";
-import { generate3dBagPdf, generateBagPdf } from "@/lib/bag-pdf";
+import { ensureProjectFolder, getSharedAccessToken } from "@/lib/dropbox";
+import { zorgVoorBagRapporten } from "@/lib/bag-rapporten";
 
 export const maxDuration = 300;
 
@@ -10,12 +10,9 @@ export const maxDuration = 300;
  * dus vóórdat de ClickUp-taak bestaat, zodat er al bestanden geüpload kunnen
  * worden terwijl de rest van het formulier nog wordt ingevuld.
  *
- * Voor de energielabel-flow worden hier ook automatisch twee officiële
- * rapporten in de map "BAG" gezet — het reguliere Kadaster BAG-PDF-rapport
- * (bagviewer.kadaster.nl) én een los 3D BAG-rapport met de 3DBAG-
- * hoogtegegevens (nok-/dakhoogte, bouwlagen). Elk maar één keer per adres:
- * bij een volgende opname op hetzelfde adres wordt een al aanwezig rapport
- * niet opnieuw gemaakt.
+ * Voor de energielabel-flow worden hier ook automatisch het BAG-rapport en het
+ * 3D BAG-rapport in de map "BAG" gezet (lib/bag-rapporten.ts). Best-effort: een
+ * mislukt rapport blokkeert het aanmaken van de projectmap nooit.
  */
 async function ensureBagPdfs(
   folderPath: string,
@@ -25,7 +22,6 @@ async function ensureBagPdfs(
   huisnummertoevoeging: string | null | undefined,
   straatEnNummer: string
 ) {
-  const bagFolder = `${folderPath}/BAG`;
   let accessToken: string;
   try {
     accessToken = await getSharedAccessToken();
@@ -36,47 +32,12 @@ async function ensureBagPdfs(
     });
     return;
   }
-
-  const existing = await listFolderFiles(accessToken, bagFolder).catch(() => []);
-  const hasMainReport = existing.some((f) => f.name.toLowerCase().includes("bag-rapport"));
-  const has3dReport = existing.some((f) => f.name.toLowerCase().includes("3d bag"));
-
-  await Promise.all([
-    hasMainReport
-      ? null
-      : generateBagPdf(postcode, huisnummer, huisletter, huisnummertoevoeging)
-          .then((pdf) => uploadFile(accessToken, `${bagFolder}/${straatEnNummer} - BAG-rapport.pdf`, pdf))
-          .catch((err) => {
-            // Best-effort: het BAG-rapport mag het aanmaken van de projectmap
-            // nooit blokkeren. Wél duidelijk en doorzoekbaar loggen (prefix
-            // "[BAG-PDF-ALERT]") zodat een terugkerende storing (bv. de
-            // Kadaster print-key die ooit roteert, of KADASTER_BAG_API_KEY die
-            // ontbreekt) opvalt in de Vercel-logs i.p.v. stilzwijgend te
-            // verdwijnen — er is bewust geen actieve meldingdienst
-            // (Slack/e-mail) gekoppeld, dus dit is de plek om op te controleren.
-            console.error("[BAG-PDF-ALERT] Genereren/uploaden van het BAG-rapport is mislukt", {
-              adres: straatEnNummer,
-              postcode,
-              huisnummer,
-              error: err instanceof Error ? { name: err.name, message: err.message } : err,
-            });
-          }),
-    has3dReport
-      ? null
-      : generate3dBagPdf(postcode, huisnummer, huisletter, huisnummertoevoeging)
-          .then((pdf) => {
-            if (!pdf) return; // geen 3D-reconstructie beschikbaar voor dit pand
-            return uploadFile(accessToken, `${bagFolder}/${straatEnNummer} - 3D BAG.pdf`, pdf);
-          })
-          .catch((err) => {
-            console.error("[BAG-PDF-ALERT] Genereren/uploaden van het 3D BAG-rapport is mislukt", {
-              adres: straatEnNummer,
-              postcode,
-              huisnummer,
-              error: err instanceof Error ? { name: err.name, message: err.message } : err,
-            });
-          }),
-  ]);
+  await zorgVoorBagRapporten(
+    accessToken,
+    folderPath,
+    { postcode, huisnummer, huisletter, huisnummertoevoeging },
+    straatEnNummer
+  );
 }
 
 export async function POST(request: Request) {

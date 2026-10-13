@@ -997,9 +997,14 @@ export async function getTemporaryLink(accessToken: string, path: string): Promi
  */
 export async function listFolderWithTemporaryLinks(
   accessToken: string,
-  folderPath: string
+  folderPath: string,
+  /** Alleen deze bestandsnamen (hoofdletterongevoelig); leeg = alles. */
+  alleen: string[] = []
 ): Promise<{ name: string; size: number; url: string | null }[]> {
-  const files = await listFolderFiles(accessToken, folderPath);
+  const gevraagd = new Set(alleen.map((n) => n.toLowerCase()));
+  const files = (await listFolderFiles(accessToken, folderPath)).filter(
+    (f) => gevraagd.size === 0 || gevraagd.has(f.name.toLowerCase())
+  );
   const uit: { name: string; size: number; url: string | null }[] = [];
   const GROEP = 6;
   for (let i = 0; i < files.length; i += GROEP) {
