@@ -21,14 +21,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }
 
-  const pad = new URL(request.url).searchParams.get("pad") ?? "";
+  const zoek = new URL(request.url).searchParams;
+  const pad = zoek.get("pad") ?? "";
+  /*
+    ?naam=… (herhaald): alleen voor deze bestanden een link. De Foto Edit Agent
+    vraagt per groep van een paar foto's om verse links; voor de hele map waren
+    dat er bij 150 foto's 150 per groep, en dat liep tegen de time-out aan.
+  */
+  const namen = zoek.getAll("naam").map((n) => n.trim()).filter(Boolean);
   if (!pad.startsWith("/")) {
     return NextResponse.json({ error: "pad ontbreekt" }, { status: 400 });
   }
 
   try {
     const token = await getSharedAccessToken();
-    const bestanden = await listFolderWithTemporaryLinks(token, pad);
+    const bestanden = await listFolderWithTemporaryLinks(token, pad, namen);
     return NextResponse.json({ pad, bestanden });
   } catch (err) {
     return NextResponse.json(
