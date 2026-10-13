@@ -1,4 +1,4 @@
-import { DROPBOX_API_BASE, DropboxApiError, ARCHIEF_MAP } from "@/lib/dropbox";
+import { DROPBOX_API_BASE, DropboxApiError, ARCHIEF_MAP, isMaandMap } from "@/lib/dropbox";
 import { mapnaamPastBijAdres, parseProjectFolderName } from "@/lib/projectmap-match";
 
 /**
@@ -126,11 +126,19 @@ export async function zoekKandidaten(
       if (!tussen) continue;
       // Bij de automatie-map is de bovenste lijst al de lijst met projecten;
       // bij de maandindeling moet er nog een niveau bij.
-      const regels = locatie.perMaand ? await lijst(accessToken, tussen) : bovenste;
+      let regels = locatie.perMaand ? await lijst(accessToken, tussen) : bovenste;
+      // Het archief is sinds 13-10-2026 ook per maand ingedeeld; beide vormen tellen.
+      if (locatie.herkomst === "archief") {
+        for (const maand of bovenste) {
+          if (maand[".tag"] === "folder" && maand.path_display && maand.name && isMaandMap(maand.name)) {
+            regels = [...regels, ...(await lijst(accessToken, maand.path_display))];
+          }
+        }
+      }
       for (const r of regels) {
         if (r[".tag"] !== "folder" || !r.name || !r.path_display) continue;
         // Het archief is zelf geen projectmap.
-        if (r.name.toLowerCase() === ARCHIEF_MAP.toLowerCase()) continue;
+        if (r.name.toLowerCase() === ARCHIEF_MAP.toLowerCase() || isMaandMap(r.name)) continue;
         if (!mapnaamPastBijAdres(r.name, doel)) continue;
         gevonden.push({
           pad: r.path_display,

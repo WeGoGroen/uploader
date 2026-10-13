@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
+import { isMaandMap } from "@/lib/archief-maand";
 import {
   createTemporaryUploadLink,
   folderExists,
@@ -42,7 +43,9 @@ function isProjectmap(pad: string): boolean {
   const delen = pad.split("/").filter(Boolean);
   // ["Automatie Energielabels", "<adres>"] of ["Automatie Energielabels", "Afgerond", "<adres>"]
   if (delen.length === 2) return delen[1] !== "Afgerond";
-  if (delen.length === 3) return delen[1] === "Afgerond";
+  if (delen.length === 3) return delen[1] === "Afgerond" && !isMaandMap(delen[2]);
+  // ["Automatie Energielabels", "Afgerond", "2026-10 Oktober", "<adres>"]
+  if (delen.length === 4) return delen[1] === "Afgerond" && isMaandMap(delen[2]);
   return false;
 }
 
