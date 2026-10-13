@@ -7,12 +7,22 @@ import {
   leesProjectmap,
   verplaats,
 } from "@/lib/dropbox";
-import { FOTOMAP, HOOFDMAP, isProjectmap, kiesLosseFotos } from "@/lib/fotos-opruimen";
+import {
+  FOTOMAP,
+  HOOFDMAP,
+  SCANMAP,
+  isProjectmap,
+  kiesLosseFotos,
+  kiesOpnameFotos,
+  kiesScans,
+} from "@/lib/fotos-opruimen";
 
 export const maxDuration = 300;
 
 /**
- * De losse foto's uit een projectmap in de submap "foto's" zetten.
+ * De losse foto's uit een projectmap in de submap "foto's" zetten — en sinds
+ * 13 oktober ook de gevelfoto's uit "Opname formulier" en de LAS/LAZ-scans
+ * die buiten "LAZ" staan (zie lib/fotos-opruimen.ts).
  *
  * Waarvoor: wie foto's aanlevert sleept ze in de projectmap en niet in de
  * submap. Voor de controle in het control center zijn ze dan onvindbaar — die
@@ -24,10 +34,11 @@ export const maxDuration = 300;
  *
  *  1. Alleen een projectmap onder "Automatie Energielabels" — direct, of in het
  *     archief "Afgerond".
- *  2. Alleen bestanden die **los in de projectmap** liggen. Wat in een submap
- *     staat blijft staan, ook als het een foto is: de oplevermap van MO
- *     Consultancy en "onderbouwing" zijn andermans werk, en daar foto's
- *     weghalen is een oplevering stukmaken.
+ *  2. Foto's alleen als ze **los in de projectmap** of direct in "Opname
+ *     formulier" liggen. Wat in een andere submap staat blijft staan, ook als
+ *     het een foto is: de oplevermap van MO Consultancy en "onderbouwing" zijn
+ *     andermans werk. Scans (.las/.laz) wel van overal, want die horen
+ *     nergens anders dan in "LAZ".
  *  3. Alleen afbeeldingen, op extensie. Nooit een PDF, nooit een scan, nooit
  *     iets waarvan de soort niet vaststaat — een verdwaald bestand verplaatsen
  *     is erger dan het laten liggen, want in "foto's" kijkt niemand ernaar.
@@ -86,91 +97,120 @@ export async function POST(request: Request) {
     );
   }
 
-  const los = kiesLosseFotos(inhoud.bestanden);
+  /*
+    Drie stromen, elk met dezelfde vier grenzen hierboven:
+     - losse foto's in de projectmap        → "foto's"
+     - gevelfoto's in "Opname formulier"    → "foto's"
+     - LAS/LAZ buiten "LAZ"                 → "LAZ"
+  */
+  const fotos = [...kiesLosseFotos(inhoud.bestanden), ...kiesOpnameFotos(inhoud.bestanden)];
+  const scans = kiesScans(inhoud.bestanden);
 
-  // Wat er al in "foto's" staat, op kleine letters: Dropbox is niet
+  const fotoUit = await verhuis(token, inhoud, fotos, FOTOMAP, droog);
+  if ("fout" in fotoUit) return NextResponse.json({ error: fotoUit.fout }, { status: 502 });
+  const scanUit = await verhuis(token, inhoud, scans, SCANMAP, droog, "LAZ");
+  if ("fout" in scanUit) return NextResponse.json({ error: scanUit.fout }, { status: 502 });
+
+  const { verplaatst, overgeslagen, mislukt } = fotoUit;
+  const totaal = verplaatst.length + scanUit.verplaatst.length;
+  return NextResponse.json({
+    ok: mislukt.length === 0 && scanUit.mislukt.length === 0,
+    pad: inhoud.pad,
+    droog,
+    fotomapBestond: fotoUit.mapBestond,
+    verplaatst,
+    overgeslagen,
+    mislukt,
+    scans: { verplaatst: scanUit.verplaatst, overgeslagen: scanUit.overgeslagen, mislukt: scanUit.mislukt },
+    reden:
+      totaal > 0
+        ? [
+            verplaatst.length > 0 ? `${verplaatst.length} foto('s) ${droog ? "te verplaatsen" : "verplaatst"} naar ${FOTOMAP}` : null,
+            scanUit.verplaatst.length > 0
+              ? `${scanUit.verplaatst.length} scan(s) ${droog ? "te verplaatsen" : "verplaatst"} naar LAZ`
+              : null,
+          ]
+            .filter(Boolean)
+            .join("; ")
+        : "niets te verplaatsen",
+  });
+}
+
+/**
+ * Een lijst bestanden in één submap van de projectmap zetten, zonder ooit te
+ * overschrijven. De submap wordt alleen aangemaakt als er ook iets in moet.
+ */
+async function verhuis(
+  token: string,
+  inhoud: { pad: string; mappen: string[]; bestanden: { pad: string; naam: string }[] },
+  bestanden: { pad: string; naam: string }[],
+  submap: string,
+  droog: boolean,
+  nieuweNaam: string = submap
+): Promise<
+  | {
+      mapBestond: boolean;
+      verplaatst: string[];
+      overgeslagen: { naam: string; reden: string }[];
+      mislukt: { naam: string; reden: string }[];
+    }
+  | { fout: string }
+> {
+  // Wat er al in de submap staat, op kleine letters: Dropbox is niet
   // kapitaalgevoelig, dus "IMG_1.JPG" en "img_1.jpg" zijn hetzelfde bestand.
-  const fotomap = inhoud.mappen.find((m) => m.toLowerCase() === FOTOMAP);
+  const bestaand = inhoud.mappen.find((m) => m.toLowerCase() === submap);
   const alAanwezig = new Set(
     inhoud.bestanden
-      .filter((b) => b.pad.toLowerCase().startsWith(`${FOTOMAP}/`))
+      .filter((b) => b.pad.toLowerCase().startsWith(`${submap}/`))
       .map((b) => b.naam.toLowerCase())
   );
+  const uit = {
+    mapBestond: Boolean(bestaand),
+    verplaatst: [] as string[],
+    overgeslagen: [] as { naam: string; reden: string }[],
+    mislukt: [] as { naam: string; reden: string }[],
+  };
+  if (bestanden.length === 0) return uit;
 
-  const verplaatst: string[] = [];
-  const overgeslagen: { naam: string; reden: string }[] = [];
-  const mislukt: { naam: string; reden: string }[] = [];
-
-  if (los.length === 0) {
-    return NextResponse.json({
-      ok: true,
-      pad: inhoud.pad,
-      droog,
-      fotomapBestond: Boolean(fotomap),
-      verplaatst,
-      overgeslagen,
-      mislukt,
-      reden: "er liggen geen losse foto's in de projectmap",
-    });
-  }
-
-  // De submap kan ontbreken; dan maken we hem. Alleen als er ook werkelijk iets
-  // in moet — een lege "foto's" aanmaken zet een vinkje dat niets dekt.
-  const doelmap = fotomap ?? FOTOMAP;
-  if (!fotomap && !droog) {
+  const doelmap = bestaand ?? nieuweNaam;
+  if (!bestaand && !droog) {
     try {
       await createFolder(token, `${inhoud.pad}/${doelmap}`);
     } catch (err) {
       // Bestaat hij inmiddels toch (andere ronde, andere sessie), dan is dat geen fout.
       const bestaat = await folderExists(token, `${inhoud.pad}/${doelmap}`).catch(() => false);
       if (!bestaat) {
-        return NextResponse.json(
-          {
-            error: `kon de submap ${doelmap} niet aanmaken: ${
-              err instanceof Error ? err.message.slice(0, 160) : "onbekende fout"
-            }`,
-          },
-          { status: 502 }
-        );
+        return {
+          fout: `kon de submap ${doelmap} niet aanmaken: ${
+            err instanceof Error ? err.message.slice(0, 160) : "onbekende fout"
+          }`,
+        };
       }
     }
   }
 
-  for (const foto of los) {
-    if (alAanwezig.has(foto.naam.toLowerCase())) {
-      overgeslagen.push({ naam: foto.naam, reden: `er staat al een ${foto.naam} in ${doelmap}` });
+  for (const bestand of bestanden) {
+    if (alAanwezig.has(bestand.naam.toLowerCase())) {
+      uit.overgeslagen.push({ naam: bestand.naam, reden: `er staat al een ${bestand.naam} in ${doelmap}` });
       continue;
     }
+    // Ook in een droge ronde bijhouden, zodat twee gelijknamige bestanden niet
+    // allebei als verplaatsbaar worden gemeld.
+    alAanwezig.add(bestand.naam.toLowerCase());
     if (droog) {
-      verplaatst.push(foto.naam);
-      // Ook in een droge ronde bijhouden, zodat twee gelijknamige losse
-      // bestanden niet allebei als verplaatsbaar worden gemeld.
-      alAanwezig.add(foto.naam.toLowerCase());
+      uit.verplaatst.push(bestand.pad);
       continue;
     }
     try {
-      await verplaats(token, `${inhoud.pad}/${foto.naam}`, `${inhoud.pad}/${doelmap}/${foto.naam}`);
-      verplaatst.push(foto.naam);
-      alAanwezig.add(foto.naam.toLowerCase());
+      await verplaats(token, `${inhoud.pad}/${bestand.pad}`, `${inhoud.pad}/${doelmap}/${bestand.naam}`);
+      uit.verplaatst.push(bestand.pad);
     } catch (err) {
-      mislukt.push({
-        naam: foto.naam,
+      alAanwezig.delete(bestand.naam.toLowerCase());
+      uit.mislukt.push({
+        naam: bestand.pad,
         reden: err instanceof Error ? err.message.slice(0, 160) : "onbekende fout",
       });
     }
   }
-
-  return NextResponse.json({
-    ok: mislukt.length === 0,
-    pad: inhoud.pad,
-    droog,
-    fotomapBestond: Boolean(fotomap),
-    verplaatst,
-    overgeslagen,
-    mislukt,
-    reden:
-      verplaatst.length > 0
-        ? `${verplaatst.length} foto('s) ${droog ? "te verplaatsen" : "verplaatst"} naar ${doelmap}`
-        : "niets te verplaatsen",
-  });
+  return uit;
 }
