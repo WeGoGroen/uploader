@@ -284,7 +284,7 @@ export async function leesOrderPad(orderId: number): Promise<string | null> {
 }
 
 /** De bestandsnaam zit in de downloadlink die Mediatask teruggeeft. */
-function naamUitUrl(url: string): string | null {
+export function naamUitUrl(url: string): string | null {
   const m = /filename%3D%22([^%]+)%22/.exec(url) ?? /filename="([^"]+)"/.exec(url);
   return m ? decodeURIComponent(m[1]) : null;
 }
@@ -427,4 +427,28 @@ export async function markeerScansGoed(
   const waarde: ScansGoedgekeurd = { puntenwolkIds: ids, door, op: new Date().toISOString() };
   await redis.set(`${GOED_PREFIX}${orderId}`, JSON.stringify(waarde));
   return { gemarkeerd: kapot.length, alAlsnogVerwerkt: false };
+}
+
+/**
+ * Afgekeurde puntenwolken die we zojuist vervangen hebben, op id afmelden.
+ *
+ * Na opnieuw versturen blijft de oude, afgekeurde puntenwolk aan de order
+ * hangen — Mediatask haalt hem niet weg. Zonder deze afmelding ziet de
+ * volgende controle hem weer als afgekeurd en stuurt dezelfde scan nóg een
+ * keer. Bewust op id en niet "alles wat nu geen beelden heeft" zoals
+ * markeerScansGoed: de zojuist verstuurde vervanger heeft ook nog geen
+ * beelden, en die mag niet onzichtbaar worden als hij straks óók wordt
+ * afgekeurd.
+ */
+export async function markeerVervangen(orderId: number, ids: number[], door: string | null): Promise<void> {
+  if (ids.length === 0) return;
+  const redis = getOptionalRedis();
+  if (!redis) return;
+  const bestaand = await leesScansGoedgekeurd(orderId);
+  const waarde: ScansGoedgekeurd = {
+    puntenwolkIds: Array.from(new Set([...(bestaand?.puntenwolkIds ?? []), ...ids])),
+    door: door ?? bestaand?.door ?? null,
+    op: new Date().toISOString(),
+  };
+  await redis.set(`${GOED_PREFIX}${orderId}`, JSON.stringify(waarde)).catch(() => {});
 }
