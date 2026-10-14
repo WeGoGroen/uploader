@@ -1930,44 +1930,52 @@ export async function archiveerProjectmappen(
   // Dezelfde verplaatsing, andere kant op. Terughalen is niet zeldzaam: een
   // map die op de verkeerde grond is gearchiveerd (bv. een status die toch
   // niet als afgerond telt) hoort terug te kunnen zonder handwerk in Dropbox.
-  const vanMap = opties.terug ? archief : root;
+  /*
+    Waar de map nu staat. Bij een maand ook direct in het archief zelf: een
+    project dat vóór de maandindeling al in "Afgerond" was gezet en nu pas
+    afgesloten wordt, hoort in de maand van afsluiten — anders blijft het
+    tussen het oude archief staan (Oudezijds Kolk 1 T, 13-10-2026).
+  */
+  const vanMappen = opties.terug ? [archief] : maand ? [root, `${root}/${ARCHIEF_MAP}`] : [root];
   const overgeslagen: { pad: string; reden: string }[] = [];
   const mislukt: { pad: string; reden: string }[] = [];
 
   // De echte mappen ophalen: de naam in Dropbox is leidend, niet het pad dat de
   // aanroeper meestuurt. Scheelt gedoe met hoofdletters en oude statusbolletjes.
   const bestaand = new Map<string, string>();
-  let cursor: string | null = null;
-  for (;;) {
-    const res: Response = await fetch(
-      `${DROPBOX_API_BASE}/files/list_folder${cursor ? "/continue" : ""}`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify(cursor ? { cursor } : { path: vanMap, recursive: false }),
-      }
-    );
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      // Nog geen archiefmap: dan valt er ook niets terug te halen.
-      if (res.status === 409 && body.includes("path/not_found")) break;
-      throw new DropboxApiError(res.status, `Dropbox list_folder failed: ${res.status} ${body}`);
-    }
-    const data = (await res.json()) as {
-      entries: { ".tag": string; name: string; path_display?: string; path_lower?: string }[];
-      cursor: string;
-      has_more: boolean;
-    };
-    for (const entry of data.entries) {
-      if (entry[".tag"] !== "folder") continue;
-      if (entry.name.toLowerCase() === ARCHIEF_MAP.toLowerCase()) continue;
-      bestaand.set(
-        (entry.path_lower ?? `${vanMap}/${entry.name}`.toLowerCase()),
-        entry.path_display ?? `${vanMap}/${entry.name}`
+  for (const vanMap of vanMappen) {
+    let cursor: string | null = null;
+    for (;;) {
+      const res: Response = await fetch(
+        `${DROPBOX_API_BASE}/files/list_folder${cursor ? "/continue" : ""}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify(cursor ? { cursor } : { path: vanMap, recursive: false }),
+        }
       );
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        // Nog geen archiefmap: dan valt er ook niets terug te halen.
+        if (res.status === 409 && body.includes("path/not_found")) break;
+        throw new DropboxApiError(res.status, `Dropbox list_folder failed: ${res.status} ${body}`);
+      }
+      const data = (await res.json()) as {
+        entries: { ".tag": string; name: string; path_display?: string; path_lower?: string }[];
+        cursor: string;
+        has_more: boolean;
+      };
+      for (const entry of data.entries) {
+        if (entry[".tag"] !== "folder") continue;
+        if (entry.name.toLowerCase() === ARCHIEF_MAP.toLowerCase() || isMaandMap(entry.name)) continue;
+        bestaand.set(
+          (entry.path_lower ?? `${vanMap}/${entry.name}`.toLowerCase()),
+          entry.path_display ?? `${vanMap}/${entry.name}`
+        );
+      }
+      if (!data.has_more) break;
+      cursor = data.cursor;
     }
-    if (!data.has_more) break;
-    cursor = data.cursor;
   }
 
   const teVerplaatsen: { van: string; naar: string }[] = [];
