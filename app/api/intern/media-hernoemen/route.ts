@@ -6,7 +6,7 @@ import { isMediaProjectmap, mediaHernoemPaden } from "@/lib/media-pad";
 export const maxDuration = 120;
 
 /**
- * Eindfoto's hernoemen binnen OUT/Photo's: `{ projectmap, submap, hernoem: [{ van, naar }] }`.
+ * Eindfoto's hernoemen binnen OUT/Photo's of OUT/360: `{ projectmap, submap, hernoem: [{ van, naar }] }`.
  *
  * Het control center zet de eindfoto's van Imagen om naar "<adres> - <ruimte>
  * <nummer>.jpg" zodra bekend is wat erop staat. Als reeks en in twee stappen,
@@ -24,7 +24,7 @@ export const maxDuration = 120;
  * vijftig foto's binnen seconden klaar zijn.
  *
  * Grenzen, net als bij media-plaatsen: alleen een projectmap onder Automatie
- * Media, alleen in OUT/Photo's, alleen gewone beeldnamen, nooit naar een naam
+ * Media, alleen in OUT/Photo's of OUT/360, alleen gewone beeldnamen, nooit naar een naam
  * die al bezet is door een bestand dat zelf niet meeverhuist.
  *
  * Het antwoord zegt per regel of hij gelukt is. Halverwege mislukt is geen
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       {
         error:
           `"${lijst[fout].van}" → "${lijst[fout].naar}" mag niet: alleen gewone beeldnamen, ` +
-          `en alleen binnen OUT/Photo's`,
+          `en alleen binnen OUT/Photo's of OUT/360`,
       },
       { status: 400 }
     );

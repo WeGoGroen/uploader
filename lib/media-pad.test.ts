@@ -359,8 +359,15 @@ describe("mediaHernoemPaden", () => {
     });
   });
 
+  it("hernoemt binnen OUT/360 naar een tekst met nummer", () => {
+    expect(mediaHernoemPaden(adres, "OUT/360", "AEB_20261012_150737_000001_Output.jpg", "Dam 5 1.jpg")).toEqual({
+      van: `${adres}/OUT/360/AEB_20261012_150737_000001_Output.jpg`,
+      naar: `${adres}/OUT/360/Dam 5 1.jpg`,
+    });
+  });
+
   it("weigert elke andere map — ook de andere uitvoermappen en de invoer", () => {
-    for (const sub of ["OUT/360", "OUT/Video", "In/Raw/Photo's", "OUT/_controle/Photo's"]) {
+    for (const sub of ["OUT/_controle/360", "OUT/360/review", "OUT/Video", "In/Raw/360", "In/Raw/Photo's", "OUT/_controle/Photo's"]) {
       expect(mediaHernoemPaden(adres, sub, "a.jpg", "b.jpg")).toBeNull();
     }
   });
