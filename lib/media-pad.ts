@@ -270,16 +270,21 @@ export function mediaVrijgeefPaden(
 }
 
 /**
- * De mappen waarin een machine bestanden mag hernoemen: alleen de uitvoer van
- * de fotografie. Daar zet het control center de eindfoto's om naar
- * "<adres> - <ruimte> <nummer>.jpg" zodra bekend is wat erop staat.
+ * De mappen waarin een machine bestanden mag hernoemen: de uitvoer van de
+ * fotografie en van de 360's. In OUT/Photo's zet het control center de
+ * eindfoto's om naar "<adres> - <ruimte> <nummer>.jpg" zodra bekend is wat
+ * erop staat; in OUT/360 geeft de naamknop op de 360-projectpagina de
+ * rondgangen "<tekst> 1.jpg", "<tekst> 2.jpg", …
  *
- * Een eigen, korte lijst en geen hergebruik van MEDIA_SUBMAPPEN: hernoemen in
- * OUT/360 of OUT/Video zou de bestandsnamen breken waar de nadir- en de
- * video-agent hun werk aan terugvinden. En nooit in de invoermap — daar staan
- * de originelen onder de naam van de camera.
+ * Een eigen, korte lijst en geen hergebruik van MEDIA_SUBMAPPEN. OUT/360 mag
+ * alleen omdat het control center na het hernoemen zelf het nieuwe pad in
+ * nadir_patches.uit_pad zet — anders vond de nadir-agent zijn resultaat niet
+ * meer terug. OUT/_controle/360 niet: wat daar staat is nog niet gekeurd en
+ * schuift onder zijn eigen naam door. OUT/Video niet, daar vindt de
+ * video-agent zijn werk aan de naam terug. En nooit in de invoermap — daar
+ * staan de originelen onder de naam van de camera.
  */
-export const HERNOEM_SUBMAPPEN = ["OUT/Photo's"] as const;
+export const HERNOEM_SUBMAPPEN = ["OUT/Photo's", "OUT/360"] as const;
 
 /** Van en naar binnen dezelfde map, of null als een van de delen niet deugt. */
 export function mediaHernoemPaden(
