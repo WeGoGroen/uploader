@@ -88,7 +88,7 @@ function isRommel(naam: string): boolean {
  * de map in en niet de rij van de agent.
  */
 export function isPanorama(naam: string): boolean {
-  return /\.(jpe?g|png|tiff?|webp|insp|heic|heif)$/i.test(naam);
+  return /\.(jpe?g|png|tiff?|webp|insp|heic|heif|dng)$/i.test(naam);
 }
 
 /**
@@ -99,6 +99,9 @@ export function herkenOpNaam(naam: string): Herkenning | "kijken" {
   if (PROXY.test(naam)) return { soort: null, reden: "voorbeeldbestand van de camera" };
   if (INSTA_VIDEO.test(naam)) return { soort: "360", reden: "360-video (Insta360)" };
   if (INSTA_FOTO.test(naam)) return { soort: "360", reden: "panorama (Insta360)" };
+  // Een DNG gaat altijd naar 360, vóór de RAW-regel — net als in het BCC
+  // (lib/media/herkennen.ts). De nadir-agent ontwikkelt hem zelf.
+  if (/\.dng$/i.test(naam)) return { soort: "360", reden: "DNG (panorama)" };
   if (VIDEO.test(naam)) return { soort: "video", reden: "clip" };
   if (ANDERE_VIDEO.test(naam)) return { soort: null, reden: "video, maar geen MP4 of MOV" };
   if (BEELD.test(naam)) return "kijken";
