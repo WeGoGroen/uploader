@@ -155,7 +155,15 @@ export async function POST(request: Request) {
 
     // Lukte de eindnaam niet, dan terug naar de oude naam: nooit een foto onder een tijdelijke naam laten staan.
     if (terug.length > 0) {
-      await verplaatsBatch(token, terug.map((i) => ({ van: tijdelijk[i], naar: reeks[i].van }))).catch(() => []);
+      const teruggezet = await verplaatsBatch(token, terug.map((i) => ({ van: tijdelijk[i], naar: reeks[i].van }))).catch(
+        () => terug.map(() => ({ fout: "terugzetten mislukt" }) as const)
+      );
+      // Ook dat niet gelukt: zeg dan waar hij nu staat, anders zoekt iemand een naam die niet meer bestaat.
+      terug.forEach((i, j) => {
+        if (teruggezet[j] === "verplaatst") return;
+        const naam = tijdelijk[i].slice(tijdelijk[i].lastIndexOf("/") + 1);
+        uitslag[i] = { ...uitslag[i], fout: `${uitslag[i].fout ?? "mislukt"} — staat nu als ${naam}` };
+      });
     }
   } catch (err) {
     return NextResponse.json(
