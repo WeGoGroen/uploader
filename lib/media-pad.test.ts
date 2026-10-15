@@ -335,6 +335,18 @@ describe("In/Raw/Photo's — foto's aangeleverd via Media → Uploaden in het co
     expect(mediaDoelPad(adres, "In/Raw/Video", "VID_20261011_1.insv", "aanlevering")).toBeNull();
     expect(mediaDoelPad(adres, "OUT/360", "VID_20261011_1.insv")).toBeNull();
   });
+
+  it("laat een DNG-panorama alleen als aanlevering in In/Raw/360 toe", () => {
+    expect(mediaDoelPad(adres, "In/Raw/360", "AEB_20261012_150737_000001_360.dng", "aanlevering")).toBe(
+      `${adres}/In/Raw/360/AEB_20261012_150737_000001_360.dng`
+    );
+    expect(mediaDoelPad(adres, "In/Raw/360", "PANO.DNG", "aanlevering")).not.toBeNull();
+    // Nooit als uitvoer: de agent levert JPEG op.
+    expect(mediaDoelPad(adres, "OUT/360", "PANO.dng")).toBeNull();
+    expect(mediaDoelPad(adres, "OUT/_controle/360", "PANO.dng")).toBeNull();
+    // Andere RAW blijft geweigerd in 360.
+    expect(mediaDoelPad(adres, "In/Raw/360", "DSC01234.ARW", "aanlevering")).toBeNull();
+  });
 });
 
 describe("mediaHernoemPaden", () => {

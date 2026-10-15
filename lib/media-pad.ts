@@ -129,6 +129,18 @@ const FOTO_INVOER = "in/raw/photo's";
  */
 const VIDEO_360 = /\.insv$/i;
 
+/**
+ * Een DNG-panorama, alleen als aanlevering in In/Raw/360.
+ *
+ * Gestitchte rondgangen komen ook als DNG binnen (Kandao 360 Studio,
+ * Insta360 Studio, Lightroom). De nadir-agent in het control center ontwikkelt
+ * ze zelf tot JPEG (lib/media/nadir/dng.ts) en Media → Uploaden daar stuurt
+ * elke DNG naar 360 — zonder deze regel werd de kopie hier geweigerd met
+ * "past niet in In/Raw/360". Niet bij BEELD: een DNG is geen uitvoer, dus in
+ * OUT/360 hoort hij nooit.
+ */
+const DNG_360 = /\.dng$/i;
+
 /** Wat de videomontage oplevert. Alleen in OUT/Video — zie magInSubmap. */
 const VIDEO = /\.(mp4|mov)$/i;
 
@@ -218,7 +230,7 @@ export function magInSubmap(naam: string, submap: string): boolean {
   const map = submap.toLowerCase();
   if (VIDEO_SUBMAPPEN.includes(map)) return VIDEO.test(naam);
   if (map === FOTO_INVOER) return BEELD.test(naam) || RAW.test(naam);
-  if (map === "in/raw/360") return BEELD.test(naam) || VIDEO_360.test(naam);
+  if (map === "in/raw/360") return BEELD.test(naam) || VIDEO_360.test(naam) || DNG_360.test(naam);
   return BEELD.test(naam);
 }
 
