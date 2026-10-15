@@ -1804,6 +1804,50 @@ export async function verplaatsBatch(
   paren: { van: string; naar: string }[],
   maxWachtMs = 45_000
 ): Promise<VerplaatsUitkomst[]> {
+  /*
+    Met herhaling bij "te veel schrijfacties". Dropbox geeft dat (429 of
+    too_many_write_operations per regel) zodra er in hetzelfde account iets
+    anders tegelijk schrijft — de 360-agent die een rondgang vrijgeeft, een
+    upload. Op 15 oktober bleven zo zeven 360's van Gustav Mahlerlaan onder hun
+    tijdelijke naam ".hernoem-…" staan: stap 2 werd geweigerd, en het
+    terugzetten ook. Zo'n weigering is tijdelijk; even wachten en dezelfde
+    regels opnieuw is het hele antwoord.
+  */
+  const uit: VerplaatsUitkomst[] = paren.map(() => ({ fout: "niet geprobeerd" }));
+  let open = paren.map((_, i) => i);
+  const pauzes = [1500, 4000, 8000];
+  for (let poging = 0; open.length > 0; poging++) {
+    let ronde: VerplaatsUitkomst[];
+    try {
+      ronde = await verplaatsBatchEenmaal(accessToken, open.map((i) => paren[i]), maxWachtMs);
+    } catch (err) {
+      if (!isTeVeelSchrijven(err) || poging >= pauzes.length) throw err;
+      await new Promise((r) => setTimeout(r, pauzes[poging]));
+      continue;
+    }
+    const opnieuw: number[] = [];
+    open.forEach((i, j) => {
+      uit[i] = ronde[j];
+      const u = ronde[j];
+      if (typeof u === "object" && /too_many_write_operations/.test(u.fout)) opnieuw.push(i);
+    });
+    if (opnieuw.length === 0 || poging >= pauzes.length) break;
+    await new Promise((r) => setTimeout(r, pauzes[poging]));
+    open = opnieuw;
+  }
+  return uit;
+}
+
+function isTeVeelSchrijven(err: unknown): boolean {
+  if (err instanceof DropboxApiError && err.status === 429) return true;
+  return err instanceof Error && /too_many_write_operations|too_many_requests/.test(err.message);
+}
+
+async function verplaatsBatchEenmaal(
+  accessToken: string,
+  paren: { van: string; naar: string }[],
+  maxWachtMs: number
+): Promise<VerplaatsUitkomst[]> {
   if (paren.length === 0) return [];
   const res = await dropboxPost(accessToken, "/files/move_batch_v2", {
     entries: paren.map((p) => ({ from_path: p.van, to_path: p.naar })),
