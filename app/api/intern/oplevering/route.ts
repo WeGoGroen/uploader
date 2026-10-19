@@ -6,7 +6,9 @@ import {
   deleteFile,
   getOrCreateSharedLink,
   getSharedAccessToken,
+  isTeVeelSchrijven,
   listFolderFiles,
+  retryAfterUit,
   sanitizePathSegment,
   saveUrl,
   uploadFile,
@@ -34,7 +36,11 @@ export const maxDuration = 300;
 const KANTOORBESTANDEN = /\.(docx?|xlsx?|xlsm|csv)$/i;
 
 const WACHT_MS = 2000;
-const MAX_RONDES = 60; // 2 minuten per bestand; daarna is er iets echt mis
+/** Hoe lang we de save_url-opdrachten samen volgen; daarna halen we zelf op.
+    Ruim binnen maxDuration, met tijd over voor opruimen, controleren en de
+    link. Stond op 60 rondes per bestand, en die liepen naast elkaar: ook toen
+    ongeveer twee minuten. */
+const MAX_VOLGEN_MS = 120_000;
 
 async function wacht(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -105,6 +111,32 @@ function bestandsnaam(url: string, terugval: string): string {
 }
 
 export async function POST(request: Request) {
+  try {
+    return await verwerk(request);
+  } catch (err) {
+    /*
+      Een fout die hier toch nog uitkomt, met naam en reden terug in plaats van
+      een kale 500.
+
+      Vroeger gaf deze route bij elke onverwachte fout een lege 500, en dan zag
+      het control center niet of Dropbox het te druk had (wachten helpt) of dat
+      er iets echt stuk was. Bij te-druk een 429 met de retry_after van
+      Dropbox, zodat de aanroeper weet hoe lang hij moet wachten.
+    */
+    const melding = err instanceof Error ? err.message : String(err);
+    console.error(err);
+    if (isTeVeelSchrijven(err)) {
+      const na = retryAfterUit(melding) ?? 10;
+      return NextResponse.json(
+        { error: "dropbox_te_druk", retry_after: na, detail: melding.slice(0, 300) },
+        { status: 429, headers: { "Retry-After": String(na) } }
+      );
+    }
+    return NextResponse.json({ error: "oplevering_mislukt", detail: melding.slice(0, 300) }, { status: 500 });
+  }
+}
+
+async function verwerk(request: Request): Promise<Response> {
   if (!isInternRequest(request)) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }
@@ -273,29 +305,50 @@ export async function POST(request: Request) {
     const zelfDoen: { naam: string; url: string }[] = [];
 
     /**
-     * Alle banen tegelijk volgen in plaats van één voor één.
+     * Alle banen in één lus volgen: per ronde elke openstaande baan één keer
+     * vragen, dan WACHT_MS rust.
      *
-     * Sequentieel wachten stapelde: bij drieëntwintig bestanden van elk een
-     * paar seconden liep de route tegen zijn tijdslimiet en gaf een 500. De
-     * banen lopen bij Dropbox toch al naast elkaar; alleen ons wachten was
-     * serieel.
+     * Eerst volgde elke baan zichzelf, allemaal tegelijk om de twee seconden.
+     * Dat scheelde tijd tegenover één voor één wachten, maar bij een map vol
+     * grote bestanden (pointclouds) waren dat zoveel vragen per seconde dat
+     * Dropbox met too_many_requests antwoordde — en dat werd een kale 500.
+     * Eén lus houdt het tempo bij één vraag tegelijk, en een 429 betekent hier
+     * wachten zoals Dropbox vraagt, niet opgeven. De klok loopt over de hele
+     * lus, zodat de route binnen maxDuration blijft.
      */
-    await Promise.all(
-      banen
-        .filter((b) => b.jobId)
-        .map(async (baan) => {
-          let ronde = 0;
-          for (;;) {
-            const { status } = await checkSaveUrlJob(token, baan.jobId!);
-            if (status === "complete") return;
-            if (status === "failed" || ++ronde > MAX_RONDES) {
-              zelfDoen.push({ naam: baan.naam, url: baan.url });
-              return;
-            }
-            await wacht(WACHT_MS);
-          }
-        })
-    );
+    let open = banen.filter((b) => b.jobId);
+    const tot = Date.now() + MAX_VOLGEN_MS;
+    while (open.length > 0) {
+      const nogOpen: typeof open = [];
+      for (const baan of open) {
+        if (Date.now() > tot) {
+          nogOpen.push(baan);
+          continue;
+        }
+        try {
+          const { status } = await checkSaveUrlJob(token, baan.jobId!);
+          if (status === "failed") zelfDoen.push({ naam: baan.naam, url: baan.url });
+          else if (status !== "complete") nogOpen.push(baan);
+        } catch (err) {
+          if (!isTeVeelSchrijven(err)) throw err;
+          // dropboxPost heeft al gewacht en het een paar keer opnieuw
+          // geprobeerd; nog steeds te druk. Volgende ronde weer vragen.
+          nogOpen.push(baan);
+          const na = retryAfterUit(err instanceof Error ? err.message : "") ?? 10;
+          await wacht(na * 1000);
+        }
+      }
+      open = nogOpen;
+      if (open.length === 0) break;
+      if (Date.now() > tot) {
+        // Zoals altijd: wat na de volgtijd nog niet klaar is, halen we zelf.
+        // Gewoon laten liggen kan niet — in de vervangmodus haalt de volgende
+        // poging het weg en begint Dropbox er opnieuw aan.
+        zelfDoen.push(...open.map((b) => ({ naam: b.naam, url: b.url })));
+        break;
+      }
+      await wacht(WACHT_MS);
+    }
     zelfDoen.push(...banen.filter((b) => !b.jobId).map((b) => ({ naam: b.naam, url: b.url })));
 
     for (const item of zelfDoen) {

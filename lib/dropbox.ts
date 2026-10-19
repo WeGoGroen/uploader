@@ -595,14 +595,9 @@ export async function saveUrl(
   path: string,
   url: string
 ): Promise<{ done: boolean; jobId: string | null }> {
-  const res = await fetch(`${DROPBOX_API_BASE}/files/save_url`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ path, url }),
-  });
+  // Via dropboxPost: bij 429 wachten zoals Dropbox vraagt, in plaats van de
+  // hele oplevering te laten vallen. Zie checkSaveUrlJob.
+  const res = await dropboxPost(accessToken, "/files/save_url", { path, url });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new DropboxApiError(res.status, `Dropbox files/save_url failed: ${res.status} ${body}`);
@@ -619,14 +614,16 @@ export async function checkSaveUrlJob(
   accessToken: string,
   jobId: string
 ): Promise<{ status: string; error: string | null }> {
-  const res = await fetch(`${DROPBOX_API_BASE}/files/save_url/check_job_status`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ async_job_id: jobId }),
-  });
+  /*
+    Via dropboxPost, dus met wachten op retry_after bij een 429.
+
+    Pieter Postsingel 49, 19 oktober: een oplevering met vier pointclouds liet
+    de status van alle opdrachten tegelijk om de twee seconden opvragen. Dropbox
+    antwoordde met too_many_requests (retry_after 10), deze functie gooide, en
+    de route gaf een kale 500 — veertien keer in een kwartier, want elke nieuwe
+    poging begon het opvragen opnieuw.
+  */
+  const res = await dropboxPost(accessToken, "/files/save_url/check_job_status", { async_job_id: jobId });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new DropboxApiError(res.status, `Dropbox save_url/check_job_status failed: ${res.status} ${body}`);
@@ -1732,6 +1729,12 @@ export async function dropboxPost(
   }
 }
 
+/** De retry_after (seconden) uit een 429-melding van Dropbox, of null. */
+export function retryAfterUit(tekst: string): number | null {
+  const m = /"retry_after"\s*:\s*(\d+)/.exec(tekst);
+  return m ? Number(m[1]) : null;
+}
+
 export type KopieUitkomst = "gekopieerd" | "bestond" | "bezig" | { fout: string };
 
 /**
@@ -1838,7 +1841,7 @@ export async function verplaatsBatch(
   return uit;
 }
 
-function isTeVeelSchrijven(err: unknown): boolean {
+export function isTeVeelSchrijven(err: unknown): boolean {
   if (err instanceof DropboxApiError && err.status === 429) return true;
   return err instanceof Error && /too_many_write_operations|too_many_requests/.test(err.message);
 }
