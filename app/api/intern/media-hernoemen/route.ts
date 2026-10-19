@@ -27,6 +27,18 @@ export const maxDuration = 120;
  * Media, alleen in OUT/Photo's of OUT/360, alleen gewone beeldnamen, nooit naar een naam
  * die al bezet is door een bestand dat zelf niet meeverhuist.
  *
+ * Alleen als namen echt van plek wisselen. Krijgt geen enkele foto een naam
+ * die een andere foto nu nog heeft (de gewone eerste keer: "EXP_…" wordt
+ * "Adres - Keuken"), dan gaat het in één stap. Op 19 oktober deed Dropbox
+ * bij Nieuwe Keizersgracht 474 ruim een minuut over stap 1; de route gaf op,
+ * stap 2 kwam nooit, en vijf 360's bleven als ".hernoem-…" staan — waarna het
+ * control center ze niet meer kon openen. In één stap eindigt een trage
+ * batch gewoon op de eindnaam.
+ *
+ * En herhaalbaar: staat "van" er niet meer maar "naar" wel, dan is hij al
+ * hernoemd (een eerdere, trage ronde) en telt hij als gelukt. Zo trekt de
+ * volgende ronde de administratie van het control center vanzelf recht.
+ *
  * Het antwoord zegt per regel of hij gelukt is. Halverwege mislukt is geen
  * geheel-of-niets: wat al verplaatst is, staat er, en dat moet de aanroeper
  * weten om zijn eigen administratie gelijk te houden met Dropbox.
@@ -94,20 +106,26 @@ export async function POST(request: Request) {
   */
   const map = reeks[0].naar.slice(0, reeks[0].naar.lastIndexOf("/"));
   const verhuist = new Set(reeks.map((p) => p.van.toLowerCase()));
+  let bezet: Set<string>;
   try {
-    const bezet = new Set((await listFolderFiles(token, map)).map((b) => `${map}/${b.name}`.toLowerCase()));
+    bezet = new Set((await listFolderFiles(token, map)).map((b) => `${map}/${b.name}`.toLowerCase()));
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message.slice(0, 200) : "Dropbox niet te bevragen" },
+      { status: 502 }
+    );
+  }
+  // Al hernoemd door een eerdere ronde: van is weg, naar staat er.
+  const alKlaar = (p: { van: string; naar: string }) => !bezet.has(p.van.toLowerCase()) && bezet.has(p.naar.toLowerCase());
+  {
     for (const p of reeks) {
+      if (alKlaar(p)) continue;
       if (verhuist.has(p.naar.toLowerCase()) || !bezet.has(p.naar.toLowerCase())) continue;
       return NextResponse.json(
         { error: `${p.naar.slice(p.naar.lastIndexOf("/") + 1)} bestaat al — er wordt niets overschreven` },
         { status: 409 }
       );
     }
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message.slice(0, 200) : "Dropbox niet te bevragen" },
-      { status: 502 }
-    );
   }
 
   /*
@@ -121,11 +139,46 @@ export async function POST(request: Request) {
   const uitslag: { van: string; naar: string; gelukt: boolean; fout?: string }[] = [];
   const tijdelijk = reeks.map((p, i) => `${map}/.hernoem-${stempel}-${i}${p.van.slice(p.van.lastIndexOf("."))}`);
 
+  const teDoen: number[] = [];
+  reeks.forEach((p, i) => {
+    if (alKlaar(p)) uitslag[i] = { van: lijst[i].van!, naar: lijst[i].naar!, gelukt: true };
+    else teDoen.push(i);
+  });
+  // Wisselen er namen? Alleen dan is de tussenstap nodig.
+  const bronnen = new Set(teDoen.map((i) => reeks[i].van.toLowerCase()));
+  const wissel = teDoen.some((i) => bronnen.has(reeks[i].naar.toLowerCase()));
+
+  if (!wissel) {
+    try {
+      const stap = await verplaatsBatch(token, teDoen.map((i) => reeks[i]), 90_000);
+      teDoen.forEach((i, j) => {
+        const u = stap[j];
+        uitslag[i] =
+          u === "verplaatst"
+            ? { van: lijst[i].van!, naar: lijst[i].naar!, gelukt: true }
+            : {
+                van: lijst[i].van!,
+                naar: lijst[i].naar!,
+                gelukt: false,
+                fout: u === "bezig" ? "Dropbox nog bezig — de volgende ronde ziet of het gelukt is" : foutVan(u, "mislukt"),
+              };
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message.slice(0, 200) : "Dropbox kon niet verplaatsen" },
+        { status: 502 }
+      );
+    }
+    const mis = uitslag.filter((u) => !u.gelukt).length;
+    return NextResponse.json({ ok: mis === 0, uitslag }, { status: mis === 0 ? 200 : 207 });
+  }
+
   try {
     // Stap 1: alles naar een tijdelijke naam in dezelfde map.
-    const stap1 = await verplaatsBatch(token, reeks.map((p, i) => ({ van: p.van, naar: tijdelijk[i] })), 50_000);
+    const stap1 = await verplaatsBatch(token, teDoen.map((i) => ({ van: reeks[i].van, naar: tijdelijk[i] })), 50_000);
     const verder: number[] = [];
-    stap1.forEach((u, i) => {
+    stap1.forEach((u, j) => {
+      const i = teDoen[j];
       if (u === "verplaatst") verder.push(i);
       else
         uitslag[i] = {
