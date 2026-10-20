@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useIkBen } from "@/components/RechtenProvider";
 import type { AddressDetails, AddressSuggestion, NearbyAddress } from "@/lib/pdok";
 import { DOCUMENT_FOLDER_MAP } from "@/lib/documents";
@@ -83,11 +83,22 @@ const GROUP_ORDER = ["A", "B", "C", "D", "E", "Mo"];
 // niet de regel — meestal niet van toepassing. Model-check is een vaste
 // checklist die al op "ja" staat, dus die hoeft niet standaard open.
 const DEFAULT_COLLAPSED = ["C", "E", "Mo"];
+// Velden die in ClickUp bestaan maar niet meer op het formulier horen.
+const HIDDEN_FIELD_CODES = ["B9"]; // B9 Kwaliteitsverklaring
+// De D1-kaart (Aantal rekenzones) staat vóór deze groep (Aanbouw).
+const REKENZONES_BEFORE_GROUP = "C";
 
 function fieldGroup(name: string): string {
   const code = name.split(" ")[0] ?? "";
   const match = code.match(/^([A-Za-z]+)/);
   return match ? match[1] : "Overig";
+}
+
+/** Op welke plek tussen de technische groepen de D1-kaart komt: vóór de
+    Aanbouw, of achteraan als die groep er niet is. */
+function rekenzonesIndex(groups: { key: string }[]): number {
+  const i = groups.findIndex((g) => g.key === REKENZONES_BEFORE_GROUP);
+  return i === -1 ? groups.length : i;
 }
 
 function findFieldByPrefix(fields: ClickUpField[], prefix: string): ClickUpField | undefined {
@@ -840,6 +851,7 @@ export default function Home() {
     if (!meta) return [];
     const byGroup = new Map<string, ClickUpField[]>();
     for (const f of meta.fields) {
+      if (HIDDEN_FIELD_CODES.includes(f.name.split(" ")[0] ?? "")) continue;
       const g = fieldGroup(f.name);
       if (!byGroup.has(g)) byGroup.set(g, []);
       byGroup.get(g)!.push(f);
@@ -867,9 +879,9 @@ export default function Home() {
     () => groupedFields.find((g) => g.key === "D") ?? null,
     [groupedFields]
   );
-  // D1 Aantal Rekenzone's krijgt een eigen kaart onderaan de technische
-  // velden: het bepaalt de rest van de indeling, dus het hoort ingevuld te
-  // zijn vóór de Dropbox-map en de Polycam-links in beeld komen.
+  // D1 Aantal Rekenzone's krijgt een eigen kaart bij de technische velden,
+  // vóór de Aanbouw: het bepaalt de rest van de indeling, dus het hoort
+  // ingevuld te zijn vóór de Dropbox-map en de Polycam-links in beeld komen.
   const rekenzonesField = useMemo(
     () => (documentationGroup ? findFieldByPrefix(documentationGroup.fields, "D1") : undefined),
     [documentationGroup]
@@ -886,16 +898,17 @@ export default function Home() {
   // in een eigen volgorde, terwijl de pagina ze gegroepeerd toont. Door de
   // weergavevolgorde te volgen springt "ga erheen" naar het bovenste lege
   // veld en noemt de foutmelding ze in de volgorde waarin je ze tegenkomt.
-  // D1 staat als eigen kaart onderaan deze stap en sluit de rij dus af; de
-  // rest van groep D heeft een eigen stap en telt hier niet mee.
+  // D1 staat als eigen kaart vóór de Aanbouw en telt daar dus mee; de rest
+  // van groep D heeft een eigen stap en telt hier niet mee.
   const missingRequiredFields = useMemo(() => {
-    const uitGroepen = technicalGroups
-      .flatMap((g) => g.fields)
-      .filter((f) => isRequiredField(f) && isEmptyFieldValue(fieldValues[f.id]));
+    const missing = (f: ClickUpField) => isRequiredField(f) && isEmptyFieldValue(fieldValues[f.id]);
+    const index = rekenzonesIndex(technicalGroups);
+    const voor = technicalGroups.slice(0, index).flatMap((g) => g.fields).filter(missing);
+    const na = technicalGroups.slice(index).flatMap((g) => g.fields).filter(missing);
     // D1 is altijd verplicht, ook als ClickUp het veld niet zo markeert.
     return rekenzonesField && isEmptyFieldValue(fieldValues[rekenzonesField.id])
-      ? [...uitGroepen, rekenzonesField]
-      : uitGroepen;
+      ? [...voor, rekenzonesField, ...na]
+      : [...voor, ...na];
     // isRequiredField leest meta en fieldValues, dus die twee zijn de echte
     // afhankelijkheden naast de groepen zelf.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1707,6 +1720,18 @@ export default function Home() {
     );
   }
 
+  // D1 hoort qua nummering bij de documentatie, maar bepaalt de indeling van
+  // al het werk daarna — dus vullen we het bij de technische velden in, vóór
+  // de Aanbouw.
+  const rekenzonesCard = rekenzonesField && (
+    <div className="section">
+      <div className="section-head">
+        <h2>{rekenzonesField.name}</h2>
+      </div>
+      <div className="section-body is-single-wide">{renderField(rekenzonesField)}</div>
+    </div>
+  );
+
   return (
     <>
       <header className="topline">
@@ -1992,55 +2017,47 @@ export default function Home() {
           )}
 
           <div className="sections">
-            {technicalGroups.map((group) => {
+            {technicalGroups.map((group, index) => {
               const collapsed = collapsedGroups.has(group.key);
               const missingHere = missingByGroup.get(group.key) ?? 0;
               return (
-                <div className="section" key={group.key}>
-                  <button
-                    type="button"
-                    className="section-head section-head-toggle"
-                    onClick={() => toggleGroup(group.key)}
-                    aria-expanded={!collapsed}
-                  >
-                    <h2>{group.title}</h2>
-                    {/* Een ingeklapte groep mag niet verbergen dat er nog
-                        verplichte velden leeg staan. */}
-                    {missingHere > 0 && (
-                      <span className="section-missing">
-                        {missingHere} nog leeg
-                      </span>
-                    )}
-                    <span className="section-count">{group.fields.length} velden</span>
-                    <svg
-                      className={`chev${collapsed ? "" : " is-open"}`}
-                      width="16"
-                      height="16"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      aria-hidden="true"
+                <Fragment key={group.key}>
+                  {index === rekenzonesIndex(technicalGroups) && rekenzonesCard}
+                  <div className="section">
+                    <button
+                      type="button"
+                      className="section-head section-head-toggle"
+                      onClick={() => toggleGroup(group.key)}
+                      aria-expanded={!collapsed}
                     >
-                      <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
-                  {!collapsed && (
-                    <div className="section-body">{group.fields.map(renderField)}</div>
-                  )}
-                </div>
+                      <h2>{group.title}</h2>
+                      {/* Een ingeklapte groep mag niet verbergen dat er nog
+                          verplichte velden leeg staan. */}
+                      {missingHere > 0 && (
+                        <span className="section-missing">
+                          {missingHere} nog leeg
+                        </span>
+                      )}
+                      <span className="section-count">{group.fields.length} velden</span>
+                      <svg
+                        className={`chev${collapsed ? "" : " is-open"}`}
+                        width="16"
+                        height="16"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                    {!collapsed && (
+                      <div className="section-body">{group.fields.map(renderField)}</div>
+                    )}
+                  </div>
+                </Fragment>
               );
             })}
-
-            {/* D1 hoort qua nummering bij de documentatie, maar bepaalt de
-                indeling van al het werk daarna — dus vullen we het hier in,
-                als afsluiting van de technische velden. */}
-            {rekenzonesField && (
-              <div className="section">
-                <div className="section-head">
-                  <h2>{rekenzonesField.name}</h2>
-                </div>
-                <div className="section-body is-single-wide">{renderField(rekenzonesField)}</div>
-              </div>
-            )}
+            {rekenzonesIndex(technicalGroups) === technicalGroups.length && rekenzonesCard}
           </div>
 
           <div className="form-foot">
