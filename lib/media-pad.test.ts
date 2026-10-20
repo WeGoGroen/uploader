@@ -366,8 +366,21 @@ describe("mediaHernoemPaden", () => {
     });
   });
 
+  it("hernoemt de controleversies mee: Imagens origineel en de Broersma-kolommen", () => {
+    expect(mediaHernoemPaden(adres, "OUT/_controle/Photo's", "DSC02537-HDR - Broersma Klassiek.jpg", "Dam 5, Amsterdam - Keuken 2 - Broersma Klassiek.jpg")).toEqual({
+      van: `${adres}/OUT/_controle/Photo's/DSC02537-HDR - Broersma Klassiek.jpg`,
+      naar: `${adres}/OUT/_controle/Photo's/Dam 5, Amsterdam - Keuken 2 - Broersma Klassiek.jpg`,
+    });
+    for (const sub of ["OUT/_controle/Broersma Klassiek", "OUT/_controle/Broersma Generatief", "OUT/_controle/Broersma Zonlicht (AI)"]) {
+      expect(mediaHernoemPaden(adres, sub, "DSC02537-HDR.jpg", "Dam 5, Amsterdam - Keuken 2.jpg")).toEqual({
+        van: `${adres}/${sub}/DSC02537-HDR.jpg`,
+        naar: `${adres}/${sub}/Dam 5, Amsterdam - Keuken 2.jpg`,
+      });
+    }
+  });
+
   it("weigert elke andere map — ook de andere uitvoermappen en de invoer", () => {
-    for (const sub of ["OUT/_controle/360", "OUT/360/review", "OUT/Video", "In/Raw/360", "In/Raw/Photo's", "OUT/_controle/Photo's"]) {
+    for (const sub of ["OUT/_controle/360", "OUT/360/review", "OUT/Video", "OUT/_controle/Video", "In/Raw/360", "In/Raw/Photo's"]) {
       expect(mediaHernoemPaden(adres, sub, "a.jpg", "b.jpg")).toBeNull();
     }
   });

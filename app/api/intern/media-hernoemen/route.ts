@@ -6,7 +6,8 @@ import { isMediaProjectmap, mediaHernoemPaden } from "@/lib/media-pad";
 export const maxDuration = 120;
 
 /**
- * Eindfoto's hernoemen binnen OUT/Photo's of OUT/360: `{ projectmap, submap, hernoem: [{ van, naar }] }`.
+ * Eindfoto's hernoemen binnen één map uit HERNOEM_SUBMAPPEN (OUT/Photo's, OUT/360
+ * en de controleversies ernaast): `{ projectmap, submap, hernoem: [{ van, naar }] }`.
  *
  * Het control center zet de eindfoto's van Imagen om naar "<adres> - <ruimte>
  * <nummer>.jpg" zodra bekend is wat erop staat. Als reeks en in twee stappen,
