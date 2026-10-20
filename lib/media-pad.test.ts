@@ -379,8 +379,12 @@ describe("mediaHernoemPaden", () => {
     }
   });
 
+  it("mag in de 360-wachtmap: daar krijgt een pand zijn namen vóór de oplevering", () => {
+    expect(mediaHernoemPaden(adres, "OUT/_controle/360", "R1.JPG", "Dam 5, Amsterdam - Keuken.jpg")).not.toBeNull();
+  });
+
   it("weigert elke andere map — ook de andere uitvoermappen en de invoer", () => {
-    for (const sub of ["OUT/_controle/360", "OUT/360/review", "OUT/Video", "OUT/_controle/Video", "In/Raw/360", "In/Raw/Photo's"]) {
+    for (const sub of ["OUT/360/review", "OUT/Video", "OUT/_controle/Video", "In/Raw/360", "In/Raw/Photo's"]) {
       expect(mediaHernoemPaden(adres, sub, "a.jpg", "b.jpg")).toBeNull();
     }
   });

@@ -290,8 +290,11 @@ export function mediaVrijgeefPaden(
  * Een eigen, korte lijst en geen hergebruik van MEDIA_SUBMAPPEN. OUT/360 mag
  * alleen omdat het control center na het hernoemen zelf het nieuwe pad in
  * nadir_patches.uit_pad zet — anders vond de nadir-agent zijn resultaat niet
- * meer terug. OUT/_controle/360 niet: wat daar staat is nog niet gekeurd en
- * schuift onder zijn eigen naam door. OUT/Video niet, daar vindt de
+ * meer terug. OUT/_controle/360 sinds 20 oktober ook: het control center levert
+ * een 360-pand nu in één keer op — eerst alles gekeurd en op naam in de
+ * wachtmap, pas daarna samen naar OUT/360 met de deellink. De namen worden dus
+ * in de wachtmap gezet, en media-vrijgeven neemt ze daarna onder die naam mee.
+ * OUT/Video niet, daar vindt de
  * video-agent zijn werk aan de naam terug. En nooit in de invoermap — daar
  * staan de originelen onder de naam van de camera.
  *
@@ -304,6 +307,7 @@ export function mediaVrijgeefPaden(
 export const HERNOEM_SUBMAPPEN = [
   "OUT/Photo's",
   "OUT/360",
+  "OUT/_controle/360",
   "OUT/_controle/Photo's",
   "OUT/_controle/Broersma Klassiek",
   "OUT/_controle/Broersma Generatief",
