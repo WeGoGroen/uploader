@@ -39,6 +39,14 @@ export const MEDIA_HOOFDMAP = "Automatie Media";
  * Buiten OUT/Photo's om dezelfde reden als OUT/_controle/360: de deellink van de
  * klant neemt submappen mee.
  *
+ * "OUT/_controle/Broersma …" zijn de drie kolommen van Broersma EDIT in het
+ * control center (Klassiek, Generatief, Zonlicht (AI)): een eigen kleuredit
+ * naast die van Imagen, om te vergelijken voor er iets naar de klant gaat.
+ * Onder OUT/_controle om dezelfde reden als de andere controlemappen: de
+ * deellink van de klant neemt submappen van OUT/Photo's mee. Zonder deze regels
+ * zette het control center ze als "<naam> - Broersma Klassiek.jpg" in
+ * OUT/_controle/Photo's, tussen de bewaarde versies van Imagen.
+ *
  * "OUT/Video" is de uitvoermap van de Video Edit Agent in het control center:
  * die monteert de clips uit In/Raw/Video automatisch en zet de video hier neer.
  * Het is de enige submap waar een video in mag, en er mag daar niets anders in
@@ -58,6 +66,9 @@ export const MEDIA_SUBMAPPEN = [
   "OUT/_controle/Photo's",
   "OUT/Video",
   "OUT/_controle/Video",
+  "OUT/_controle/Broersma Klassiek",
+  "OUT/_controle/Broersma Generatief",
+  "OUT/_controle/Broersma Zonlicht (AI)",
   "out/Omgevingsfoto's",
 ] as const;
 
@@ -283,8 +294,21 @@ export function mediaVrijgeefPaden(
  * schuift onder zijn eigen naam door. OUT/Video niet, daar vindt de
  * video-agent zijn werk aan de naam terug. En nooit in de invoermap — daar
  * staan de originelen onder de naam van de camera.
+ *
+ * OUT/_controle/Photo's en de Broersma-kolommen wel: daar staan versies van
+ * dezelfde eindfoto's (Imagens bewaarde origineel, de kleuredits van Broersma
+ * EDIT), en die moeten de nieuwe naam volgen. Zonder dat stond op Leidsekade
+ * 70H (19 oktober) "Keuken 2.jpg" in OUT/Photo's naast "_DSC3188 - Broersma
+ * Klassiek.jpg" in de controlemap, en wist niemand meer welke bij welke hoorde.
  */
-export const HERNOEM_SUBMAPPEN = ["OUT/Photo's", "OUT/360"] as const;
+export const HERNOEM_SUBMAPPEN = [
+  "OUT/Photo's",
+  "OUT/360",
+  "OUT/_controle/Photo's",
+  "OUT/_controle/Broersma Klassiek",
+  "OUT/_controle/Broersma Generatief",
+  "OUT/_controle/Broersma Zonlicht (AI)",
+] as const;
 
 /** Van en naar binnen dezelfde map, of null als een van de delen niet deugt. */
 export function mediaHernoemPaden(
