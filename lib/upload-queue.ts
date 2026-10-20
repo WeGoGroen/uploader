@@ -395,6 +395,19 @@ export async function probeerOpnieuw(ids: string[]): Promise<number> {
   return gestart;
 }
 
+/**
+ * Internet terug: wat in deze sessie mislukte, meteen opnieuw proberen. Een
+ * foto die zonder bereik is gemaakt (bijvoorbeeld een ingekleurde gevel in
+ * een kelder of buitengebied) staat dan al in IndexedDB en gaat zo vanzelf
+ * omhoog, zonder dat de opnemer op "opnieuw" hoeft te tikken.
+ */
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    const mislukt = tasks.filter((t) => t.dropbox === "error").map((t) => t.id);
+    if (mislukt.length > 0) void probeerOpnieuw(mislukt);
+  });
+}
+
 /** Haalt taken op id uit de lijst — voor het wegklikken van de hervat-melding. */
 export function forgetTasks(ids: string[]) {
   const set = new Set(ids);
