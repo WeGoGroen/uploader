@@ -9,7 +9,6 @@ import { leesbareOmvang, type StapInhoud } from "@/lib/media-inhoud";
 import { relatieveTijd } from "@/lib/relatieve-tijd";
 import { tijdslimiet } from "@/lib/tijdslimiet";
 import TodayAppointments from "@/components/TodayAppointments";
-import RamenInkleuren, { RamenStatus } from "@/components/RamenInkleuren";
 import type { AddressDetails, AddressSuggestion, NearbyAddress } from "@/lib/pdok";
 import { meldAfgerond, meldGestart, startHartslag, type OpnameMelding } from "@/lib/opname-melden";
 import {
@@ -1093,10 +1092,6 @@ export default function MediaFlow() {
     .filter((t) => t.dropbox === "uploading" && t.etaSeconds != null)
     .reduce((max, t) => Math.max(max, t.etaSeconds ?? 0), 0);
   const ietsGekozen = telbaar.length > 0 || herkennen > 0;
-  const ramenAdres = {
-    straatEnNummer: `${address.straatnaam} ${houseNumber(address)}`,
-    woonplaats: address.woonplaatsnaam,
-  };
 
   return (
     <>
@@ -1147,39 +1142,32 @@ export default function MediaFlow() {
             handeling. Niet uitgeschakeld terwijl de map klaargezet wordt —
             kiesBestanden wacht daar zelf op. Op een computer mag je de
             bestanden er ook op slepen. */}
-        {/* Rechts van "Uploaden": een foto van een gevel maken en daarop de
-            ramen inkleuren. Gaat naar het energielabel (D2 Foto's
-            Buitengevels), niet naar deze mediamap. */}
-        <div className="media-uprij">
-          <button
-            type="button"
-            className={`media-upknop${ietsGekozen ? " is-compact" : ""}${sleepErover ? " is-sleep" : ""}`}
-            onClick={() => inputRef.current?.click()}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setSleepErover(true);
-            }}
-            onDragLeave={() => setSleepErover(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setSleepErover(false);
-              void kiesBestanden([...e.dataTransfer.files]);
-            }}
-          >
-            <span className="media-upknop-icoon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path d="M12 16V4M6.5 9.5 12 4l5.5 5.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-              </svg>
-            </span>
-            <span className="media-upknop-tekst">{ietsGekozen ? "Meer uploaden" : "Uploaden"}</span>
-            <span className="media-upknop-sub">
-              Foto&apos;s, video en 360 — alles door elkaar, we verdelen het zelf
-            </span>
-          </button>
-          <RamenInkleuren adres={ramenAdres} account={account} />
-        </div>
-        <RamenStatus adres={ramenAdres} />
+        <button
+          type="button"
+          className={`media-upknop${ietsGekozen ? " is-compact" : ""}${sleepErover ? " is-sleep" : ""}`}
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setSleepErover(true);
+          }}
+          onDragLeave={() => setSleepErover(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setSleepErover(false);
+            void kiesBestanden([...e.dataTransfer.files]);
+          }}
+        >
+          <span className="media-upknop-icoon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 16V4M6.5 9.5 12 4l5.5 5.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+            </svg>
+          </span>
+          <span className="media-upknop-tekst">{ietsGekozen ? "Meer uploaden" : "Uploaden"}</span>
+          <span className="media-upknop-sub">
+            Foto&apos;s, video en 360 — alles door elkaar, we verdelen het zelf
+          </span>
+        </button>
 
         {ietsGekozen && (
           <div className="media-totaal">
