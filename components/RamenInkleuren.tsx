@@ -139,12 +139,23 @@ function tekenLabel(ctx: CanvasRenderingContext2D, gevel: Gevel, breedte: number
 }
 
 /**
- * De grijze knop naast "Uploaden" op de mediapagina: opent de camera, en na
- * de foto een schermvullend venster om de ramen in te kleuren. "Klaar" zet de
- * foto met de inkleuring erop in de uploadwachtrij — die bewaart hem eerst op
- * de iPad, dus zonder internet gaat er niets verloren.
+ * De grijze knop naast de Dropbox-balk van het energielabel: opent de camera,
+ * en na de foto een schermvullend venster om de ramen in te kleuren. "Klaar"
+ * zet de foto met de inkleuring erop in de uploadwachtrij — die bewaart hem
+ * eerst op de iPad, dus zonder internet gaat er niets verloren.
+ *
+ * `map` is de projectmap van de opname zodra die klaarstaat; zonder (nog geen
+ * verbinding gehad) zoekt hij de map zelf op of valt hij terug op de naam.
  */
-export default function RamenInkleuren({ adres, account }: { adres: Adres; account: string | null }) {
+export default function RamenInkleuren({
+  adres,
+  map,
+  account,
+}: {
+  adres: Adres;
+  map: string | null;
+  account: string | null;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [foto, setFoto] = useState<{
     id: number;
@@ -187,7 +198,7 @@ export default function RamenInkleuren({ adres, account }: { adres: Adres; accou
         aria-label="Foto maken en ramen inkleuren"
       >
         <span className="ramen-knop-icoon" aria-hidden="true">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
             <path
               d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.2l1.4-2h5.8l1.4 2h2.2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5v-9Z"
               stroke="currentColor"
@@ -209,8 +220,9 @@ export default function RamenInkleuren({ adres, account }: { adres: Adres; accou
           onSluit={() => setFoto(null)}
           onKlaar={async (file) => {
             setFoto(null);
-            const map = await energielabelMap(adres);
-            enqueue(map, BUITENGEVEL_SUBMAP, file, account);
+            if (map) bewaarMap(adres, map);
+            const doel = map ?? (await energielabelMap(adres));
+            enqueue(doel, BUITENGEVEL_SUBMAP, file, account);
           }}
         />
       )}
@@ -331,7 +343,7 @@ function Inkleuren({
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          Terug naar media
+          Terug naar de opname
         </button>
         <h2>Ramen inkleuren · {adres.straatEnNummer}</h2>
       </div>
