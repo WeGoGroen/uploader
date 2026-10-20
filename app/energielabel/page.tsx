@@ -140,6 +140,16 @@ function matchYearOption(year: number, options: ClickUpFieldOption[]): string | 
     alleen af te leiden, dus die laten we bewust over aan de opnemer. */
 const INSULATION_FIELD_PREFIXES = ["B2", "B3", "B4", "B5"];
 
+/** Bij A7 Type dak = "Geen" gaan B4 (hellend dak) en B5 (isolatie dak)
+    automatisch op "nvt". */
+const ROOF_NVT_FIELD_PREFIXES = ["B4", "B5"];
+const NVT_OPTION_KEYS = ["nvt", "niet van toepassing"];
+
+/** Optienaam zonder hoofdletters, punten en losse spaties: "N.v.t." → "nvt". */
+function optionKey(name: string): string {
+  return name.toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
+}
+
 function insulationYearRangeLabel(year: number): string | null {
   if (year < 1965 || year >= 2018) return null;
   if (year <= 1974) return "Van 1965 t/m 1974";
@@ -1064,7 +1074,23 @@ export default function Home() {
   }
 
   function setFieldValue(id: string, value: FieldValue) {
-    setFieldValues((prev) => ({ ...prev, [id]: value }));
+    setFieldValues((prev) => {
+      const next = { ...prev, [id]: value };
+      // A7 Type dak = "Geen": dan is er ook geen hellend dak (B4) of dak om
+      // te isoleren (B5), dus die zetten we meteen op "nvt".
+      const typeDak = meta ? findFieldByPrefix(meta.fields, "A7") : undefined;
+      if (meta && typeDak && typeDak.id === id) {
+        const gekozen = typeDak.options.find((o) => o.id === value);
+        if (gekozen && optionKey(gekozen.name) === "geen") {
+          for (const prefix of ROOF_NVT_FIELD_PREFIXES) {
+            const field = findFieldByPrefix(meta.fields, prefix);
+            const nvt = field?.options.find((o) => NVT_OPTION_KEYS.includes(optionKey(o.name)));
+            if (field && nvt) next[field.id] = nvt.id;
+          }
+        }
+      }
+      return next;
+    });
   }
 
   // Kleine wikkel om de gedeelde regels (lib/required-fields.ts), zodat de
