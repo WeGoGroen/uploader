@@ -42,12 +42,23 @@ export function verdiepingLabel(n: number): string {
   return `${ordinal(n)} floor`;
 }
 
+/** De garage zoals de opnemer hem op de uploadpagina aangeeft. */
+export interface OpmerkingGarage {
+  /** De bouwlaag waarop de garage ligt; precies één. */
+  verdieping: number;
+  /** Heeft de parkeerplek een elektrische lader (laadpaal, wallbox)? */
+  lader: boolean;
+}
+
 export function bouwOrderOpmerking({
   verdiepingenPerBestand,
+  garage,
   mappen,
 }: {
   /** Per scanbestand de bouwlagen die erin zitten. */
   verdiepingenPerBestand: Record<string, number[]>;
+  /** Alleen gezet als er een garage is. */
+  garage?: OpmerkingGarage | null;
   /** De mappen met bestanden, in de volgorde waarin ze moeten staan. */
   mappen: OpmerkingMap[];
 }): string {
@@ -68,6 +79,15 @@ export function bouwOrderOpmerking({
     );
   if (verdiepingen.length > 0) {
     blokken.push(`Scanned floors per file:\n${verdiepingen.join("\n")}`);
+  }
+
+  // Direct onder de verdiepingen: de garage hoort bij dezelfde vraag (wat
+  // ligt waar), en de lader kan de verwerker niet uit de scan halen.
+  if (garage) {
+    blokken.push(
+      `Garage: yes, on the ${verdiepingLabel(garage.verdieping)}.\n` +
+        `EV charger at the parking space: ${garage.lader ? "yes" : "no"}.`
+    );
   }
 
   /*

@@ -112,4 +112,26 @@ describe("bouwOrderOpmerking", () => {
     });
     expect(zonderLink).not.toContain("Each link below opens a folder");
   });
+
+  it("zet de garage met verdieping en lader onder de verdiepingen", () => {
+    const tekst = bouwOrderOpmerking({
+      verdiepingenPerBestand: { "scan.ply": [0, 1] },
+      garage: { verdieping: -1, lader: true },
+      mappen: [optimized],
+    });
+    expect(tekst).toContain("Garage: yes, on the basement level 1.\nEV charger at the parking space: yes.");
+    expect(tekst.indexOf("Scanned floors")).toBeLessThan(tekst.indexOf("Garage:"));
+    expect(tekst.indexOf("Garage:")).toBeLessThan(tekst.indexOf("Point clouds"));
+  });
+
+  it("noemt geen garage als die er niet is", () => {
+    const tekst = bouwOrderOpmerking({ verdiepingenPerBestand: { "scan.ply": [0] }, garage: null, mappen: [] });
+    expect(tekst).not.toContain("Garage");
+    const zonderLader = bouwOrderOpmerking({
+      verdiepingenPerBestand: {},
+      garage: { verdieping: 0, lader: false },
+      mappen: [],
+    });
+    expect(zonderLader).toBe("Garage: yes, on the ground floor.\nEV charger at the parking space: no.");
+  });
 });
