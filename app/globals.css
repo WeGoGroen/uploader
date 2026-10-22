@@ -1331,6 +1331,54 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
   box-shadow: 0 1px 4px rgba(26, 135, 72, 0.35);
 }
 @media (prefers-reduced-motion: reduce) { .floor-btn { transition: none; } }
+
+/* ================= garage & parkeren ================= */
+/* Hele regel is de knop, met een schakelaar rechts: groot genoeg voor een
+   handschoen, en aan/uit is in één oogopslag te zien. */
+.garage-toggle {
+  display: flex; align-items: center; gap: 14px; width: 100%; min-height: 64px;
+  padding: 12px 16px; border-radius: 12px; cursor: pointer; text-align: left;
+  font: inherit; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--rule-strong);
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+.garage-toggle.is-large { min-height: 72px; }
+.garage-toggle:hover:not(.is-on) { background: var(--inset); }
+.garage-toggle.is-on { background: var(--accent-wash); border-color: var(--accent); }
+.garage-toggle-icon {
+  flex: none; width: 38px; height: 38px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--inset); color: var(--ink-soft);
+}
+.garage-toggle.is-large .garage-toggle-icon { width: 44px; height: 44px; }
+.garage-toggle.is-on .garage-toggle-icon { background: var(--accent); color: #fff; }
+.garage-toggle-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.garage-toggle-text strong { font-size: 15px; font-weight: 650; }
+.garage-toggle.is-large .garage-toggle-text strong { font-size: 15.5px; }
+.garage-toggle-text span { font-size: 13px; color: var(--ink-soft); }
+.garage-switch {
+  flex: none; position: relative; width: 50px; height: 30px; border-radius: 999px;
+  background: var(--rule-strong); transition: background 0.14s ease;
+}
+.garage-switch::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px;
+  border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: left 0.14s ease;
+}
+.garage-toggle.is-on .garage-switch { background: var(--accent); }
+.garage-toggle.is-on .garage-switch::after { left: 23px; }
+.garage-details {
+  display: flex; flex-direction: column; gap: 10px; padding: 16px 16px 18px;
+  background: var(--inset); border: 1px solid var(--rule); border-radius: 12px;
+}
+.garage-label { font-size: 12.5px; font-weight: 650; color: var(--ink-soft); }
+.garage-label em { font-style: normal; color: var(--bad); font-weight: 700; }
+.garage-floors { background: var(--paper); align-self: flex-start; }
+.garage-hint { font-size: 12px; color: var(--ink-faint); }
+.garage-sep { height: 1px; background: var(--rule); margin: 6px 0; }
+@media (prefers-reduced-motion: reduce) {
+  .garage-toggle, .garage-switch, .garage-switch::after { transition: none; }
+}
 .scan-icon.is-afwijking { background: var(--bad); }
 .scan-list li.is-afwijking .scan-dot { background: var(--bad); }
 .scan-verdict.is-afwijking { background: var(--bad-wash); color: var(--bad); }

@@ -77,6 +77,9 @@ export async function POST(request: Request) {
     extraDrawingUrls?: string[];
     /** Verdiepingen per geüpload Optimized-bestand, bv. {"scan.ply": [-1,0]}. */
     floorsByFile?: Record<string, number[]>;
+    /** Garage, alleen gezet als er een is: de bouwlaag en of de parkeerplek
+        een elektrische lader heeft. */
+    garage?: { verdieping: number; lader: boolean } | null;
     /** Alleen het concept aanmaken (en de Dropbox-map eraan koppelen), zonder
         opmerking, scans of indienen. Gebruikt bij de bevestigingspop-up aan
         het begin van de flow: de bestanden bestaan dan nog niet. */
@@ -235,6 +238,10 @@ export async function POST(request: Request) {
 
     const opmerking = bouwOrderOpmerking({
       verdiepingenPerBestand: body.floorsByFile ?? {},
+      garage:
+        body.garage && Number.isInteger(body.garage.verdieping)
+          ? { verdieping: body.garage.verdieping, lader: body.garage.lader === true }
+          : null,
       mappen,
     });
     if (opmerking) {

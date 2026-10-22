@@ -125,6 +125,12 @@ function DocumentenContent() {
   // Alle unieke bouwlagen over de scans heen — de scancontrole toetst
   // daarmee of er een verdieping ontbreekt.
   const allFloors = [...new Set(Object.values(floorsByFile).flat())];
+  // Garage bij de woning: uit = geen garage. Aan = precies één bouwlaag
+  // (verplicht) en of de parkeerplek een elektrische lader heeft. Gaat net als
+  // de verdiepingen als opmerking mee naar de Mediatask-order.
+  const [garage, setGarage] = useState(false);
+  const [garageVerdieping, setGarageVerdieping] = useState<number | null>(null);
+  const [garageLader, setGarageLader] = useState(false);
   // De geoptimaliseerde export van deze opname, zoals die net geüpload is. De
   // scancontrole leest 'm rechtstreeks uit het geheugen; na een herlaadbeurt is
   // hij weg en slaan we de controle over (het bestand staat dan al in Dropbox).
@@ -704,6 +710,7 @@ function DocumentenContent() {
   // de verwerker bij Mediatask niet zien wélke bouwlaag hij voor zich heeft.
   const optimizedFiles = existing["Optimized"] ?? [];
   const filesZonderVerdieping = optimizedFiles.filter((f) => (floorsByFile[f.name] ?? []).length === 0);
+  const garageZonderVerdieping = garage && garageVerdieping === null;
 
   // De scans die als puntenwolk meegaan: alles wat in de Optimized-map van
   // Dropbox staat. Het versturen gebeurt vanaf onze server, dus het maakt niet
@@ -834,6 +841,8 @@ function DocumentenContent() {
           number,
           postcode,
           floorsByFile,
+          garage:
+            garage && garageVerdieping !== null ? { verdieping: garageVerdieping, lader: garageLader } : null,
         }),
       });
       const data = await res.json();
@@ -1130,6 +1139,81 @@ function DocumentenContent() {
         </div>
 
         <div className="section">
+          <div className="section-head">
+            <h2>Garage &amp; parkeren</h2>
+            {garageZonderVerdieping && <span className="section-missing">1 nog in te vullen</span>}
+          </div>
+          <div className="section-body" style={{ gridTemplateColumns: "1fr" }}>
+            <button
+              type="button"
+              className={`garage-toggle is-large${garage ? " is-on" : ""}`}
+              aria-pressed={garage}
+              onClick={() => setGarage((g) => !g)}
+            >
+              <span className="garage-toggle-icon" aria-hidden="true">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 10.5 12 4l9 6.5V20H3z" />
+                  <path d="M7 20v-7h10v7" />
+                  <path d="M7 16h10" />
+                </svg>
+              </span>
+              <span className="garage-toggle-text">
+                <strong>Er is een garage</strong>
+                <span>Tik aan als bij deze woning een garage hoort</span>
+              </span>
+              <span className="garage-switch" aria-hidden="true" />
+            </button>
+
+            {garage && (
+              <div className="garage-details">
+                <span className="garage-label">
+                  Op welke verdieping ligt de garage?
+                  {garageVerdieping === null && <em> — verplicht, kies er één</em>}
+                </span>
+                <span className="floor-picker garage-floors" role="radiogroup" aria-label="Verdieping van de garage">
+                  {Array.from({ length: 13 }, (_, i) => i - 2).map((n) => {
+                    const on = garageVerdieping === n;
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        className={`floor-btn${on ? " is-on" : ""}`}
+                        onClick={() => setGarageVerdieping(on ? null : n)}
+                      >
+                        {n}
+                      </button>
+                    );
+                  })}
+                </span>
+                <span className="garage-hint">-1 = kelder/souterrain · 0 = begane grond · 1 = eerste verdieping</span>
+
+                <span className="garage-sep" />
+
+                <button
+                  type="button"
+                  className={`garage-toggle${garageLader ? " is-on" : ""}`}
+                  aria-pressed={garageLader}
+                  onClick={() => setGarageLader((l) => !l)}
+                >
+                  <span className="garage-toggle-icon" aria-hidden="true">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M13 3 6 13h5l-1 8 7-10h-5z" />
+                    </svg>
+                  </span>
+                  <span className="garage-toggle-text">
+                    <strong>Parkeerplek heeft een elektrische lader</strong>
+                    <span>Laadpaal of wallbox bij de garage of parkeerplek</span>
+                  </span>
+                  <span className="garage-switch" aria-hidden="true" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="section">
           <div className="section-body" style={{ gridTemplateColumns: "1fr" }}>
             {!hasMediataskConfig && (
               <p className="note" style={{ padding: 0 }}>
@@ -1140,6 +1224,11 @@ function DocumentenContent() {
               <p className="note" style={{ padding: 0, color: "var(--bad)", fontWeight: 600 }}>
                 ⚠ Geef eerst per scan aan welke verdiepingen erin zitten:{" "}
                 {filesZonderVerdieping.map((f) => f.name).join(", ")}
+              </p>
+            )}
+            {garageZonderVerdieping && (
+              <p className="note" style={{ padding: 0, color: "var(--bad)", fontWeight: 600 }}>
+                ⚠ Geef eerst aan op welke verdieping de garage ligt.
               </p>
             )}
             {teVersturenScans.length > 0 && (
@@ -1166,6 +1255,7 @@ function DocumentenContent() {
                 loading ||
                 !hasMediataskConfig ||
                 filesZonderVerdieping.length > 0 ||
+                garageZonderVerdieping ||
                 nogAanHetUploaden.length > 0 ||
                 pcNogBezig > 0
               }
@@ -1185,6 +1275,8 @@ function DocumentenContent() {
                   ? `Scans gaan al naar Mediatask — nog ${pcNogBezig} bezig`
                 : filesZonderVerdieping.length > 0
                   ? "Verdiepingen ontbreken nog"
+                : garageZonderVerdieping
+                  ? "Verdieping garage ontbreekt nog"
                   : optimizedFile && !scanCheckDone
                     ? "Scan controleren en versturen"
                     : "Uploaden naar Mediatask"}
