@@ -26,7 +26,7 @@ describe("voegGradenToe", () => {
 
   it("gebruikt zonder meting de kaart, met de bron erbij", async () => {
     const g = groepen("O");
-    await voegGradenToe(g, "x", null, kaart("O", 92));
+    await voegGradenToe(g, "x", null, kaart("O", 92), true);
     expect(a8(g).waarde).toBe("O — 92° (kaart)");
     expect(a8(g).reden ?? null).toBeNull();
   });
@@ -34,19 +34,30 @@ describe("voegGradenToe", () => {
   it("houdt de keuze van de opnemer als de kaart het oneens is, en meldt het verschil", async () => {
     // Mandenmakerssteeg 2C, 23-10: opnemer "O", kaart "Z, 202°".
     const g = groepen("O");
-    await voegGradenToe(g, "x", null, kaart("Z", 202));
+    await voegGradenToe(g, "x", null, kaart("Z", 202), true);
     expect(a8(g).waarde).toBe("O");
     expect(a8(g).reden).toContain("Z, 202°");
   });
 
   it("laat A8 staan zoals het was als de kaart niets zekers oplevert", async () => {
     const g = groepen("NW");
-    await voegGradenToe(g, "x", null, async () => null);
+    await voegGradenToe(g, "x", null, async () => null, true);
     expect(a8(g).waarde).toBe("NW");
     await voegGradenToe(g, "x", null, async () => {
       throw new Error("PDOK eruit");
-    });
+    }, true);
     expect(a8(g).waarde).toBe("NW");
+  });
+});
+
+describe("zonder meting, standaard", () => {
+  it("vraagt de kaart niet en tekent geen kompas — alleen uit de uploader", async () => {
+    const g = groepen("O");
+    const zoek = vi.fn(async () => ({ kompas: "Z", graden: 202 }));
+    const v = await voegGradenToe(g, "x", null, zoek);
+    expect(zoek).not.toHaveBeenCalled();
+    expect(v).toBeNull();
+    expect(a8(g).waarde).toBe("O");
   });
 });
 

@@ -132,7 +132,7 @@ async function haalAfbeeldingen(
  */
 export async function dossierVoorTaak(
   taskId: string,
-  opties: { opnieuw?: boolean; extraGroepen?: DossierGroep[] } = {}
+  opties: { opnieuw?: boolean; extraGroepen?: DossierGroep[]; kaartAlsTerugval?: boolean } = {}
 ): Promise<DossierUitkomst> {
   let token: string;
   try {
@@ -153,7 +153,13 @@ export async function dossierVoorTaak(
   const adres = `${adresGegevens.addressLine}, ${adresGegevens.woonplaats}`;
 
   const groepen = bouwGroepen(taak.customFields);
-  const voorgevel = await voegGradenToe(groepen, adres, gemetenGraden(taak.beschrijving));
+  const voorgevel = await voegGradenToe(
+    groepen,
+    adres,
+    gemetenGraden(taak.beschrijving),
+    voorgevelVoorAdres,
+    opties.kaartAlsTerugval === true
+  );
   const velden = groepen.reduce((som, g) => som + g.velden.length, 0);
   if (velden === 0) {
     /*
@@ -290,7 +296,8 @@ export async function voegGradenToe(
   groepen: DossierGroep[],
   adres: string,
   gemeten: number | null = null,
-  zoek: (adres: string) => Promise<{ kompas: string; graden: number } | null> = voorgevelVoorAdres
+  zoek: (adres: string) => Promise<{ kompas: string; graden: number } | null> = voorgevelVoorAdres,
+  kaartAlsTerugval = false
 ): Promise<Voorgevel | null> {
   const a8 = groepen.flatMap((g) => g.velden).find((v) => v.code === "A8");
   if (!a8) return null;
@@ -300,6 +307,15 @@ export async function voegGradenToe(
     a8.waarde = `${gekozen ?? "?"} — ${gemeten}° (kompas)`;
     return { gekozen, graden: gemeten, bron: "kompas", opmerking: null };
   }
+
+  /*
+    Besluit van 23-10: het kompas komt uit de uploader, niet uit andere
+    gegevens. Zonder meting blijft A8 dus de windrichting die de opnemer koos,
+    zonder graden en zonder tekening. De kaart (PDOK) mag alleen invullen bij
+    het eenmalig bijwerken van de lopende dossiers van vóór de meting — die
+    hadden nooit een kompasmeting kúnnen hebben.
+  */
+  if (!kaartAlsTerugval) return null;
 
   const kaart = await zoek(adres).catch(() => null);
   if (!kaart) return gekozen ? { gekozen, graden: null, bron: null, opmerking: null } : null;

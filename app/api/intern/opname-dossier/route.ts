@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { taskId?: string; opnieuw?: boolean; extraGroepen?: DossierGroep[] }
+    | { taskId?: string; opnieuw?: boolean; extraGroepen?: DossierGroep[]; kaartAlsTerugval?: boolean }
     | null;
   const taskId = body?.taskId?.trim() ?? "";
   if (!taskId) return NextResponse.json({ error: "taskId ontbreekt" }, { status: 400 });
@@ -35,6 +35,9 @@ export async function POST(request: Request) {
     */
     const uitkomst = await dossierVoorTaak(taskId, {
       opnieuw: body?.opnieuw === true,
+      // Alleen voor het eenmalig bijwerken van lopende dossiers van vóór de
+      // kompasmeting: dan mag PDOK de graden leveren. Standaard nooit.
+      kaartAlsTerugval: body?.kaartAlsTerugval === true,
       extraGroepen: Array.isArray(body?.extraGroepen) ? body.extraGroepen : undefined,
     });
     // 200 ook als het dossier er niet kwam: dít verzoek is gelukt, en de agent
