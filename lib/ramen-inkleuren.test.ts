@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   GEVELS,
   energielabelMapVoor,
-  isRamenBestand,
   lijnDikte,
   ramenBestandsnaam,
 } from "@/lib/ramen-inkleuren";
@@ -21,18 +20,6 @@ describe("ramenBestandsnaam", () => {
   it("geeft twee foto's van dezelfde gevel nooit dezelfde naam", () => {
     const later = new Date(2026, 9, 20, 14, 5, 10);
     expect(ramenBestandsnaam(GEVELS[1], moment)).not.toBe(ramenBestandsnaam(GEVELS[1], later));
-  });
-});
-
-describe("isRamenBestand", () => {
-  it("herkent namen die hier gemaakt zijn", () => {
-    expect(isRamenBestand("Linker zijgevel 2026-10-20 14.05.09.jpg")).toBe(true);
-    expect(isRamenBestand("Buitengevel 2026-10-20 14.05.09.jpg")).toBe(true);
-  });
-
-  it("laat andere bestanden liggen", () => {
-    expect(isRamenBestand("IMG_1234.jpg")).toBe(false);
-    expect(isRamenBestand("Voorgevel.jpg")).toBe(false);
   });
 });
 

@@ -90,12 +90,6 @@ export function ramenBestandsnaam(gevel: Gevel | null, moment: Date): string {
   return `${gevel?.naam ?? "Buitengevel"} ${stempel}.jpg`;
 }
 
-/** Herkent een bestand dat hier gemaakt is, voor de statuslijst. */
-export function isRamenBestand(naam: string): boolean {
-  const namen = [...GEVELS.map((g) => g.naam), "Buitengevel"];
-  return namen.some((n) => naam.startsWith(`${n} `)) && /\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}\.jpg$/.test(naam);
-}
-
 /** Zelfde opschoning als sanitizePathSegment in lib/dropbox.ts (die module
     is server-only). */
 function mapnaamDeel(waarde: string): string {
