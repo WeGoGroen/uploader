@@ -11,6 +11,7 @@ import { taskToAddress } from "@/lib/sharepoint-match";
 import { bijlagenUitVelden, bouwGroepen, splitsCode, veldTekst, type RuwVeld } from "@/lib/opname-velden";
 import { bouwOpnameDossier, type DossierFoto } from "@/lib/opname-pdf";
 import type { DossierGroep } from "@/lib/opname-velden";
+import type { Voorgevel } from "@/lib/opname-pdf";
 
 /**
  * Het opnameformulier uit ClickUp als PDF in de projectmap.
@@ -152,7 +153,7 @@ export async function dossierVoorTaak(
   const adres = `${adresGegevens.addressLine}, ${adresGegevens.woonplaats}`;
 
   const groepen = bouwGroepen(taak.customFields);
-  await voegGradenToe(groepen, adres, gemetenGraden(taak.beschrijving));
+  const voorgevel = await voegGradenToe(groepen, adres, gemetenGraden(taak.beschrijving));
   const velden = groepen.reduce((som, g) => som + g.velden.length, 0);
   if (velden === 0) {
     /*
@@ -236,6 +237,7 @@ export async function dossierVoorTaak(
     streefdatumMs: taak.dueDate,
     groepen,
     extraGroepen: opties.extraGroepen,
+    voorgevel,
     fotos,
     andereBijlagen: anders.map((b) => ({ code: b.code, naam: b.naam })),
     opgehaaldOp: new Date(),
@@ -289,18 +291,18 @@ export async function voegGradenToe(
   adres: string,
   gemeten: number | null = null,
   zoek: (adres: string) => Promise<{ kompas: string; graden: number } | null> = voorgevelVoorAdres
-): Promise<void> {
+): Promise<Voorgevel | null> {
   const a8 = groepen.flatMap((g) => g.velden).find((v) => v.code === "A8");
-  if (!a8) return;
+  if (!a8) return null;
   const gekozen = a8.waarde?.trim() || null;
 
   if (gemeten !== null) {
     a8.waarde = `${gekozen ?? "?"} — ${gemeten}° (kompas)`;
-    return;
+    return { gekozen, graden: gemeten, bron: "kompas", opmerking: null };
   }
 
   const kaart = await zoek(adres).catch(() => null);
-  if (!kaart) return;
+  if (!kaart) return gekozen ? { gekozen, graden: null, bron: null, opmerking: null } : null;
   if (!gekozen) {
     a8.waarde = `${kaart.kompas} — ${kaart.graden}° (kaart)`;
     a8.reden = "Niet ingevuld door de opnemer; afgeleid uit de kaart. Controleren.";
@@ -309,4 +311,5 @@ export async function voegGradenToe(
   } else {
     a8.reden = `Geen kompasmeting. De kaart geeft ${kaart.kompas}, ${kaart.graden}°. Controleren.`;
   }
+  return { gekozen, graden: kaart.graden, bron: "kaart", opmerking: a8.reden ?? null };
 }

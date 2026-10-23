@@ -66,6 +66,22 @@ export interface DossierFoto {
   mime: string;
 }
 
+/**
+ * De oriëntatie van de voorgevel, voor de kompastekening naast A8.
+ *
+ * `gekozen` is wat de opnemer in A8 koos (een van de acht windrichtingen),
+ * `graden` de exacte richting: gemeten met het kompas in de uploader, of
+ * afgeleid uit de kaart. Ze kunnen verschillen — dan laat de tekening allebei
+ * zien: de pijl wijst de graden aan, de groen omrande knop is de keuze.
+ */
+export interface Voorgevel {
+  gekozen: string | null;
+  graden: number | null;
+  bron: "kompas" | "kaart" | null;
+  /** Waarom de kaart en de opnemer het oneens zijn, als dat zo is. */
+  opmerking: string | null;
+}
+
 export interface DossierInvoer {
   adres: string;
   postcodePlaats: string;
@@ -82,6 +98,8 @@ export interface DossierInvoer {
       met wat er uit de opnamefoto's is gelezen. Apart gehouden van `groepen`
       zodat meteen zichtbaar blijft wat een mens invulde en wat een agent las. */
   extraGroepen?: DossierGroep[];
+  /** Voor de kompastekening onder groep A. Ontbreekt hij, dan geen tekening. */
+  voorgevel?: Voorgevel | null;
   fotos: DossierFoto[];
   /** Bijlagen die geen afbeelding zijn — video's, een LAZ-scan. Die kunnen niet
       afgedrukt worden, maar horen wel vermeld: anders lijkt het dossier
@@ -453,6 +471,185 @@ function tekenGroep(vel: Vel, groep: DossierGroep, kolommen: number): void {
   vel.y = top - paneelHoogte - 8;
 }
 
+/* --- Het kompas van de voorgevel ------------------------------------------ */
+
+/** De kleuren van het kompas in de uploader (app/globals.css), zodat het
+    formulier hetzelfde instrument laat zien als de opnemer in handen had. */
+const KOMPAS_KLEUR = {
+  papier: rgb(1, 1, 1),
+  inzet: rgb(0.957, 0.965, 0.957), // --inset   #f4f6f4
+  lijn: rgb(0.902, 0.914, 0.902), // --rule    #e6e9e6
+  lijnSterk: rgb(0.827, 0.851, 0.831), // --rule-strong #d3d9d4
+  inkt: rgb(0.102, 0.125, 0.11), // --ink     #1a201c
+  inktZacht: rgb(0.329, 0.376, 0.353), // --ink-soft #54605a
+  accent: rgb(0.102, 0.529, 0.282), // --accent  #1a8748
+  accentInkt: rgb(0.078, 0.4, 0.212), // --accent-ink #146636
+  accentWas: rgb(0.914, 0.965, 0.933), // --accent-wash #e9f6ee
+};
+
+const WINDRICHTINGEN: [string, number][] = [
+  ["N", 0], ["NO", 45], ["O", 90], ["ZO", 135], ["Z", 180], ["ZW", 225], ["W", 270], ["NW", 315],
+];
+
+/** De windrichting die het dichtst bij een peiling ligt. */
+function dichtstbij(graden: number): string {
+  let beste = WINDRICHTINGEN[0];
+  for (const w of WINDRICHTINGEN) {
+    const verschil = (a: number) => Math.min(Math.abs(graden - a), 360 - Math.abs(graden - a));
+    if (verschil(w[1]) < verschil(beste[1])) beste = w;
+  }
+  return beste[0];
+}
+
+/** Een punt op de cirkel: kompaspeiling (0 = boven, met de klok mee) naar x/y in PDF-punten. */
+function opCirkel(cx: number, cy: number, r: number, peiling: number): { x: number; y: number } {
+  const rad = (peiling * Math.PI) / 180;
+  return { x: cx + r * Math.sin(rad), y: cy + r * Math.cos(rad) };
+}
+
+/**
+ * Het kompas zoals in de uploader: een ring met streepjes om de 15°, de acht
+ * windrichtingen als knoppen op de rand, de keuze van de opnemer groen omrand,
+ * en de graden in het midden.
+ *
+ * Net als in de uploader draait de ring en staat de pijl vast bovenaan: de
+ * richting van de voorgevel staat onder de pijl, en waar de N terechtkomt laat
+ * zien hoe het pand ligt. De letters blijven rechtop, zoals op de iPad.
+ */
+function tekenKompasPaneel(vel: Vel, v: Voorgevel): void {
+  const D = 150; // doorsnede van de ring; in de uploader 300 px, alles schaalt mee
+  const s = D / 300;
+  const R = D / 2;
+  const hoogte = D + 2 * PANEEL.padding + 18;
+
+  vel.ruimte(hoogte + 8);
+  const top = vel.y;
+  vel.pagina.drawSvgPath(rondPad(BREEDTE, hoogte, PANEEL.radius), {
+    x: MARGE.links,
+    y: top,
+    borderColor: KLEUR.rand,
+    borderWidth: 0.75,
+  });
+
+  const cx = MARGE.links + PANEEL.padding + R + 4;
+  const cy = top - PANEEL.padding - 12 - R;
+  const draai = v.graden ?? 0; // de ring draait zo dat deze peiling bovenaan staat
+  const scherm = (peiling: number) => peiling - draai;
+
+  // De ring: wit, een dunne rand, een witte band van 10 px en dan een tweede
+  // rand, met een zacht grijs vlak naar binnen — de verloop van de uploader in
+  // drie lagen.
+  vel.pagina.drawCircle({ x: cx, y: cy, size: R, color: KOMPAS_KLEUR.papier, borderColor: KOMPAS_KLEUR.lijn, borderWidth: 1 });
+  vel.pagina.drawCircle({ x: cx, y: cy, size: R - 10.5 * s, color: KOMPAS_KLEUR.inzet, borderColor: KOMPAS_KLEUR.lijn, borderWidth: 0.6 });
+  vel.pagina.drawCircle({ x: cx, y: cy, size: R * 0.66, color: KOMPAS_KLEUR.papier });
+
+  // Streepjes om de 15°; bij N, O, Z en W langer en donkerder.
+  for (let peiling = 0; peiling < 360; peiling += 15) {
+    const hoofd = peiling % 90 === 0;
+    const buiten = opCirkel(cx, cy, R - (hoofd ? 5 : 6) * s, scherm(peiling));
+    const binnen = opCirkel(cx, cy, R - (hoofd ? 15 : 13) * s, scherm(peiling));
+    vel.pagina.drawLine({
+      start: buiten,
+      end: binnen,
+      thickness: (hoofd ? 2.5 : 1.5) * s,
+      color: hoofd ? KOMPAS_KLEUR.inktZacht : KOMPAS_KLEUR.lijnSterk,
+    });
+  }
+
+  // De acht knoppen op de rand, op 39% van de doorsnede vanaf het midden.
+  const knopR = 27 * s;
+  const gekozen = v.gekozen?.toUpperCase() ?? null;
+  for (const [naam, peiling] of WINDRICHTINGEN) {
+    const p = opCirkel(cx, cy, D * 0.39, scherm(peiling));
+    const actief = naam === gekozen;
+    const noord = naam === "N";
+    vel.pagina.drawCircle({
+      x: p.x,
+      y: p.y,
+      size: knopR,
+      color: actief ? KOMPAS_KLEUR.accentWas : KOMPAS_KLEUR.papier,
+      borderColor: actief ? KOMPAS_KLEUR.accent : noord ? KOMPAS_KLEUR.inkt : KOMPAS_KLEUR.lijnSterk,
+      borderWidth: (actief ? 3 : 2) * s,
+    });
+    const grootte = 13.5 * s;
+    const breed = vel.vet.widthOfTextAtSize(naam, grootte);
+    const kleur = actief ? KOMPAS_KLEUR.accentInkt : KOMPAS_KLEUR.inkt;
+    if (actief) {
+      // Het vinkje boven de letter. Helvetica kent ✓ niet, dus als lijntjes.
+      const vx = p.x - 3 * s;
+      const vy = p.y + 6 * s;
+      vel.pagina.drawLine({ start: { x: vx - 2.5 * s, y: vy + 1.5 * s }, end: { x: vx, y: vy - 1 * s }, thickness: 1.4 * s, color: KOMPAS_KLEUR.accent });
+      vel.pagina.drawLine({ start: { x: vx, y: vy - 1 * s }, end: { x: vx + 6 * s, y: vy + 5 * s }, thickness: 1.4 * s, color: KOMPAS_KLEUR.accent });
+    }
+    vel.pagina.drawText(naam, {
+      x: p.x - breed / 2,
+      y: p.y - grootte * 0.36 - (actief ? 3 * s : 0),
+      size: grootte,
+      font: vel.vet,
+      color: kleur,
+    });
+  }
+
+  // Het midden: de graden, of een streepje als er geen getal is.
+  vel.pagina.drawCircle({ x: cx, y: cy, size: 17 * s * 1.25, color: KOMPAS_KLEUR.inzet });
+  const midden = v.graden !== null ? `${v.graden}\u00b0` : "-";
+  const mg = 11 * s * 1.25;
+  const mb = vel.vet.widthOfTextAtSize(veilig(midden), mg);
+  vel.pagina.drawText(veilig(midden), { x: cx - mb / 2, y: cy - mg * 0.36, size: mg, font: vel.vet, color: KOMPAS_KLEUR.accentInkt });
+
+  // De vaste pijl bovenaan, alleen als er een richting is om aan te wijzen.
+  if (v.graden !== null) {
+    const pt = cy + R + 7 * s; // punt
+    const pb = cy + R - 9 * s; // basis
+    vel.pagina.drawSvgPath(`M 0 0 L ${9 * s} ${pt - pb} L ${-9 * s} ${pt - pb} Z`, {
+      x: cx,
+      y: pt,
+      color: KOMPAS_KLEUR.accent,
+    });
+  }
+
+  // Rechts de uitleg, in de opmaak van de velden.
+  const tx = cx + R + 28;
+  let ty = top - PANEEL.padding - REGEL.label + 2;
+  vel.schrijf("A8 \u00b7 ORI\u00cbNTATIE VOORGEVEL", tx, ty, MAAT.kopKlein, KLEUR.zacht, true);
+  ty -= 30;
+  // De kop zegt waar de pijl naar wijst. Wat de opnemer koos, staat groen
+  // omrand in de ring; die twee door elkaar halen gaf "O · 202°", een richting
+  // die niemand heeft gemeten.
+  const kop = v.graden !== null ? `${dichtstbij(v.graden)} \u00b7 ${v.graden}\u00b0` : `${v.gekozen ?? "-"}`;
+  vel.schrijf(kop, tx, ty, MAAT.titel, KLEUR.tekst, true);
+  ty -= REGEL.waarde + 6;
+  const bron =
+    v.bron === "kompas"
+      ? "Gemeten met het kompas in de uploader, tijdens de opname."
+      : v.bron === "kaart"
+        ? "Niet gemeten; afgeleid uit de pandvorm (BAG) tegen de straat (BGT)."
+        : "Geen graden bekend: niet gemeten, en niet af te leiden uit de kaart.";
+  const breedteTekst = MARGE.links + BREEDTE - PANEEL.padding - tx;
+  for (const regel of knip(bron, vel.normaal, MAAT.waarde, breedteTekst)) {
+    vel.schrijf(regel, tx, ty, MAAT.waarde, KLEUR.tekst);
+    ty -= REGEL.waarde;
+  }
+  ty -= 6;
+  const uitleg =
+    v.graden !== null
+      ? "De groene pijl bovenaan wijst de richting van de voorgevel aan; de ring is zo gedraaid dat N laat zien hoe het pand ligt. Groen omrand: wat de opnemer in A8 koos."
+      : "Groen omrand: wat de opnemer in A8 koos.";
+  for (const regel of knip(uitleg, vel.normaal, MAAT.bijschrift, breedteTekst)) {
+    vel.schrijf(regel, tx, ty, MAAT.bijschrift, KLEUR.zacht);
+    ty -= REGEL.bijschrift;
+  }
+  if (v.opmerking) {
+    ty -= 4;
+    for (const regel of knip(v.opmerking, vel.normaal, MAAT.bijschrift, breedteTekst)) {
+      vel.schrijf(regel, tx, ty, MAAT.bijschrift, KLEUR.attentie);
+      ty -= REGEL.bijschrift;
+    }
+  }
+
+  vel.y = top - hoogte - 8;
+}
+
 function tekenSectiekop(vel: Vel, titel: string, onder: string): void {
   vel.ruimte(REGEL.waarde * 3);
   vel.y -= MAAT.sectie;
@@ -628,6 +825,8 @@ export async function bouwOpnameDossier(invoer: DossierInvoer): Promise<Uint8Arr
     // Opmerkingen zijn lopende tekst; die gaan over de volle breedte staan in
     // plaats van in drie smalle kolommen waar niets in past.
     tekenGroep(vel, groep, groep.letter === "E" ? 1 : 3);
+    // Het kompas hoort bij A8, dus direct onder groep A.
+    if (groep.letter === "A" && invoer.voorgevel) tekenKompasPaneel(vel, invoer.voorgevel);
   }
 
   /* --- En wat er uit de foto's is gelezen --------------------------------- */
