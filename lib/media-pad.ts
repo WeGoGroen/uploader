@@ -69,6 +69,10 @@ export const MEDIA_SUBMAPPEN = [
   "OUT/_controle/Broersma Klassiek",
   "OUT/_controle/Broersma Generatief",
   "OUT/_controle/Broersma Zonlicht (AI)",
+  // De oplevering van Broersma EDIT: per foto de beste versie, genummerd in de
+  // volgorde van de rondgang ("01 Adres - Gevel.jpg"). Zie businesscontrolcenter
+  // lib/media/broersma/oplevering.ts.
+  "OUT/Oplevering",
   "out/Omgevingsfoto's",
 ] as const;
 
@@ -333,7 +337,8 @@ export function mediaHernoemPaden(
 
 /**
  * Uitvoermappen die het control center mag leegmaken: alleen die van de
- * fotografie, en alleen om een shoot opnieuw door Imagen te halen. Anders
+ * fotografie, en alleen om een shoot opnieuw door Imagen te halen, of om de
+ * oplevering van Broersma EDIT opnieuw samen te stellen (OUT/Oplevering). Anders
  * blijven de eindfoto's van de vorige bewerking naast de nieuwe staan, en dan
  * krijgt de klant beide in zijn deellink.
  *
@@ -342,7 +347,7 @@ export function mediaHernoemPaden(
  * andersom. Verwijderd is bij Dropbox niet weg — het staat in "Verwijderde
  * bestanden".
  */
-export const LEEGMAAK_UITVOER = ["OUT/Photo's", "OUT/_controle/Photo's"] as const;
+export const LEEGMAAK_UITVOER = ["OUT/Photo's", "OUT/_controle/Photo's", "OUT/Oplevering"] as const;
 
 export function isLeegmaakUitvoer(submap: string): boolean {
   return LEEGMAAK_UITVOER.some((m) => m.toLowerCase() === submap.toLowerCase());
