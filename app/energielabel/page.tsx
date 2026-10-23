@@ -7,7 +7,7 @@ import { DOCUMENT_FOLDER_MAP } from "@/lib/documents";
 import { enqueue, getServerSnapshot, getSnapshot, removeTask, subscribe } from "@/lib/upload-queue";
 import { clearDraftLocal, listPendingLocalDrafts, markDraftSynced, saveDraftLocal } from "@/lib/local-drafts";
 import TodayAppointments from "@/components/TodayAppointments";
-import RamenInkleuren, { RamenStatus } from "@/components/RamenInkleuren";
+import RamenInkleuren from "@/components/RamenInkleuren";
 // Gedeeld met het dashboard: één plek die bepaalt wanneer een opname "af" is,
 // zodat de waarschuwing daar niet iets anders betekent dan de blokkade hier.
 import {
@@ -1445,107 +1445,104 @@ export default function Home() {
       ? { straatEnNummer: `${address.straatnaam} ${houseNumber(address)}`, woonplaats: address.woonplaatsnaam }
       : null;
     return (
-      <div className="dbx-blok">
-        <div className="dbx-rij">
-          <div className={`dbx-strip${dropboxFolder ? " is-ready" : dropboxError ? " is-off" : ""}`}>
-            <div className="dbx-strip-top">
-              <span className="conn-icon is-dropbox dbx-strip-icon">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path
-                    d="M7 3 2 6.3 7 9.6 2 12.9l5 3.3 5-3.3 5 3.3 5-3.3-5-3.3 5-3.3-5-3.3-5 3.3-5-3.3Zm5 15 5-3.3v2.2L12 20l-5-3.1v-2.2l5 3.3Z"
-                    fill="currentColor"
-                  />
-                </svg>
+      <div className="dbx-rij">
+        <div className={`dbx-strip${dropboxFolder ? " is-ready" : dropboxError ? " is-off" : ""}`}>
+          <div className="dbx-strip-top">
+            <span className="conn-icon is-dropbox dbx-strip-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M7 3 2 6.3 7 9.6 2 12.9l5 3.3 5-3.3 5 3.3 5-3.3-5-3.3 5-3.3-5-3.3-5 3.3-5-3.3Zm5 15 5-3.3v2.2L12 20l-5-3.1v-2.2l5 3.3Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+
+            {dropboxLoading && (
+              <span className="dbx-strip-text">
+                <span className="spinner" /> Dropbox-map klaarzetten…
               </span>
-
-              {dropboxLoading && (
-                <span className="dbx-strip-text">
-                  <span className="spinner" /> Dropbox-map klaarzetten…
-                </span>
-              )}
-
-              {dropboxFolder && (
-                <>
-                  <span className="dbx-strip-text">
-                    <span className="dbx-strip-check" aria-hidden="true">✓</span>
-                    Map aangemaakt — <span className="dbx-folder-path">{dropboxFolder.path}</span>
-                  </span>
-                  <span className="dbx-strip-progress-label">
-                    {uploadedCount}/{DOCUMENT_FIELDS.length} geüpload
-                  </span>
-                  <button
-                    type="button"
-                    className="dbx-strip-refresh"
-                    onClick={() => refreshDocFiles(dropboxFolder)}
-                    disabled={docFilesLoading}
-                    title="Nu verversen"
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={docFilesLoading ? "spin" : undefined}>
-                      <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
-                  <a
-                    href={dropboxFolder.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn-open-dbx"
-                  >
-                    Openen
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <path
-                        d="M6 4h6v6M12 4 4 12"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </a>
-                </>
-              )}
-
-              {dropboxError && (
-                <>
-                  <span className="dbx-strip-text conn-err" style={{ margin: 0 }}>{dropboxError}</span>
-                  <a href="/instellingen" className="btn-text">
-                    Naar Verbindingen
-                  </a>
-                </>
-              )}
-            </div>
+            )}
 
             {dropboxFolder && (
-              <div className="dbx-strip-docs">
-                {DOCUMENT_FIELDS.map((d) => {
-                  const done = (docFiles[d.key]?.length ?? 0) > 0;
-                  return (
-                    <div key={d.key} className={`dbx-strip-doc-row${done ? " is-done" : ""}`}>
-                      {done ? (
-                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                          <path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      ) : (
-                        <span className="dbx-strip-doc-empty" aria-hidden="true" />
-                      )}
-                      <span className="dbx-strip-doc-label">{d.label}</span>
-                      <span className="dbx-strip-doc-status">
-                        {done ? `${docFiles[d.key]!.length} bestand${docFiles[d.key]!.length > 1 ? "en" : ""}` : "nog niets"}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              <>
+                <span className="dbx-strip-text">
+                  <span className="dbx-strip-check" aria-hidden="true">✓</span>
+                  Map aangemaakt — <span className="dbx-folder-path">{dropboxFolder.path}</span>
+                </span>
+                <span className="dbx-strip-progress-label">
+                  {uploadedCount}/{DOCUMENT_FIELDS.length} geüpload
+                </span>
+                <button
+                  type="button"
+                  className="dbx-strip-refresh"
+                  onClick={() => refreshDocFiles(dropboxFolder)}
+                  disabled={docFilesLoading}
+                  title="Nu verversen"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={docFilesLoading ? "spin" : undefined}>
+                    <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <a
+                  href={dropboxFolder.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-open-dbx"
+                >
+                  Openen
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path
+                      d="M6 4h6v6M12 4 4 12"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </a>
+              </>
+            )}
+
+            {dropboxError && (
+              <>
+                <span className="dbx-strip-text conn-err" style={{ margin: 0 }}>{dropboxError}</span>
+                <a href="/instellingen" className="btn-text">
+                  Naar Verbindingen
+                </a>
+              </>
             )}
           </div>
-          {ramenAdres && (
-            <RamenInkleuren
-              adres={ramenAdres}
-              map={dropboxFolder?.path ?? null}
-              account={meta?.account.username ?? null}
-            />
+
+          {dropboxFolder && (
+            <div className="dbx-strip-docs">
+              {DOCUMENT_FIELDS.map((d) => {
+                const done = (docFiles[d.key]?.length ?? 0) > 0;
+                return (
+                  <div key={d.key} className={`dbx-strip-doc-row${done ? " is-done" : ""}`}>
+                    {done ? (
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M3.5 8.5 6.5 11.5 12.5 4.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    ) : (
+                      <span className="dbx-strip-doc-empty" aria-hidden="true" />
+                    )}
+                    <span className="dbx-strip-doc-label">{d.label}</span>
+                    <span className="dbx-strip-doc-status">
+                      {done ? `${docFiles[d.key]!.length} bestand${docFiles[d.key]!.length > 1 ? "en" : ""}` : "nog niets"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
-        {ramenAdres && <RamenStatus adres={ramenAdres} />}
+        {ramenAdres && (
+          <RamenInkleuren
+            adres={ramenAdres}
+            map={dropboxFolder?.path ?? null}
+            account={meta?.account.username ?? null}
+          />
+        )}
       </div>
     );
   }

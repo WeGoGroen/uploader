@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-import { enqueue, getServerSnapshot, getSnapshot, probeerOpnieuw, subscribe } from "@/lib/upload-queue";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { enqueue } from "@/lib/upload-queue";
 import {
   BUITENGEVEL_SUBMAP,
   GEVELS,
@@ -9,7 +9,6 @@ import {
   GRENST_AAN,
   SCHRIJF,
   energielabelMapVoor,
-  isRamenBestand,
   lijnDikte,
   ramenBestandsnaam,
   type Gevel,
@@ -469,59 +468,5 @@ function Inkleuren({
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * De ingekleurde foto's van dit adres en hoe ver ze zijn. Zonder internet
- * staat er "wacht op internet": het bestand staat dan veilig op de iPad en de
- * wachtrij probeert het opnieuw zodra er weer verbinding is.
- */
-export function RamenStatus({ adres }: { adres: Adres }) {
-  const taken = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const online = useSyncExternalStore(
-    (cb) => {
-      window.addEventListener("online", cb);
-      window.addEventListener("offline", cb);
-      return () => {
-        window.removeEventListener("online", cb);
-        window.removeEventListener("offline", cb);
-      };
-    },
-    () => navigator.onLine,
-    () => true
-  );
-  const adresDeel = `/${energielabelMapVoor(adres.woonplaats, adres.straatEnNummer).split("/").pop()}`;
-  const eigen = taken.filter(
-    (t) => t.folder === BUITENGEVEL_SUBMAP && t.folderPath.endsWith(adresDeel) && isRamenBestand(t.name)
-  );
-  if (eigen.length === 0) return null;
-
-  return (
-    <ul className="ramen-status">
-      {eigen.map((t) => {
-        const wacht = t.dropbox !== "done" && !online;
-        const tekst =
-          t.dropbox === "done"
-            ? "In Dropbox · D2 Foto's Buitengevels"
-            : wacht
-              ? "Wacht op internet — staat veilig op de iPad"
-              : t.dropbox === "error"
-                ? "Mislukt"
-                : `Uploaden… ${Math.round(t.pct)}%`;
-        const klasse = t.dropbox === "done" ? "is-ok" : wacht || t.dropbox === "error" ? "is-wacht" : "";
-        return (
-          <li key={t.id} className={`ramen-status-regel ${klasse}`}>
-            <span className="ramen-status-naam">{t.name}</span>
-            <span>{tekst}</span>
-            {t.dropbox === "error" && online && (
-              <button type="button" className="btn-text" onClick={() => void probeerOpnieuw([t.id])}>
-                Opnieuw proberen
-              </button>
-            )}
-          </li>
-        );
-      })}
-    </ul>
   );
 }
