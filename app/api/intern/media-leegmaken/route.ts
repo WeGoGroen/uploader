@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error: uitvoer
-          ? `alleen OUT/Photo's of OUT/_controle/Photo's mag als uitvoer leeg — kreeg "${submap}"`
+          ? `alleen OUT/Photo's, OUT/_controle/Photo's of OUT/Oplevering mag als uitvoer leeg — kreeg "${submap}"`
           : `alleen een aanlevermap (In/Raw/…) mag leeg — kreeg "${submap}"`,
       },
       { status: 400 }
