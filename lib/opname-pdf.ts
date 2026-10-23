@@ -645,14 +645,16 @@ function tekenKompasPaneel(vel: Vel, v: Voorgevel): void {
   const kop = v.graden !== null ? `${dichtstbij(v.graden)} \u00b7 ${v.graden}\u00b0` : `${v.gekozen ?? "-"}`;
   vel.schrijf(kop, tx, ty, MAAT.titel, KLEUR.tekst, true);
   ty -= REGEL.waarde + 6;
+  // Bij graden uit de kaart staat hier niets: op verzoek van Floris (23-10)
+  // geen regel over BAG en BGT op het formulier.
   const bron =
     v.bron === "kompas"
       ? "Gemeten met het kompas in de uploader, tijdens de opname."
       : v.bron === "kaart"
-        ? "Niet gemeten; afgeleid uit de pandvorm (BAG) tegen de straat (BGT)."
+        ? null
         : "Geen graden bekend: niet gemeten, en niet af te leiden uit de kaart.";
   const breedteTekst = MARGE.links + BREEDTE - PANEEL.padding - tx;
-  for (const regel of knip(bron, vel.normaal, MAAT.waarde, breedteTekst)) {
+  for (const regel of bron ? knip(bron, vel.normaal, MAAT.waarde, breedteTekst) : []) {
     vel.schrijf(regel, tx, ty, MAAT.waarde, KLEUR.tekst);
     ty -= REGEL.waarde;
   }
