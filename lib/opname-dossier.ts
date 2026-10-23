@@ -309,7 +309,7 @@ export async function voegGradenToe(
   } else if (gekozen.toUpperCase() === kaart.kompas) {
     a8.waarde = `${gekozen} — ${kaart.graden}° (kaart)`;
   } else {
-    a8.reden = `Geen kompasmeting. De kaart geeft ${kaart.kompas}, ${kaart.graden}°. Controleren.`;
+    a8.reden = `Geen kompasmeting. De kaart geeft ${kaart.kompas}, ${kaart.graden}°; de opnemer koos ${gekozen}. Controleren.`;
   }
   return { gekozen, graden: kaart.graden, bron: "kaart", opmerking: a8.reden ?? null };
 }

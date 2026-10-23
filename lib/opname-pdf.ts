@@ -520,7 +520,7 @@ function tekenKompasPaneel(vel: Vel, v: Voorgevel): void {
   const D = 150; // doorsnede van de ring; in de uploader 300 px, alles schaalt mee
   const s = D / 300;
   const R = D / 2;
-  const hoogte = D + 2 * PANEEL.padding + 18;
+  const hoogte = D + 2 * PANEEL.padding + 30;
 
   vel.ruimte(hoogte + 8);
   const top = vel.y;
@@ -532,8 +532,14 @@ function tekenKompasPaneel(vel: Vel, v: Voorgevel): void {
   });
 
   const cx = MARGE.links + PANEEL.padding + R + 4;
-  const cy = top - PANEEL.padding - 12 - R;
-  const draai = v.graden ?? 0; // de ring draait zo dat deze peiling bovenaan staat
+  const cy = top - PANEEL.padding - 24 - R; // ruimte boven de pijl voor "Voorkant"
+  /*
+    De ring draait op de windrichting van de voorkant, niet op de exacte
+    graad: dan staat het groene vakje altijd precies onder de pijl. Bij 202°
+    stond Z er anders 22° naast. De exacte graad staat in het midden, in de
+    kop, en als groen streepje op de rand.
+  */
+  const draai = v.graden !== null ? WINDRICHTINGEN.find(([n]) => n === dichtstbij(v.graden!))![1] : 0;
   const scherm = (peiling: number) => peiling - draai;
 
   // De ring: wit, een dunne rand, een witte band van 10 px en dan een tweede
@@ -556,9 +562,25 @@ function tekenKompasPaneel(vel: Vel, v: Voorgevel): void {
     });
   }
 
+  // Waar de exacte graad op de rand ligt: een groen streepje, net naast de
+  // pijl als de voorkant niet precies op een windrichting valt.
+  if (v.graden !== null) {
+    vel.pagina.drawLine({
+      start: opCirkel(cx, cy, R - 2 * s, scherm(v.graden)),
+      end: opCirkel(cx, cy, R - 18 * s, scherm(v.graden)),
+      thickness: 3 * s,
+      color: KOMPAS_KLEUR.accent,
+    });
+  }
+
   // De acht knoppen op de rand, op 39% van de doorsnede vanaf het midden.
   const knopR = 27 * s;
-  const gekozen = v.gekozen?.toUpperCase() ?? null;
+  /*
+    Groen omrand is de windrichting onder de pijl: de voorkant. Zo staan het
+    groene vakje en de pijl altijd op dezelfde plek. Zonder graden is er geen
+    pijl, en dan is het de keuze uit A8.
+  */
+  const gekozen = v.graden !== null ? dichtstbij(v.graden) : v.gekozen?.toUpperCase() ?? null;
   for (const [naam, peiling] of WINDRICHTINGEN) {
     const p = opCirkel(cx, cy, D * 0.39, scherm(peiling));
     const actief = naam === gekozen;
@@ -606,6 +628,10 @@ function tekenKompasPaneel(vel: Vel, v: Voorgevel): void {
       y: pt,
       color: KOMPAS_KLEUR.accent,
     });
+    const tekst = "VOORKANT";
+    const grootte = 7.5;
+    const breed = vel.vet.widthOfTextAtSize(tekst, grootte);
+    vel.pagina.drawText(tekst, { x: cx - breed / 2, y: pt + 4, size: grootte, font: vel.vet, color: KOMPAS_KLEUR.accentInkt });
   }
 
   // Rechts de uitleg, in de opmaak van de velden.
@@ -633,8 +659,8 @@ function tekenKompasPaneel(vel: Vel, v: Voorgevel): void {
   ty -= 6;
   const uitleg =
     v.graden !== null
-      ? "De groene pijl bovenaan wijst de richting van de voorgevel aan; de ring is zo gedraaid dat N laat zien hoe het pand ligt. Groen omrand: wat de opnemer in A8 koos."
-      : "Groen omrand: wat de opnemer in A8 koos.";
+      ? "De groene pijl wijst de voorkant aan, met de windrichting groen omrand. Het groene streepje op de rand staat op de exacte graad. De ring is zo gedraaid dat N laat zien hoe het pand ligt."
+      : "Geen graden bekend. Groen omrand: wat de opnemer in A8 koos.";
   for (const regel of knip(uitleg, vel.normaal, MAAT.bijschrift, breedteTekst)) {
     vel.schrijf(regel, tx, ty, MAAT.bijschrift, KLEUR.zacht);
     ty -= REGEL.bijschrift;
