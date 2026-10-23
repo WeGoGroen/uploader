@@ -199,6 +199,20 @@ function nearestCompass(degrees: number): string {
 export async function determineVoorgevelOrientation(
   pandRing: LonLat[]
 ): Promise<string | null> {
+  return (await bepaalVoorgevel(pandRing))?.kompas ?? null;
+}
+
+/**
+ * Dezelfde bepaling, maar met de graden erbij: de kompaspeiling van de
+ * buitenwaartse normaal van de voorgevel, 0-359 met 0 = noord.
+ *
+ * Het A8-veld in ClickUp kent alleen acht windrichtingen. Voor de berekening
+ * telt het verschil tussen 94° en 130° wel — allebei "O" of "ZO" — dus het
+ * opnameformulier zet de graden ernaast.
+ */
+export async function bepaalVoorgevel(
+  pandRing: LonLat[]
+): Promise<{ kompas: string; graden: number } | null> {
   const facades = simplifyToFacades(pandRing);
   if (facades.length === 0) return null;
 
@@ -235,5 +249,5 @@ export async function determineVoorgevelOrientation(
   const outward =
     angleDiff(normalA, outwardBearing) < angleDiff(normalB, outwardBearing) ? normalA : normalB;
 
-  return nearestCompass(outward);
+  return { kompas: nearestCompass(outward), graden: Math.round(outward) % 360 };
 }

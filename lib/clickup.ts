@@ -664,6 +664,9 @@ export async function getTask(accessToken: string, taskId: string): Promise<Clic
 }
 
 export interface ClickUpTaakVolledig {
+  /** De beschrijving als platte tekst. Hierin zet de uploader bij het aanmaken
+      onder meer het bouwjaar en de kompasmeting van de voorgevel. */
+  beschrijving: string;
   id: string;
   name: string;
   status: string;
@@ -698,6 +701,7 @@ export async function getTaakVolledig(
     url: string;
     date_created?: string;
     due_date?: string | null;
+    text_content?: string | null;
     custom_fields?: ClickUpTaakVolledig["customFields"];
   }>(accessToken, `/task/${taskId}`);
 
@@ -713,6 +717,7 @@ export async function getTaakVolledig(
     url: data.url,
     dateCreated: getal(data.date_created),
     dueDate: getal(data.due_date),
+    beschrijving: data.text_content ?? "",
     customFields: data.custom_fields ?? [],
   };
 }

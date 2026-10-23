@@ -1,4 +1,4 @@
-import { determineVoorgevelOrientation, type LonLat } from "@/lib/gevel";
+import { bepaalVoorgevel, type LonLat } from "@/lib/gevel";
 
 const LOCATIESERVER_BASE = "https://api.pdok.nl/bzk/locatieserver/search/v3_1";
 const BAG_OGC_BASE = "https://api.pdok.nl/kadaster/bag/ogc/v2";
@@ -29,6 +29,8 @@ export interface AddressDetails {
   /** Automatisch bepaalde kompasrichting van de voorgevel (A8), of null als
       dat niet met voldoende zekerheid kon worden vastgesteld. */
   voorgevelOrientatie: string | null;
+  /** Dezelfde richting in graden (0-359, 0 = noord), of null. */
+  voorgevelGraden: number | null;
 }
 
 export async function suggestAddresses(query: string): Promise<AddressSuggestion[]> {
@@ -209,9 +211,9 @@ export async function getAddressDetails(id: string): Promise<AddressDetails> {
   // Gevelrichting is een best-effort aanvulling: als PDOK/BGT hapert of geen
   // zinnige uitlijning oplevert, blijft het veld gewoon leeg voor handmatige
   // invoer — dat mag het ophalen van de rest van het adres nooit blokkeren.
-  const voorgevelOrientatie = geometry
-    ? await determineVoorgevelOrientation(geometry).catch(() => null)
-    : null;
+  const voorgevel = geometry ? await bepaalVoorgevel(geometry).catch(() => null) : null;
+  const voorgevelOrientatie = voorgevel?.kompas ?? null;
+  const voorgevelGraden = voorgevel?.graden ?? null;
 
   return {
     straatnaam: doc.straatnaam,
@@ -225,5 +227,22 @@ export async function getAddressDetails(id: string): Promise<AddressDetails> {
     bouwjaar,
     oppervlakte,
     voorgevelOrientatie,
+    voorgevelGraden,
   };
+}
+
+/**
+ * De voorgevel van een adres in graden, voor het opnameformulier: het eerste
+ * adres dat PDOK bij deze tekst vindt, en daarvan de pandvorm tegen de straat.
+ * Null als PDOK niets zekers oplevert — dan staat er geen getal, in plaats van
+ * een getal van het buurpand.
+ */
+export async function voorgevelVoorAdres(
+  adres: string
+): Promise<{ kompas: string; graden: number } | null> {
+  const [eerste] = await suggestAddresses(adres);
+  if (!eerste) return null;
+  const details = await getAddressDetails(eerste.id);
+  if (details.voorgevelOrientatie === null || details.voorgevelGraden === null) return null;
+  return { kompas: details.voorgevelOrientatie, graden: details.voorgevelGraden };
 }

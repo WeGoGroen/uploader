@@ -264,7 +264,8 @@ function CompassPicker({
 }: {
   options: ClickUpFieldOption[];
   value: string | undefined;
-  onSelect: (id: string) => void;
+  /** `graden` alleen als de keuze uit de kompassensor kwam, niet bij een aangetikte windrichting. */
+  onSelect: (id: string, graden?: number) => void;
   onClose: () => void;
 }) {
   const [heading, setHeading] = useState<number | null>(null);
@@ -424,7 +425,7 @@ function CompassPicker({
           </p>
         )}
         {liveStatus === "active" && heading != null && liveOption && (
-          <button type="button" className="btn btn-primary btn-block compass-live-btn" onClick={() => onSelect(liveOption.id)}>
+          <button type="button" className="btn btn-primary btn-block compass-live-btn" onClick={() => onSelect(liveOption.id, Math.round(heading))}>
             Gebruik huidige richting: {liveName} ({Math.round(heading)}°)
           </button>
         )}
@@ -465,6 +466,8 @@ export default function Home() {
   const [taskStatus, setTaskStatus] = useState("");
   const [beschrijving, setBeschrijving] = useState("");
   const [fieldValues, setFieldValues] = useState<Record<string, FieldValue>>({});
+  // De kompasmeting achter A8, in graden; null als er niet gemeten is.
+  const [voorgevelGraden, setVoorgevelGraden] = useState<number | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     () => new Set(DEFAULT_COLLAPSED)
   );
@@ -1012,6 +1015,7 @@ export default function Home() {
     setCreateError(null);
     setStep("search");
     setFieldValues({});
+    setVoorgevelGraden(null);
     setShowRequiredErrors(false);
     setRequiredError(null);
     setCollapsedGroups(new Set(DEFAULT_COLLAPSED));
@@ -1235,6 +1239,7 @@ export default function Home() {
           status: taskStatus,
           beschrijving,
           customFields: buildCustomFieldsPayload(),
+          voorgevelGraden,
         }),
       });
       const data = await res.json();
@@ -1335,6 +1340,7 @@ export default function Home() {
     setLocationError(null);
     setShowManualSearch(false);
     setFieldValues({});
+    setVoorgevelGraden(null);
     setShowRequiredErrors(false);
     setRequiredError(null);
     setStep("search");
@@ -1658,8 +1664,11 @@ export default function Home() {
             <CompassPicker
               options={f.options}
               value={fieldValues[f.id] as string | undefined}
-              onSelect={(optId) => {
+              onSelect={(optId, graden) => {
                 setFieldValue(f.id, optId);
+                // Een aangetikte windrichting is geen meting: dan vervalt een
+                // eerder gemeten getal, anders klopt het niet meer met A8.
+                setVoorgevelGraden(graden ?? null);
                 setCompassFieldId(null);
               }}
               onClose={() => setCompassFieldId(null)}

@@ -1,3 +1,4 @@
+import { voorgevelVoorAdres } from "@/lib/pdok";
 import { getTaakVolledig, requireClickUpConfig } from "@/lib/clickup";
 import {
   findProjectFolder,
@@ -151,6 +152,7 @@ export async function dossierVoorTaak(
   const adres = `${adresGegevens.addressLine}, ${adresGegevens.woonplaats}`;
 
   const groepen = bouwGroepen(taak.customFields);
+  await voegGradenToe(groepen, adres, gemetenGraden(taak.beschrijving));
   const velden = groepen.reduce((som, g) => som + g.velden.length, 0);
   if (velden === 0) {
     /*
@@ -258,4 +260,53 @@ export async function dossierVoorTaak(
     overgeslagen: anders.length + nietOpgehaald,
     bestondAl: false,
   };
+}
+
+/** De kompasmeting die de uploader bij het aanmaken in de beschrijving zette, of null. */
+export function gemetenGraden(beschrijving: string): number | null {
+  const m = /Voorgevel:\s*(\d{1,3})\s*°/.exec(beschrijving ?? "");
+  if (!m) return null;
+  const g = Number(m[1]);
+  return g >= 0 && g < 360 ? g : null;
+}
+
+/**
+ * Zet bij A8 (oriëntatie voorgevel) de graden naast de windrichting.
+ *
+ * ClickUp kent voor A8 alleen acht windrichtingen, maar voor de berekening
+ * telt het verschil tussen 94° en 130° — allebei te kiezen als "O" of "ZO".
+ *
+ * Eerst de meting van de opnemer: het kompas in de uploader, bewaard in de
+ * taakbeschrijving. Zonder meting de kaart (pandvorm in de BAG tegen de straat
+ * in de BGT), en dan altijd met "(kaart)" erbij: die bepaling pakt de
+ * dichtstbijzijnde straat, en bij een hoekpand of een steeg kan dat de
+ * verkeerde zijn. Op 23-10 gaf de kaart voor Mandenmakerssteeg 2C "Z, 202°"
+ * waar de opnemer "O" koos. Zegt de kaart iets anders dan de opnemer, dan
+ * houdt A8 de keuze van de opnemer en staat het verschil eronder.
+ */
+export async function voegGradenToe(
+  groepen: DossierGroep[],
+  adres: string,
+  gemeten: number | null = null,
+  zoek: (adres: string) => Promise<{ kompas: string; graden: number } | null> = voorgevelVoorAdres
+): Promise<void> {
+  const a8 = groepen.flatMap((g) => g.velden).find((v) => v.code === "A8");
+  if (!a8) return;
+  const gekozen = a8.waarde?.trim() || null;
+
+  if (gemeten !== null) {
+    a8.waarde = `${gekozen ?? "?"} — ${gemeten}° (kompas)`;
+    return;
+  }
+
+  const kaart = await zoek(adres).catch(() => null);
+  if (!kaart) return;
+  if (!gekozen) {
+    a8.waarde = `${kaart.kompas} — ${kaart.graden}° (kaart)`;
+    a8.reden = "Niet ingevuld door de opnemer; afgeleid uit de kaart. Controleren.";
+  } else if (gekozen.toUpperCase() === kaart.kompas) {
+    a8.waarde = `${gekozen} — ${kaart.graden}° (kaart)`;
+  } else {
+    a8.reden = `Geen kompasmeting. De kaart geeft ${kaart.kompas}, ${kaart.graden}°. Controleren.`;
+  }
 }

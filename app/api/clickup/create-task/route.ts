@@ -49,6 +49,8 @@ export async function POST(request: Request) {
     status?: string;
     beschrijving?: string;
     customFields?: { id: string; value: string | number | boolean | string[] }[];
+    /** Wat het kompas mat toen de opnemer "Gebruik huidige richting" koos. */
+    voorgevelGraden?: number | null;
   };
 
   if (!body.address) {
@@ -78,6 +80,11 @@ export async function POST(request: Request) {
     `${addressLine}, ${address.postcode} ${address.woonplaatsnaam}`,
     address.bouwjaar !== null ? `Bouwjaar: ${address.bouwjaar} (BAG)` : null,
     `BAG-objectnummer: ${address.adresseerbaarobjectId}`,
+    // A8 kent alleen acht windrichtingen; de meting zelf gaat anders verloren.
+    // Het opnameformulier leest deze regel terug (lib/opname-dossier.ts).
+    typeof body.voorgevelGraden === "number" && Number.isFinite(body.voorgevelGraden)
+      ? `Voorgevel: ${Math.round(((body.voorgevelGraden % 360) + 360) % 360)}° (gemeten met kompas)`
+      : null,
     dropboxFolder ? `Dropbox-map: ${dropboxFolder.url}` : null,
     body.beschrijving?.trim() ? "" : null,
     body.beschrijving?.trim() ?? null,

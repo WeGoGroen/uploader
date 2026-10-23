@@ -431,7 +431,14 @@ function tekenGroep(vel: Vel, groep: DossierGroep, kolommen: number): void {
       }
 
       /* Waarom dit veld leeg is of niet zeker. Staat er alleen als er iets te
-         melden valt, zodat de gewone velden er niet anders uit gaan zien. */
+         melden valt, zodat de gewone velden er niet anders uit gaan zien.
+
+         Na de lus staat wy op de basislijn van een regel die er niet is: een
+         hele waarderegel te laag. Eerst terug naar de onderkant van de
+         waarden — dat is ook waar rijHoogte() de reden laat beginnen. Zonder
+         die correctie hing de reden elf punten te laag, tegen het label van
+         de volgende rij aan (zichtbaar bij sectie F, 23-10). */
+      wy += MAAT.waarde;
       wy -= 4;
       for (const regel of cel.redenRegels) {
         wy -= MAAT.bijschrift;
