@@ -1231,6 +1231,20 @@ function DocumentenContent() {
                 ⚠ Geef eerst aan op welke verdieping de garage ligt.
               </p>
             )}
+            {garage && garageVerdieping !== null && (
+              <p className="note" style={{ padding: 0 }}>
+                Gaat mee in de opmerking bij de Mediatask-order:{" "}
+                <strong style={{ color: "var(--ink)" }}>
+                  Garage op{" "}
+                  {garageVerdieping === 0
+                    ? "begane grond"
+                    : garageVerdieping < 0
+                      ? `kelder ${-garageVerdieping}`
+                      : `verdieping ${garageVerdieping}`}
+                  {garageLader ? ", met elektrische lader" : ", zonder lader"}
+                </strong>
+              </p>
+            )}
             {teVersturenScans.length > 0 && (
               <p className="note" style={{ padding: 0 }}>
                 {teVersturenScans.length === 1
