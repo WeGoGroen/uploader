@@ -4,11 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } 
 import { useIkBen } from "@/components/RechtenProvider";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import ScanCheck from "@/components/ScanCheck";
 import { enqueue, getServerSnapshot, getSnapshot, removeTask, subscribe } from "@/lib/upload-queue";
-// Geoptimaliseerde puntenwolk-exports: hierin zitten de werkelijke punten, dus
-// hier valt een echte plattegrond uit te snijden.
-import { isPointCloudFile } from "@/lib/pointcloud-read";
 import { meldAfgerond } from "@/lib/opname-melden";
 import { berekenMd5, type Md5Uitkomst } from "@/lib/md5-client";
 
@@ -106,10 +102,6 @@ function DocumentenContent() {
   const allTasks = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const tasks = useMemo(() => allTasks.filter((t) => t.folderPath === folderPath), [allTasks, folderPath]);
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  // Aparte keuzeknop voor de export waarop de controle draait. Die gaat
-  // bewust niet naar Dropbox: de puntenwolk is puur voor de controle, en de
-  // .dp die Mediatask nodig heeft staat al in Optimized.
-  const checkInputRef = useRef<HTMLInputElement | null>(null);
   // Pop-up wanneer er een RAW-scan (_raw.dp) in Optimized terecht dreigt te
   // komen of al staat — die hoort bij RAW.
   // `file` is alleen gezet wanneer het bestand nog los in het geheugen zit
@@ -122,38 +114,12 @@ function DocumentenContent() {
   // bouwlagen bevatten en er kunnen meerdere scans per adres zijn. Gaat als
   // opmerking mee naar de Mediatask-order, mét bestandsnaam erbij.
   const [floorsByFile, setFloorsByFile] = useState<Record<string, number[]>>({});
-  // Alle unieke bouwlagen over de scans heen — de scancontrole toetst
-  // daarmee of er een verdieping ontbreekt.
-  const allFloors = [...new Set(Object.values(floorsByFile).flat())];
   // Garage bij de woning: uit = geen garage. Aan = precies één bouwlaag
   // (verplicht) en of de parkeerplek een elektrische lader heeft. Gaat net als
   // de verdiepingen als opmerking mee naar de Mediatask-order.
   const [garage, setGarage] = useState(false);
   const [garageVerdieping, setGarageVerdieping] = useState<number | null>(null);
   const [garageLader, setGarageLader] = useState(false);
-  // De geoptimaliseerde export van deze opname, zoals die net geüpload is. De
-  // scancontrole leest 'm rechtstreeks uit het geheugen; na een herlaadbeurt is
-  // hij weg en slaan we de controle over (het bestand staat dan al in Dropbox).
-  const [optimizedFile, setOptimizedFile] = useState<File | null>(null);
-  // Het .dp-bestand uit dezelfde map. Daar staan de referentiematen en
-  // AprilTags in, die in geen enkele export terechtkomen.
-  const [optimizedDp, setOptimizedDp] = useState<File | null>(null);
-  // Referentiegegevens uit de BAG en 3DBAG, puur om de scan tegen af te zetten.
-  // Deze registraties kloppen regelmatig niet, dus een verschil kleurt rood in
-  // de checklist maar houdt het versturen nooit tegen.
-  const [referentie, setReferentie] = useState<{ oppervlakte: number | null; bouwlagen: number | null } | null>(null);
-  // Staat de controle open, en is hij al een keer langsgekomen? Dat laatste
-  // voorkomt dat je na "Toch doorsturen" opnieuw de hele molen doorloopt.
-  const [scanCheckOpen, setScanCheckOpen] = useState(false);
-  // Tekstregel bij de scan-stap in de voortgangspop-up.
-  const [scanUploadStap, setScanUploadStap] = useState<string | null>(null);
-  // Id van de vastgelegde scancontrole, zodat die aan de order gekoppeld kan
-  // worden zodra we een ordernummer hebben.
-  const [scanRecordId, setScanRecordId] = useState<string | null>(null);
-  const [scanCheckDone, setScanCheckDone] = useState(false);
-  // Melding wanneer er een bestand gekozen is dat geen puntenwolk is.
-  const [exportFout, setExportFout] = useState<string | null>(null);
-
   async function refreshFiles() {
     if (!folderPath) return;
     setLoading(true);
@@ -209,23 +175,6 @@ function DocumentenContent() {
     void refreshFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folderPath]);
-
-  // Eenmalig de BAG-referentie ophalen. Mislukt dat, dan blijft het gewoon leeg
-  // en toont de checklist die twee punten als "onbekend".
-  useEffect(() => {
-    const zoekterm = [postcode, number].filter(Boolean).join(" ") || addr;
-    if (!zoekterm) return;
-    let afgebroken = false;
-    fetch(`/api/address/scan-reference?q=${encodeURIComponent(zoekterm)}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (!afgebroken) setReferentie({ oppervlakte: d.oppervlakte ?? null, bouwlagen: d.bouwlagen ?? null });
-      })
-      .catch(() => {});
-    return () => {
-      afgebroken = true;
-    };
-  }, [postcode, number, addr]);
 
   // ---------- Concept-order direct bij binnenkomst ----------
   // De order hoort er te zijn zodra deze pagina er is: elke scan die daarna
@@ -448,18 +397,6 @@ function DocumentenContent() {
               if (folder === "Optimized" && isRawScanFile(file.name)) {
                 setRawWarning({ name: file.name, file });
                 continue;
-              }
-              // Een export in Optimized is meteen de bron voor de
-              // scancontrole: die opent hier, zodat je de plattegronden ziet
-              // terwijl de upload in de wachtrij doorloopt.
-              if (folder === "Optimized" && isPointCloudFile(file.name)) {
-                setOptimizedFile(file);
-                setScanCheckDone(false);
-                setScanCheckOpen(true);
-              } else if (folder === "Optimized" && /\.dp$/i.test(file.name)) {
-                // Hierin staan de referentiematen en AprilTags; die gaan mee
-                // zodra de controle draait.
-                setOptimizedDp(file);
               }
               uploadFile(folder, file);
             }
@@ -860,17 +797,6 @@ function DocumentenContent() {
       setMediataskOrderId(data.order.id);
       setMediataskSubmitError(data.submitError ?? null);
 
-      // De scancontrole aan de order hangen en het oordeel er als comment
-      // onder zetten. Lukt dat niet, dan is dat vervelend voor de dataset maar
-      // geen reden om de opnemer een fout te tonen: de order staat er.
-      if (scanRecordId) {
-        void fetch("/api/scan-record", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: scanRecordId, orderId: data.order.id }),
-        }).catch(() => {});
-      }
-
       // De geoptimaliseerde scan gaat rechtstreeks van hier naar Amazon en
       // wordt daarna aan de order gekoppeld. De RAW-scan gaat bewust niet mee:
       // Mediatask werkt met de geoptimaliseerde versie.
@@ -1083,63 +1009,6 @@ function DocumentenContent() {
 
         <div className="section">
           <div className="section-head">
-            <h2>Scancontrole <span className="beta-tag">BETA</span></h2>
-          </div>
-          <div className="section-body" style={{ gridTemplateColumns: "1fr" }}>
-            <p className="note" style={{ padding: 0 }}>
-              Exporteer de geoptimaliseerde scan in Dot3D via File &gt; Export als <strong>PLY</strong> en kies
-              &apos;m hier. Hij gaat mee omhoog naar Optimized, en ondertussen tekenen we de plattegrond per
-              bouwlaag uit en lopen we de checklist langs.
-            </p>
-            <input
-              ref={(el) => {
-                checkInputRef.current = el;
-              }}
-              type="file"
-              // Bewust geen accept-filter: de Bestanden-app op iPadOS kent
-              // .ply niet en maakt het bestand dan onselecteerbaar. We
-              // controleren de extensie hieronder zelf, met een nette melding.
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const gekozen = e.target.files?.[0];
-                e.target.value = "";
-                if (!gekozen) return;
-                if (!isPointCloudFile(gekozen.name)) {
-                  setExportFout(
-                    `"${gekozen.name}" is geen puntenwolk. Exporteer in Dot3D via File > Export als PLY (of PTS, LAS of LAZ).`
-                  );
-                  return;
-                }
-                setExportFout(null);
-                // Uploaden en controleren tegelijk: de upload loopt in de
-                // wachtrij door terwijl de controle het bestand uit het
-                // geheugen leest. Twee keer hetzelfde bestand aanwijzen hoeft
-                // dus niet.
-                setOptimizedFile(gekozen);
-                setScanCheckDone(false);
-                setScanCheckOpen(true);
-                uploadFile("Optimized", gekozen);
-              }}
-            />
-            {exportFout && <p className="scan-error">{exportFout}</p>}
-            <div className="scan-pick">
-              <button type="button" className="btn btn-quiet" onClick={() => checkInputRef.current?.click()}>
-                {optimizedFile ? "Andere export kiezen" : "Export kiezen en uploaden (.ply)"}
-              </button>
-              {optimizedFile && (
-                <>
-                  <span className="scan-pick-name">{optimizedFile.name}</span>
-                  <button type="button" className="btn btn-quiet" onClick={() => setScanCheckOpen(true)}>
-                    Opnieuw controleren
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="section">
-          <div className="section-head">
             <h2>Garage &amp; parkeren</h2>
             {garageZonderVerdieping && <span className="section-missing">1 nog in te vullen</span>}
           </div>
@@ -1273,13 +1142,7 @@ function DocumentenContent() {
                 nogAanHetUploaden.length > 0 ||
                 pcNogBezig > 0
               }
-              onClick={() => {
-                // Eerst de scan laten zien, daarna pas versturen. Is er geen
-                // export in deze sessie geüpload, of is de controle al
-                // langsgekomen, dan gaat het rechtstreeks door.
-                if (optimizedFile && !scanCheckDone) setScanCheckOpen(true);
-                else void uploadToMediatask();
-              }}
+              onClick={() => void uploadToMediatask()}
             >
               {loading
                 ? "Dropbox-bestanden laden…"
@@ -1291,9 +1154,7 @@ function DocumentenContent() {
                   ? "Verdiepingen ontbreken nog"
                 : garageZonderVerdieping
                   ? "Verdieping garage ontbreekt nog"
-                  : optimizedFile && !scanCheckDone
-                    ? "Scan controleren en versturen"
-                    : "Uploaden naar Mediatask"}
+                  : "Uploaden naar Mediatask"}
             </button>
           </div>
         </div>
@@ -1591,30 +1452,6 @@ function DocumentenContent() {
             </div>
           </div>
         </div>
-      )}
-
-      {scanCheckOpen && optimizedFile && (
-        <ScanCheck
-          file={optimizedFile}
-          dpFile={optimizedDp}
-          address={addr || undefined}
-          // De verdiepingen die de opnemer hierboven aantikt, zijn precies wat
-          // de controle nodig heeft om te toetsen of er een bouwlaag ontbreekt.
-          bagAreaM2={referentie?.oppervlakte ?? undefined}
-          // De aangevinkte verdiepingen gaan voor: dat is wat de opnemer ter
-          // plekke heeft gezien. Staat er niets aangevinkt, dan valt de
-          // controle terug op 3DBAG.
-          expectedFloors={
-            allFloors.length > 0 ? allFloors.length : (referentie?.bouwlagen ?? undefined)
-          }
-          onRecord={setScanRecordId}
-          onClose={() => setScanCheckOpen(false)}
-          onApprove={() => {
-            setScanCheckDone(true);
-            setScanCheckOpen(false);
-            void uploadToMediatask();
-          }}
-        />
       )}
 
     </>
