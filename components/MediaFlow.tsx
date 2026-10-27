@@ -224,6 +224,25 @@ export default function MediaFlow() {
   // submap en naam. Alleen voor wat op dit apparaat gekozen is.
   const [redenen, setRedenen] = useState<Record<string, string>>({});
   const [sleepErover, setSleepErover] = useState(false);
+  // Uitkomst van "opnieuw proberen" als er niets te herstarten viel.
+  const [opnieuwMelding, setOpnieuwMelding] = useState<string | null>(null);
+
+  /**
+   * Mislukte uploads opnieuw starten, en zeggen als dat niet kan. De knop
+   * deed eerder stil niets als het bestand nergens meer stond (pagina
+   * herladen en het bestand was te groot voor de opslag op de iPad).
+   */
+  async function opnieuwProberen(ids: string[]) {
+    setOpnieuwMelding(null);
+    const gestart = await probeerOpnieuw(ids);
+    if (gestart < ids.length) {
+      const weg = ids.length - gestart;
+      setOpnieuwMelding(
+        `${weg} bestand${weg === 1 ? "" : "en"} kon${weg === 1 ? "" : "den"} niet opnieuw gestart worden — ` +
+          "kies ze nog een keer via Meer uploaden."
+      );
+    }
+  }
 
   const alleTaken = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const takenVanOpname = useMemo(
@@ -588,28 +607,42 @@ export default function MediaFlow() {
    * stopt de upload en gaat hij pas verder als je de app weer opent. Dit is
    * het enige wat een webapp daar realistisch tegen kan doen; Safari kent
    * geen achtergrond-upload.
+   *
+   * Hangt aan óf er iets loopt, niet aan hoevéél: met het aantal als
+   * afhankelijkheid werd het slot bij elk afgerond bestand losgelaten en
+   * opnieuw aangevraagd. En iOS geeft het slot zelf vrij zodra de pagina uit
+   * beeld gaat; zonder het bij terugkomst opnieuw te vragen viel het scherm na
+   * één keer wegklikken alsnog in slaap, midden in een video.
    */
+  const ietsBezig = bezigTotaal > 0;
   useEffect(() => {
-    if (bezigTotaal === 0) return;
-    type Slot = { release: () => Promise<void> };
+    if (!ietsBezig) return;
+    type Slot = { release: () => Promise<void>; released?: boolean };
     let slot: Slot | null = null;
     let losgelaten = false;
     const wakeLock = (navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<Slot> } })
       .wakeLock;
-    void wakeLock
-      ?.request("screen")
-      .then((s) => {
-        if (losgelaten) void s.release();
-        else slot = s;
-      })
-      // Geweigerd of niet ondersteund: dan werkt uploaden gewoon door, alleen
-      // zonder deze bescherming.
-      .catch(() => {});
+    const vraag = () => {
+      if (losgelaten || document.visibilityState !== "visible") return;
+      if (slot && !slot.released) return;
+      void wakeLock
+        ?.request("screen")
+        .then((s) => {
+          if (losgelaten) void s.release();
+          else slot = s;
+        })
+        // Geweigerd of niet ondersteund: dan werkt uploaden gewoon door, alleen
+        // zonder deze bescherming.
+        .catch(() => {});
+    };
+    vraag();
+    document.addEventListener("visibilitychange", vraag);
     return () => {
       losgelaten = true;
+      document.removeEventListener("visibilitychange", vraag);
       void slot?.release().catch(() => {});
     };
-  }, [bezigTotaal]);
+  }, [ietsBezig]);
 
 
   /**
@@ -1252,6 +1285,11 @@ export default function MediaFlow() {
                             {t.dropbox === "error" ? "mislukt" : t.dropbox === "done" ? "✓ 100%" : `${t.pct}%`}
                           </span>
                         </span>
+                        {t.dropbox === "error" && t.dropboxError && (
+                          <span className="media-kolom-r2" style={{ color: "var(--bad)" }}>
+                            {t.dropboxError}
+                          </span>
+                        )}
                         {redenen[`${st.map}/${t.name}`] && (
                           <span className="media-kolom-r2">{redenen[`${st.map}/${t.name}`]}</span>
                         )}
@@ -1278,7 +1316,7 @@ export default function MediaFlow() {
                   <button
                     type="button"
                     className="media-kolom-opnieuw"
-                    onClick={() => void probeerOpnieuw(mislukt.map((t) => t.id))}
+                    onClick={() => void opnieuwProberen(mislukt.map((t) => t.id))}
                   >
                     ↻ Mislukte opnieuw proberen
                   </button>
@@ -1287,6 +1325,12 @@ export default function MediaFlow() {
             );
           })}
         </div>
+
+        {opnieuwMelding && (
+          <p className="note" style={{ color: "var(--bad)" }}>
+            {opnieuwMelding}
+          </p>
+        )}
 
         {overgeslagen.length > 0 && (
           <details className="media-overgeslagen">

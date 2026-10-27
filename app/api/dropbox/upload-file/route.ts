@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSharedAccessToken, uploadFile } from "@/lib/dropbox";
+import { schrijfwijze } from "@/lib/media-folders";
 
 // Grotere foto's/LAZ-scans mogen best even duren.
 export const maxDuration = 60;
@@ -20,7 +21,8 @@ export async function POST(request: Request) {
   try {
     const accessToken = await getSharedAccessToken();
     const buffer = Buffer.from(await file.arrayBuffer());
-    await uploadFile(accessToken, `${path}/${file.name}`, buffer);
+    const pad = `${path}/${file.name}`;
+    await uploadFile(accessToken, pad, buffer, schrijfwijze(pad));
     return NextResponse.json({ ok: true, name: file.name });
   } catch (err) {
     console.error("Failed to upload file to Dropbox", err);

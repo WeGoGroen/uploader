@@ -54,3 +54,26 @@ export const MEDIA_STAPPEN: MediaStap[] = [
     map: "In/Raw/360",
   },
 ];
+
+/**
+ * Gaat dit pad naar de aanlevering van een media-opname ("…/In/Raw/…")?
+ *
+ * Daar mag een upload nooit een ander bestand overschrijven. Twee camera's die
+ * allebei bij DSC00001 beginnen, of een drone en een 360-camera met dezelfde
+ * teller, leverden met "overwrite" stil verlies van beeld op: het tweede
+ * bestand verving het eerste. Bij deze paden laat Dropbox een bestand met een
+ * andere inhoud naast het bestaande landen ("DSC00001 (1).ARW"); exact
+ * dezelfde inhoud nog eens versturen (een herkansing) is geen conflict en
+ * levert dus ook geen dubbel op.
+ *
+ * Alleen de media-aanlevering: bij een energielabel of NEN2580 is dezelfde
+ * naam opnieuw uploaden juist een nieuwe versie die de oude moet vervangen.
+ */
+export function isMediaAanlevering(pad: string): boolean {
+  return /\/In\/Raw\//i.test(pad);
+}
+
+/** De commit-instelling voor Dropbox bij dit pad; zie isMediaAanlevering. */
+export function schrijfwijze(pad: string): { mode: "add" | "overwrite"; autorename: boolean } {
+  return isMediaAanlevering(pad) ? { mode: "add", autorename: true } : { mode: "overwrite", autorename: false };
+}
