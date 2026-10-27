@@ -1312,6 +1312,26 @@ export default function MediaFlow() {
                   </p>
                 )}
 
+                {/* Rechtstreeks naar deze submap in de Dropbox-app. Daar kan de
+                    opnemer aanleveren met achtergrond-upload (scherm op slot,
+                    iPad in de tas), wat deze pagina niet kan. Wat er binnenkomt
+                    telt hierboven gewoon mee. De link komt mee met de
+                    periodieke blik in Dropbox; zonder link geen knop. */}
+                {inDropbox?.webUrl && (
+                  <a
+                    href={inDropbox.webUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="media-kolom-dbxknop"
+                    title={`Open ${st.map} in Dropbox`}
+                  >
+                    <span>Open in Dropbox</span>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M6 4h6v6M12 4 4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </a>
+                )}
+
                 {mislukt.length > 0 && (
                   <button
                     type="button"

@@ -1942,6 +1942,12 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
   color: var(--accent-text);
 }
 .media-kolom-opnieuw:hover { background: var(--inset); }
+.media-kolom-dbxknop {
+  display: flex; align-items: center; gap: 6px;
+  border-top: 1px solid var(--rule); padding: 10px 14px;
+  font-size: 13px; font-weight: 650; color: var(--accent-text); text-decoration: none;
+}
+.media-kolom-dbxknop:hover { background: var(--inset); }
 
 .media-overgeslagen {
   background: var(--warn-wash); color: var(--warn); border-radius: var(--r-sm);
