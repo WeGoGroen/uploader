@@ -2,7 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useIkBen } from "@/components/RechtenProvider";
-import { enqueue, getServerSnapshot, getSnapshot, probeerOpnieuw, subscribe } from "@/lib/upload-queue";
+import {
+  enqueue,
+  forgetTasks,
+  getServerSnapshot,
+  getSnapshot,
+  probeerOpnieuw,
+  stopUpload,
+  subscribe,
+  verwijderGeupload,
+  type UploadTask,
+} from "@/lib/upload-queue";
 import { MEDIA_STAPPEN, type MediaStap } from "@/lib/media-folders";
 import { KOP_BYTES, herkenOpNaam, herkenUitKop, leesKop, type Herkenning } from "@/lib/media-herkennen";
 import { leesbareOmvang, type StapInhoud } from "@/lib/media-inhoud";
@@ -91,10 +101,16 @@ interface DropboxStand {
  * beeld is — dan kijkt niemand, en elke ronde is een Dropbox-aanroep voor
  * niets. Terug in beeld (bijvoorbeeld uit de Dropbox-app) kijkt hij meteen.
  */
-function useDropboxInhoud(projectmap: string | null): { stand: DropboxStand | null; fout: boolean } {
+function useDropboxInhoud(projectmap: string | null): {
+  stand: DropboxStand | null;
+  fout: boolean;
+  /** Meteen opnieuw kijken, bv. na het verwijderen van een bestand. */
+  ververs: () => void;
+} {
   const [stand, setStand] = useState<{ voor: string; stand: DropboxStand | null; fout: boolean } | null>(
     null
   );
+  const kijkNu = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!projectmap) return;
@@ -146,19 +162,22 @@ function useDropboxInhoud(projectmap: string | null): { stand: DropboxStand | nu
       if (document.visibilityState === "visible") void kijk();
     };
 
+    kijkNu.current = () => void kijk();
     void kijk();
     document.addEventListener("visibilitychange", weerInBeeld);
     return () => {
       weg = true;
+      kijkNu.current = () => {};
       if (timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", weerInBeeld);
     };
   }, [projectmap]);
 
   // Een stand van een vorige opname hoort niet bij deze.
+  const ververs = () => kijkNu.current();
   return stand && stand.voor === projectmap
-    ? { stand: stand.stand, fout: stand.fout }
-    : { stand: null, fout: false };
+    ? { stand: stand.stand, fout: stand.fout, ververs }
+    : { stand: null, fout: false, ververs };
 }
 
 /**
@@ -224,6 +243,42 @@ export default function MediaFlow() {
   // submap en naam. Alleen voor wat op dit apparaat gekozen is.
   const [redenen, setRedenen] = useState<Record<string, string>>({});
   const [sleepErover, setSleepErover] = useState(false);
+  // Welk bestand op "verwijderen?" staat, en welke daar nu mee bezig is.
+  const [teVerwijderen, setTeVerwijderen] = useState<string | null>(null);
+  const [verwijderBezig, setVerwijderBezig] = useState<string | null>(null);
+  const [verwijderFout, setVerwijderFout] = useState<string | null>(null);
+
+  /**
+   * Een bestand uit de opname halen. Wat er gebeurt hangt af van waar het is:
+   * al in Dropbox → daar weghalen; nog onderweg → de upload stoppen; mislukt →
+   * alleen uit de lijst, want in Dropbox staat het niet.
+   */
+  async function verwijder(t: UploadTask) {
+    setVerwijderFout(null);
+    if (t.dropbox === "uploading") {
+      stopUpload(t.id);
+      setTeVerwijderen(null);
+      return;
+    }
+    if (t.dropbox === "error") {
+      forgetTasks([t.id]);
+      setTeVerwijderen(null);
+      return;
+    }
+    setVerwijderBezig(t.id);
+    try {
+      const weg = await verwijderGeupload(t.id);
+      if (weg) {
+        setTeVerwijderen(null);
+        kijkInDropbox();
+      } else {
+        setVerwijderFout(t.id);
+      }
+    } finally {
+      setVerwijderBezig(null);
+    }
+  }
+
   // Uitkomst van "opnieuw proberen" als er niets te herstarten viel.
   const [opnieuwMelding, setOpnieuwMelding] = useState<string | null>(null);
 
@@ -250,7 +305,7 @@ export default function MediaFlow() {
     [alleTaken, folder]
   );
 
-  const { stand: dropbox, fout: dropboxFout } = useDropboxInhoud(folder?.path ?? null);
+  const { stand: dropbox, fout: dropboxFout, ververs: kijkInDropbox } = useDropboxInhoud(folder?.path ?? null);
 
   /**
    * Hoeveel bestanden er voor een stap staan.
@@ -1278,12 +1333,26 @@ export default function MediaFlow() {
                     {eigen.map((t) => (
                       <li key={t.id}>
                         <span className="media-kolom-r1">
-                          <span className="media-kolom-naam">{t.name}</span>
+                          <span className="media-kolom-naam" title={t.name}>{t.name}</span>
                           {/* Ook bij "klaar" het percentage: 100% is het antwoord
                               op de vraag die je stelt terwijl je staat te wachten. */}
                           <span className={`media-kolom-st is-${t.dropbox}`}>
                             {t.dropbox === "error" ? "mislukt" : t.dropbox === "done" ? "✓ 100%" : `${t.pct}%`}
                           </span>
+                          <button
+                            type="button"
+                            className={`media-kolom-del${teVerwijderen === t.id ? " is-open" : ""}`}
+                            aria-label={`${t.name} verwijderen`}
+                            title="Verwijderen"
+                            onClick={() => {
+                              setVerwijderFout(null);
+                              // Mislukt staat niet in Dropbox: niets om over te twijfelen.
+                              if (t.dropbox === "error") void verwijder(t);
+                              else setTeVerwijderen(teVerwijderen === t.id ? null : t.id);
+                            }}
+                          >
+                            ✕
+                          </button>
                         </span>
                         {t.dropbox === "error" && t.dropboxError && (
                           <span className="media-kolom-r2" style={{ color: "var(--bad)" }}>
@@ -1296,6 +1365,39 @@ export default function MediaFlow() {
                         {t.dropbox === "uploading" && t.pct > 0 && (
                           <span className="up-bar media-kolom-bar-klein">
                             <span className="up-bar-fill" style={{ width: `${t.pct}%` }} />
+                          </span>
+                        )}
+                        {teVerwijderen === t.id && t.dropbox !== "error" && (
+                          <span className="media-kolom-confirm">
+                            <span className="media-kolom-confirm-vraag">
+                              {verwijderFout === t.id
+                                ? "Verwijderen lukte niet. Nog een keer?"
+                                : t.dropbox === "done"
+                                  ? "Uit Dropbox verwijderen?"
+                                  : "Upload stoppen en weghalen?"}
+                            </span>
+                            <button
+                              type="button"
+                              className="doc-file-yes"
+                              disabled={verwijderBezig === t.id}
+                              onClick={() => void verwijder(t)}
+                            >
+                              {verwijderBezig === t.id
+                                ? "Bezig…"
+                                : t.dropbox === "done"
+                                  ? "Ja, verwijder"
+                                  : "Ja, stop"}
+                            </button>
+                            <button
+                              type="button"
+                              className="doc-file-no"
+                              onClick={() => {
+                                setTeVerwijderen(null);
+                                setVerwijderFout(null);
+                              }}
+                            >
+                              Nee
+                            </button>
                           </span>
                         )}
                       </li>

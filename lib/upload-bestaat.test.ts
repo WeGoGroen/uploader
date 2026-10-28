@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { staatErAl } from "./upload-queue";
+import { GestoptFout, magOpnieuw, staatErAl, zoekBestand } from "./upload-queue";
 import { isMediaAanlevering, schrijfwijze } from "./media-folders";
 
 /**
@@ -41,5 +41,38 @@ describe("schrijfwijze", () => {
       mode: "overwrite",
       autorename: false,
     });
+  });
+});
+
+/**
+ * Verwijderen moet het eigen bestand raken. Staat er een ander bestand met
+ * dezelfde naam en heeft Dropbox het eigen bestand hernoemd, dan zou weghalen
+ * op de oorspronkelijke naam juist het verkeerde beeld wissen.
+ */
+describe("zoekBestand", () => {
+  it("picks the renamed copy when the plain name is a different file", () => {
+    const lijst = [
+      { name: "DSC00001.ARW", size: 999 },
+      { name: "DSC00001 (1).ARW", size: 100 },
+    ];
+    expect(zoekBestand(lijst, "DSC00001.ARW", 100)).toBe("DSC00001 (1).ARW");
+  });
+
+  it("prefers the plain name when both match", () => {
+    const lijst = [
+      { name: "DSC00001 (1).ARW", size: 100 },
+      { name: "DSC00001.ARW", size: 100 },
+    ];
+    expect(zoekBestand(lijst, "DSC00001.ARW", 100)).toBe("DSC00001.ARW");
+  });
+
+  it("returns null when nothing matches", () => {
+    expect(zoekBestand([{ name: "DSC00001.ARW", size: 999 }], "DSC00001.ARW", 100)).toBeNull();
+  });
+});
+
+describe("a stopped upload", () => {
+  it("is never retried", () => {
+    expect(magOpnieuw(new GestoptFout())).toBe(false);
   });
 });

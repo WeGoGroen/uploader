@@ -1930,6 +1930,21 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
 .media-kolom-st { flex: none; font-variant-numeric: tabular-nums; color: var(--ink-faint); }
 .media-kolom-st.is-done { color: var(--ok); font-weight: 650; }
 .media-kolom-st.is-error { color: var(--bad); font-weight: 700; }
+/* Verwijderen per bestand; zelfde knop en bevestiging als .doc-file-del. */
+.media-kolom-r1 { align-items: center; }
+.media-kolom-r1 .media-kolom-naam { flex: 1; min-width: 0; }
+.media-kolom-del {
+  flex: none; width: 30px; height: 30px; margin: -6px -4px -6px 0; border-radius: 8px;
+  border: 0; background: none; color: var(--ink-faint);
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.media-kolom-del:hover, .media-kolom-del.is-open { background: var(--bad-wash); color: var(--bad); }
+.media-kolom-confirm {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 6px; padding: 6px 8px; border-radius: 8px; background: var(--bad-wash);
+  font-size: 12px; color: var(--bad); font-weight: 600;
+}
+.media-kolom-confirm-vraag { flex: 1 1 100%; }
 .media-kolom-bar-klein { height: 3px; margin-top: 4px; }
 .media-kolom-dbx {
   margin: 0; padding: 8px 14px; border-top: 1px solid var(--rule);
