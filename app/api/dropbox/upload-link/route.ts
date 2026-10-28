@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createTemporaryUploadLink, getSharedAccessToken } from "@/lib/dropbox";
+import { schrijfwijze } from "@/lib/media-folders";
 
 /**
  * Geeft tijdelijke Dropbox-uploadlinks terug, zodat de browser bestanden
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
   const links: Record<string, string | null> = {};
   await Promise.all(
     paden.map(async (pad) => {
-      links[pad] = await createTemporaryUploadLink(accessToken, pad).catch((err) => {
+      links[pad] = await createTemporaryUploadLink(accessToken, pad, schrijfwijze(pad)).catch((err) => {
         console.error("Failed to create Dropbox upload link", { pad, err });
         return null;
       });

@@ -438,14 +438,27 @@ export async function createFolder(accessToken: string, path: string): Promise<v
   throw new DropboxApiError(res.status, `Dropbox create_folder_v2 failed: ${res.status} ${body}`);
 }
 
+/** Hoe een upload omgaat met een bestand dat er al staat. */
+export interface Schrijfwijze {
+  mode: "add" | "overwrite";
+  autorename: boolean;
+}
+const OVERSCHRIJVEN: Schrijfwijze = { mode: "overwrite", autorename: false };
+
 /** Uploadt een bestand naar Dropbox; overschrijft stilzwijgend als het al bestaat. */
-export async function uploadFile(accessToken: string, path: string, content: Buffer): Promise<void> {
+export async function uploadFile(
+  accessToken: string,
+  path: string,
+  content: Buffer,
+  /** Standaard overschrijven; zie schrijfwijze() in lib/media-folders.ts. */
+  schrijf: Schrijfwijze = OVERSCHRIJVEN
+): Promise<void> {
   const res = await fetch(`${DROPBOX_CONTENT_BASE}/files/upload`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/octet-stream",
-      "Dropbox-API-Arg": safeHeaderJson({ path, mode: "overwrite", autorename: false, mute: true }),
+      "Dropbox-API-Arg": safeHeaderJson({ path, ...schrijf, mute: true }),
     },
     body: new Uint8Array(content),
   });
@@ -461,7 +474,11 @@ export async function uploadFile(accessToken: string, path: string, content: Buf
  * account-token blijft server-side. Dropbox staat via deze weg bestanden tot
  * 150MB toe — daarboven blijft de chunked route hieronder nodig.
  */
-export async function createTemporaryUploadLink(accessToken: string, path: string): Promise<string> {
+export async function createTemporaryUploadLink(
+  accessToken: string,
+  path: string,
+  schrijf: Schrijfwijze = OVERSCHRIJVEN
+): Promise<string> {
   const res = await fetch(`${DROPBOX_API_BASE}/files/get_temporary_upload_link`, {
     method: "POST",
     headers: {
@@ -469,7 +486,7 @@ export async function createTemporaryUploadLink(accessToken: string, path: strin
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      commit_info: { path, mode: "overwrite", autorename: false, mute: true },
+      commit_info: { path, ...schrijf, mute: true },
       duration: 3600,
     }),
   });
@@ -559,7 +576,8 @@ export async function finishUploadSession(
   sessionId: string,
   offset: number,
   path: string,
-  chunk: Buffer
+  chunk: Buffer,
+  schrijf: Schrijfwijze = OVERSCHRIJVEN
 ): Promise<void> {
   const res = await fetch(`${DROPBOX_CONTENT_BASE}/files/upload_session/finish`, {
     method: "POST",
@@ -568,7 +586,7 @@ export async function finishUploadSession(
       "Content-Type": "application/octet-stream",
       "Dropbox-API-Arg": safeHeaderJson({
         cursor: { session_id: sessionId, offset },
-        commit: { path, mode: "overwrite", autorename: false, mute: true },
+        commit: { path, ...schrijf, mute: true },
       }),
     },
     body: new Uint8Array(chunk),

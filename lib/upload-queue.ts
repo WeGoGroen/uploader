@@ -14,6 +14,7 @@
  */
 
 import { compressImage, isCompressibleImage, mayCompressFolder } from "@/lib/image-compress";
+import { schrijfwijze } from "@/lib/media-folders";
 import { tijdslimiet } from "@/lib/tijdslimiet";
 import { vraagUploadLink } from "@/lib/upload-links";
 import {
@@ -44,6 +45,9 @@ export interface UploadTask {
   /** Geschatte resterende tijd in seconden, of null zolang dat nog niet te
       zeggen valt (te weinig gemeten). */
   etaSeconds?: number | null;
+  /** Grootte van het bestand dat verstuurd wordt, zodra de upload begint.
+      Nodig om het in Dropbox terug te vinden (zie zoekBestand). */
+  size?: number;
 }
 
 /**
@@ -124,6 +128,19 @@ const pending: { task: UploadTask; file: File }[] = [];
 let runningWeight = 0;
 let seq = 0;
 
+/**
+ * De bestanden van deze sessie, in het geheugen, per taak.
+ *
+ * "Opnieuw proberen" las het bestand alleen uit IndexedDB. Maar daar staat
+ * lang niet altijd iets: een video of 360-opname van een paar gigabyte past
+ * op een iPad vaak niet in de opslag (of het wegschrijven is na vier seconden
+ * opgegeven), en dan deed de knop "Mislukte opnieuw proberen" stil niets —
+ * precies bij de grote bestanden die het vaakst mislukken. Zolang het
+ * tabblad openstaat hebben we het bestand gewoon nog; IndexedDB is alleen
+ * nodig na een herstart.
+ */
+const bestanden = new Map<string, File>();
+
 // Eigen rijtje voor het verkleinen van foto's, los van de uploadslots.
 // Vroeger gebeurde het verkleinen bínnen een uploadslot: terwijl de CPU een
 // HEIC decodeerde deed dat netwerkslot niets. Nu werkt de compressie vooruit
@@ -150,16 +167,25 @@ function emit() {
  */
 const startedAt = new Map<string, number>();
 
+/**
+ * Wat er bij de eerste meting van deze poging al stond. Een hervatte upload
+ * begint op bv. 80%: die bytes zijn niet in déze poging verstuurd, en ze
+ * meetellen gaf direct na hervatten "nog 3 seconden" voor een halve video.
+ */
+const startBytes = new Map<string, number>();
+
 function setProgress(id: string, done: number, total: number) {
   const start = startedAt.get(id);
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  if (!startBytes.has(id)) startBytes.set(id, done);
+  const ditKeer = done - (startBytes.get(id) ?? 0);
 
   let etaSeconds: number | null = null;
-  if (start && done > 0) {
+  if (start && ditKeer > 0) {
     const elapsed = (Date.now() - start) / 1000;
     // Pas schatten na een seconde en wat data; daarvoor is de meting ruis.
-    if (elapsed > 1 && done > 256 * 1024) {
-      const bytesPerSecond = done / elapsed;
+    if (elapsed > 1 && ditKeer > 256 * 1024) {
+      const bytesPerSecond = ditKeer / elapsed;
       etaSeconds = Math.max(0, (total - done) / bytesPerSecond);
     }
   }
@@ -189,7 +215,10 @@ export function getServerSnapshot(): UploadTask[] {
     verwijderd, zodat de map niet ten onrechte "klaar" blijft. */
 export function removeTask(folderPath: string, folder: string, name: string) {
   for (const t of tasks) {
-    if (t.folderPath === folderPath && t.folder === folder && t.name === name) void vergeetUpload(t.id);
+    if (t.folderPath === folderPath && t.folder === folder && t.name === name) {
+      void vergeetUpload(t.id);
+      bestanden.delete(t.id);
+    }
   }
   tasks = tasks.filter((t) => !(t.folderPath === folderPath && t.folder === folder && t.name === name));
   emit();
@@ -221,6 +250,7 @@ export async function vergeetTakenVoor(
   hoortErbij: (item: { folderPath: string }) => boolean
 ): Promise<number> {
   const ids = new Set(tasks.filter(hoortErbij).map((t) => t.id));
+  for (const id of ids) bestanden.delete(id);
   if (ids.size > 0) {
     tasks = tasks.filter((t) => !ids.has(t.id));
     emit();
@@ -252,8 +282,25 @@ export function enqueue(
     pct: 0,
     dropbox: "uploading",
   };
-  // Zelfde bestandsnaam opnieuw uploaden: oude regel vervangen i.p.v. dubbel tonen.
-  tasks = [...tasks.filter((t) => !(t.folderPath === folderPath && t.folder === folder && t.name === file.name)), task];
+  const zelfdeNaam = tasks.filter(
+    (t) => t.folderPath === folderPath && t.folder === folder && t.name === file.name
+  );
+  // Hetzelfde bestand twee keer gekozen terwijl het nog omhoog gaat (nog eens
+  // op "Meer uploaden" en dezelfde selectie): niet nóg een keer versturen.
+  // Zelfde naam en grootte is hier hetzelfde bestand.
+  if (zelfdeNaam.some((t) => t.dropbox === "uploading" && bestanden.get(t.id)?.size === file.size)) return;
+  // Een afgeronde of mislukte regel met dezelfde naam maakt plaats voor de
+  // nieuwe, maar ook uit de opslag: anders pakte hervatOpenstaandeUploads()
+  // het oude record bij de volgende keer openen weer op — een spookupload.
+  // Loopt de oude nog (een ánder bestand met dezelfde naam, bv. van een
+  // tweede camera), dan blijven beide staan: dat zijn twee uploads.
+  const vervangen = new Set(zelfdeNaam.filter((t) => t.dropbox !== "uploading").map((t) => t.id));
+  for (const id of vervangen) {
+    void vergeetUpload(id);
+    bestanden.delete(id);
+  }
+  tasks = [...tasks.filter((t) => !vervangen.has(t.id)), task];
+  bestanden.set(task.id, file);
   emit();
   // Meteen vastleggen: als de iPad het tabblad afsluit terwijl dit nog
   // loopt, pakken we 'm bij de volgende keer openen weer op.
@@ -336,6 +383,7 @@ export async function hervatOpenstaandeUploads(): Promise<string[]> {
       dropbox: "uploading",
       };
     tasks = [...tasks, task];
+    bestanden.set(task.id, u.file);
     routeer(task, u.file);
     nieuw++;
   }
@@ -357,11 +405,25 @@ export async function hervatOpenstaandeUploads(): Promise<string[]> {
  */
 export async function probeerOpnieuw(ids: string[]): Promise<number> {
   const set = new Set(ids);
-  const bewaard = await openstaandeUploads();
+  const bewaard = (await openstaandeUploads()).filter((u) => set.has(u.id));
+  // Wat niet (meer) in de opslag staat maar nog wel in het geheugen van dit
+  // tabblad: zie `bestanden`.
+  for (const t of tasks) {
+    const file = bestanden.get(t.id);
+    if (!set.has(t.id) || !file || bewaard.some((u) => u.id === t.id)) continue;
+    bewaard.push({
+      id: t.id,
+      folderPath: t.folderPath,
+      folder: t.folder,
+      name: t.name,
+      account: t.account ?? null,
+      file,
+      bewaardOp: Date.now(),
+    });
+  }
   let gestart = 0;
 
   for (const u of bewaard) {
-    if (!set.has(u.id)) continue;
     const bestaand = tasks.find((t) => t.id === u.id);
     // Al bezig? Dan niet nog een keer in de rij zetten.
     if (bestaand?.dropbox === "uploading") continue;
@@ -387,6 +449,7 @@ export async function probeerOpnieuw(ids: string[]): Promise<number> {
     } else {
       tasks = [...tasks, task];
     }
+    bestanden.set(u.id, u.file);
     routeer(task, u.file);
     gestart++;
   }
@@ -401,19 +464,129 @@ export async function probeerOpnieuw(ids: string[]): Promise<number> {
  * een kelder of buitengebied) staat dan al in IndexedDB en gaat zo vanzelf
  * omhoog, zonder dat de opnemer op "opnieuw" hoeft te tikken.
  */
+/**
+ * Hoe vaak een mislukte upload vanzelf opnieuw mag. Een upload die structureel
+ * stuk is (pad bestaat niet, geen rechten) mag niet bij elke keer terugkomen
+ * in beeld opnieuw een video van een gigabyte gaan versturen.
+ */
+const VANZELF_MAX = 3;
+const vanzelfGeprobeerd = new Map<string, number>();
+
+function herstelVanzelf() {
+  const mislukt = tasks
+    .filter((t) => t.dropbox === "error" && (vanzelfGeprobeerd.get(t.id) ?? 0) < VANZELF_MAX)
+    .map((t) => t.id);
+  if (mislukt.length === 0) return;
+  for (const id of mislukt) vanzelfGeprobeerd.set(id, (vanzelfGeprobeerd.get(id) ?? 0) + 1);
+  void probeerOpnieuw(mislukt);
+}
+
+/*
+  Ook terug in beeld: op een iPad sneuvelt een upload vooral doordat het
+  scherm op slot ging of de opnemer even een andere app opende. iOS legt het
+  tabblad dan stil, de verbinding valt weg en de upload staat op "mislukt" —
+  zonder dat er een "online"-gebeurtenis komt, want het netwerk was er al die
+  tijd. Wie terugkomt in de app wil dat het gewoon verdergaat.
+*/
 if (typeof window !== "undefined") {
-  window.addEventListener("online", () => {
-    const mislukt = tasks.filter((t) => t.dropbox === "error").map((t) => t.id);
-    if (mislukt.length > 0) void probeerOpnieuw(mislukt);
+  window.addEventListener("online", herstelVanzelf);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && navigator.onLine !== false) herstelVanzelf();
   });
 }
 
 /** Haalt taken op id uit de lijst — voor het wegklikken van de hervat-melding. */
 export function forgetTasks(ids: string[]) {
   const set = new Set(ids);
-  for (const t of tasks) if (set.has(t.id)) void vergeetUpload(t.id);
+  for (const t of tasks) {
+    if (!set.has(t.id)) continue;
+    void vergeetUpload(t.id);
+    bestanden.delete(t.id);
+  }
   tasks = tasks.filter((t) => !set.has(t.id));
   emit();
+}
+
+/** Taken die de opnemer heeft stopgezet; zie stopUpload. */
+const gestopt = new Set<string>();
+/** Lopende verzoeken per taak, zodat stoppen ze meteen kan afbreken. */
+const lopendeXhrs = new Map<string, Set<XMLHttpRequest>>();
+
+/** De opnemer heeft deze upload zelf gestopt: niet herhalen, niet melden. */
+export class GestoptFout extends Error {
+  constructor() {
+    super("Upload gestopt");
+    this.name = "GestoptFout";
+  }
+}
+
+function stopAls(id: string) {
+  if (gestopt.has(id)) throw new GestoptFout();
+}
+
+/**
+ * Stopt een upload die nog loopt of nog moet beginnen, en haalt hem weg — uit
+ * de lijst én uit de opslag, anders zou hervatOpenstaandeUploads() hem bij de
+ * volgende keer openen gewoon weer starten.
+ *
+ * Lopende verzoeken worden meteen afgebroken; een blok dat via onze server
+ * loopt (fetch) maakt zijn ronde nog af, maar daarna start er niets meer. Komt
+ * de upload precies op dat moment toch binnen, dan haalt runTask hem alsnog
+ * uit Dropbox.
+ */
+export function stopUpload(id: string) {
+  gestopt.add(id);
+  for (const rij of [pending, compressPending]) {
+    const i = rij.findIndex((p) => p.task.id === id);
+    if (i !== -1) rij.splice(i, 1);
+  }
+  for (const xhr of lopendeXhrs.get(id) ?? []) xhr.abort();
+  lopendeXhrs.delete(id);
+  forgetTasks([id]);
+}
+
+/**
+ * Haalt een afgeronde upload weer uit Dropbox en uit de lijst. Geeft false als
+ * dat niet lukte; dan blijft de regel staan, zodat het opnieuw kan.
+ */
+export async function verwijderGeupload(id: string): Promise<boolean> {
+  const t = tasks.find((x) => x.id === id);
+  if (!t) return true;
+  const weg = await haalUitDropbox(t.folderPath, t.folder, t.name, t.size);
+  if (weg) forgetTasks([id]);
+  return weg;
+}
+
+/**
+ * Verwijdert een geüpload bestand uit de map. Eerst opzoeken: bij de
+ * media-aanlevering kan Dropbox het onder "naam (1).ext" hebben gezet, en dan
+ * zou verwijderen op de oorspronkelijke naam juist het ándere bestand raken.
+ * Staat het er niet (meer), dan is er niets te doen.
+ */
+async function haalUitDropbox(folderPath: string, folder: string, name: string, size?: number): Promise<boolean> {
+  try {
+    const res = await fetch("/api/dropbox/files", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: `${folderPath}/${folder}` }),
+      signal: tijdslimiet(KORT_MS),
+    });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { files?: { name: string; size: number }[] };
+    const lijst = data.files ?? [];
+    const gevonden =
+      size === undefined ? (lijst.find((f) => f.name.toLowerCase() === name.toLowerCase())?.name ?? null) : zoekBestand(lijst, name, size);
+    if (!gevonden) return true;
+    const weg = await fetch("/api/dropbox/delete-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: `${folderPath}/${folder}/${gevonden}` }),
+      signal: tijdslimiet(KORT_MS),
+    });
+    return weg.ok;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -447,10 +620,28 @@ function pump() {
   }
 }
 
+/** Een terugvalweg begint weer bij nul; de tijdsschatting dus ook. */
+function nieuweMeting(id: string) {
+  startedAt.set(id, Date.now());
+  startBytes.delete(id);
+}
+
+function klaarMet(id: string) {
+  startedAt.delete(id);
+  startBytes.delete(id);
+  bestanden.delete(id);
+  vanzelfGeprobeerd.delete(id);
+  void vergeetUpload(id);
+}
+
 async function runTask(task: UploadTask, file: File) {
   // Verkleinen is hier al gebeurd (zie pumpCompress): dit slot is puur netwerk.
+  // Gestopt terwijl het nog aan het verkleinen was of in de rij stond.
+  if (gestopt.has(task.id)) return;
   const fullPath = `${task.folderPath}/${task.folder}/${file.name}`;
   startedAt.set(task.id, Date.now());
+  startBytes.delete(task.id);
+  patch(task.id, { size: file.size });
   try {
     if (file.size < PARALLEL_VANAF) {
       // Foto's, RAW inbegrepen: in één keer. Blokken opzetten kost hier alleen
@@ -461,27 +652,39 @@ async function runTask(task: UploadTask, file: File) {
       // een geblokkeerde sessie de upload niet onmogelijk maakt.
       try {
         await uploadChunkedDirect(task, file, fullPath);
-      } catch {
+      } catch (err) {
+        if (gestopt.has(task.id)) throw err;
+        nieuweMeting(task.id);
         await uploadDirect(task, file, fullPath);
       }
     } else {
       // Te groot voor één aanroep: parallelle blokken, anders via onze server.
       try {
         await uploadChunkedDirect(task, file, fullPath);
-      } catch {
+      } catch (err) {
+        if (gestopt.has(task.id)) throw err;
+        nieuweMeting(task.id);
         await uploadChunked(task, file, fullPath);
       }
     }
+    if (gestopt.has(task.id)) {
+      // Net binnengekomen terwijl de opnemer op "stoppen" tikte: hij wilde
+      // dit bestand niet, dus ook niet in Dropbox.
+      void haalUitDropbox(task.folderPath, task.folder, file.name, file.size);
+      return;
+    }
     patch(task.id, { dropbox: "done", pct: 100, etaSeconds: null });
-    startedAt.delete(task.id);
-    void vergeetUpload(task.id);
+    klaarMet(task.id);
   } catch (err) {
+    startedAt.delete(task.id);
+    startBytes.delete(task.id);
+    if (gestopt.has(task.id)) return;
     // De upload kan tóch geslaagd zijn (netwerk-hik ná aankomst) — pas
     // "mislukt" tonen als het bestand echt niet in de map staat.
-    const reallyThere = await fileExists(task.folderPath, task.folder, file.name);
+    const reallyThere = await fileExists(task.folderPath, task.folder, file);
     if (reallyThere) {
-      patch(task.id, { dropbox: "done", pct: 100 });
-      void vergeetUpload(task.id);
+      patch(task.id, { dropbox: "done", pct: 100, etaSeconds: null });
+      klaarMet(task.id);
       return;
     }
     // Bewust níét vergeten bij een fout: zo kan een volgende keer openen het
@@ -518,6 +721,7 @@ async function uploadDirect(task: UploadTask, file: File, fullPath: string) {
       headers: { "Content-Type": "application/octet-stream" },
       onProgress: (verzonden, totaal) => setProgress(task.id, verzonden, totaal),
       melding: (status) => `Dropbox weigerde het bestand (gaf ${status})`,
+      taakId: task.id,
     });
   });
 }
@@ -535,6 +739,7 @@ async function uploadViaServer(task: UploadTask, file: File) {
     verstuurXhr({
       url: "/api/dropbox/upload-file",
       body: form,
+      taakId: task.id,
       onProgress: (verzonden, totaal) => setProgress(task.id, verzonden, totaal),
       melding: (_status, body) => {
         try {
@@ -660,6 +865,7 @@ function dropboxStatus(err: UploadFout): number {
  * niets aan op.
  */
 export function magOpnieuw(err: unknown): boolean {
+  if (err instanceof GestoptFout) return false;
   if (err instanceof NetwerkFout) return true;
   if (err instanceof UploadFout) {
     const status = dropboxStatus(err);
@@ -767,12 +973,19 @@ interface VerstuurOpties {
   onProgress?: (verzonden: number, totaal: number) => void;
   /** Vertaalt een foutantwoord naar een melding voor in beeld. */
   melding?: (status: number, body: string) => string;
+  /** De taak waar dit verzoek bij hoort, zodat stopUpload het kan afbreken. */
+  taakId?: string;
 }
 
 /** Eén verzoek met bestandsinhoud, mét bewaking op stilstand. */
-function verstuurXhr({ url, body, headers = {}, onProgress, melding }: VerstuurOpties): Promise<string> {
+function verstuurXhr({ url, body, headers = {}, onProgress, melding, taakId }: VerstuurOpties): Promise<string> {
   return new Promise<string>((resolve, reject) => {
+    if (taakId && gestopt.has(taakId)) return reject(new GestoptFout());
     const xhr = new XMLHttpRequest();
+    if (taakId) {
+      if (!lopendeXhrs.has(taakId)) lopendeXhrs.set(taakId, new Set());
+      lopendeXhrs.get(taakId)!.add(xhr);
+    }
     let afgerond = false;
     let bewaker: ReturnType<typeof setTimeout> | null = null;
 
@@ -784,6 +997,7 @@ function verstuurXhr({ url, body, headers = {}, onProgress, melding }: VerstuurO
       if (afgerond) return;
       afgerond = true;
       stop();
+      if (taakId) lopendeXhrs.get(taakId)?.delete(xhr);
       fn();
     };
     const bewaak = (ms: number, waarom: string) => {
@@ -822,6 +1036,9 @@ function verstuurXhr({ url, body, headers = {}, onProgress, melding }: VerstuurO
       });
     xhr.onerror = () => eenmalig(() => reject(new NetwerkFout()));
     xhr.ontimeout = () => eenmalig(() => reject(new NetwerkFout("Netwerkfout: tijd verstreken")));
+    // Alleen stopUpload breekt af zonder eerst zelf af te ronden; de bewaker
+    // hierboven rondt eerst af, dus daar is dit een no-op.
+    xhr.onabort = () => eenmalig(() => reject(new GestoptFout()));
 
     // Ook vóór de eerste byte: een verbinding die niet opgezet wordt hangt net
     // zo hard als een verbinding die halverwege stilvalt.
@@ -850,6 +1067,7 @@ async function uploadChunkedDirect(task: UploadTask, file: File, fullPath: strin
   try {
     await chunkedDirectPoging(task, file, fullPath, true);
   } catch (err) {
+    if (gestopt.has(task.id)) throw err;
     const bewaard = await leesUploadSessie(task.id);
     // Alleen een tweede poging als er ook echt iets te hergebruiken viel;
     // anders was dit gewoon een mislukte upload en heeft herhalen geen zin.
@@ -986,6 +1204,7 @@ async function chunkedDirectPoging(
               report();
             },
             melding: (status) => `Dropbox append gaf ${status}`,
+            taakId: task.id,
           }).finally(() => inFlight.delete(workerId))
         )
       );
@@ -1010,6 +1229,7 @@ async function chunkedDirectPoging(
 
   async function worker(workerId: number) {
     for (;;) {
+      stopAls(task.id);
       const i = next++;
       if (i >= parallel.length) return;
       const [from, to] = parallel[i];
@@ -1019,7 +1239,9 @@ async function chunkedDirectPoging(
   await Promise.all(
     Array.from({ length: Math.min(CHUNK_PARALLEL, parallel.length) }, (_, w) => worker(w))
   );
+  stopAls(task.id);
   if (sluit) await stuurBlok(0, sluit[0], sluit[1], true);
+  stopAls(task.id);
 
   // Afronden staat aan het éínd van een lange upload — juist daar is het token
   // het oudst.
@@ -1027,7 +1249,7 @@ async function chunkedDirectPoging(
     metBlokRetry(() =>
       dbx("upload_session/finish", {
         cursor: { session_id: sessionId, offset: file.size },
-        commit: { path: fullPath, mode: "overwrite", autorename: false, mute: true },
+        commit: { path: fullPath, ...schrijfwijze(fullPath), mute: true },
       })
     )
   );
@@ -1115,6 +1337,7 @@ async function uploadChunked(task: UploadTask, file: File, fullPath: string) {
   const { parallel, sluit } = afsluitBlok(file.size, ranges);
   async function worker() {
     for (;;) {
+      stopAls(task.id);
       const i = next++;
       if (i >= parallel.length) return;
       const [from, to] = parallel[i];
@@ -1122,7 +1345,9 @@ async function uploadChunked(task: UploadTask, file: File, fullPath: string) {
     }
   }
   await Promise.all(Array.from({ length: Math.min(CHUNK_PARALLEL, parallel.length) }, worker));
+  stopAls(task.id);
   if (sluit) await stuurBlok(sluit[0], sluit[1], true);
+  stopAls(task.id);
 
   await metBlokRetry(() =>
     chunkRoute(
@@ -1135,7 +1360,38 @@ async function uploadChunked(task: UploadTask, file: File, fullPath: string) {
 }
 
 
-async function fileExists(folderPath: string, folder: string, name: string): Promise<boolean> {
+/**
+ * Staat dit bestand al in de lijst van de map?
+ *
+ * Op naam én grootte. Alleen op naam keek hier eerder, en dan was een
+ * mislukte upload "klaar" zodra er toevallig een ánder bestand met dezelfde
+ * naam stond — van een tweede camera, of een eerdere versie — en werd het
+ * bewaarde bestand opgeruimd. Bij de media-aanlevering kan Dropbox het onder
+ * "naam (1).ext" hebben gezet; zie isMediaAanlevering.
+ */
+export function staatErAl(lijst: { name: string; size: number }[], name: string, size: number): boolean {
+  return zoekBestand(lijst, name, size) !== null;
+}
+
+/** Onder welke naam staat dit bestand in de lijst? Zelfde regels als staatErAl;
+    de eigen naam gaat voor een hernoemde kopie. */
+export function zoekBestand(lijst: { name: string; size: number }[], name: string, size: number): string | null {
+  const punt = name.lastIndexOf(".");
+  const stam = punt > 0 ? name.slice(0, punt) : name;
+  const ext = punt > 0 ? name.slice(punt) : "";
+  const hernoemd = (n: string) =>
+    n.toLowerCase().startsWith(`${stam} (`.toLowerCase()) &&
+    n.toLowerCase().endsWith(`)${ext}`.toLowerCase()) &&
+    /^\d+$/.test(n.slice(stam.length + 2, n.length - ext.length - 1));
+  const zelfde = lijst.filter((f) => f.size === size);
+  return (
+    zelfde.find((f) => f.name.toLowerCase() === name.toLowerCase())?.name ??
+    zelfde.find((f) => hernoemd(f.name))?.name ??
+    null
+  );
+}
+
+async function fileExists(folderPath: string, folder: string, file: File): Promise<boolean> {
   try {
     const res = await fetch("/api/dropbox/files", {
       method: "POST",
@@ -1146,7 +1402,7 @@ async function fileExists(folderPath: string, folder: string, name: string): Pro
       signal: tijdslimiet(KORT_MS),
     });
     const data = await res.json();
-    return ((data.files ?? []) as { name: string }[]).some((f) => f.name === name);
+    return staatErAl((data.files ?? []) as { name: string; size: number }[], file.name, file.size);
   } catch {
     return false;
   }
