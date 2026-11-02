@@ -60,7 +60,14 @@ async function leesGesprek(baseUrl: string, token: string, orderId: number) {
     opmerkingen: opmerkingenUit(ruw, orderId),
     // Welke velden Mediatask werkelijk stuurt: het endpoint is ongedocumenteerd,
     // en zo is de vorm na te kijken zonder in te loggen bij Mediatask.
-    velden: lijst[0] && typeof lijst[0] === "object" ? Object.keys(lijst[0] as object).sort() : [],
+    velden:
+      lijst[0] && typeof lijst[0] === "object"
+        ? [
+            ...Object.keys(lijst[0] as object).sort(),
+            // De vorm van het tijdveld, om na te kijken: niet gedocumenteerd.
+            `timestamps=${JSON.stringify((lijst[0] as Record<string, unknown>).timestamps ?? null)?.slice(0, 120)}`,
+          ]
+        : [],
   };
 }
 

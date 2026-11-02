@@ -34,11 +34,64 @@ export function lijstUit(ruw: unknown): unknown[] {
   return [];
 }
 
+/**
+ * Mediatask slaat opmerkingen uit hun eigen scherm op als HTML ("<div>…<br>").
+ * Platte tekst ervan maken: regels blijven regels, entiteiten worden tekens.
+ */
+export function zonderHtml(tekst: string): string {
+  if (!/[<&]/.test(tekst)) return tekst.trim();
+  return tekst
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(div|p|li|h\d)>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n: string) => String.fromCharCode(Number(n)))
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function tekstUit(r: Record<string, unknown>): string | null {
   const v = [r.comment, r.body, r.text, r.content, r.message].find(
     (x): x is string => typeof x === "string" && x.trim().length > 0
   );
-  return v ? v.trim() : null;
+  const schoon = v ? zonderHtml(v) : "";
+  return schoon || null;
+}
+
+/**
+ * Het tijdstip. Live gezien: Mediatask stuurt een veld `timestamps`; de vorm
+ * daarvan is niet gedocumenteerd, dus een tekst, een getal (seconden of
+ * milliseconden), een lijst of een object met created_at/created worden alle
+ * gelezen.
+ */
+export function tijdUit(r: Record<string, unknown>): string | null {
+  const kandidaten: unknown[] = [r.created_at, r.createdAt, r.date, r.created];
+  const ts = r.timestamps;
+  if (ts && typeof ts === "object" && !Array.isArray(ts)) {
+    const t = ts as Record<string, unknown>;
+    kandidaten.push(t.created_at, t.createdAt, t.created, t.date, t.inserted_at, t.updated_at);
+  } else if (Array.isArray(ts)) {
+    kandidaten.push(ts[0]);
+  } else {
+    kandidaten.push(ts);
+  }
+  for (const k of kandidaten) {
+    if (typeof k === "string" && k.trim()) {
+      const d = new Date(/^\d+$/.test(k.trim()) ? Number(k.trim()) * (k.trim().length <= 10 ? 1000 : 1) : k.trim());
+      if (!Number.isNaN(d.getTime())) return d.toISOString();
+    }
+    if (typeof k === "number" && Number.isFinite(k) && k > 0) {
+      return new Date(k < 1e12 ? k * 1000 : k).toISOString();
+    }
+  }
+  return null;
 }
 
 function schrijverUit(r: Record<string, unknown>): { door: string | null; doorId: number | null } {
@@ -69,7 +122,7 @@ export function leesOpmerkingVol(ruw: unknown, orderId: number): OpmerkingVol | 
   const tekst = tekstUit(r);
   if (!tekst) return null;
   const { door, doorId } = schrijverUit(r);
-  const op = [r.created_at, r.createdAt, r.date, r.created].find((v): v is string => typeof v === "string") ?? null;
+  const op = tijdUit(r);
   const eigenId = r.id ?? r.uuid;
   const id =
     eigenId !== undefined && eigenId !== null && String(eigenId).trim()
@@ -82,12 +135,17 @@ export function leesOpmerkingVol(ruw: unknown, orderId: number): OpmerkingVol | 
   return { id, tekst, door, doorId, op };
 }
 
+/** Mediatask nummert opmerkingen oplopend; bij gelijke (of geen) tijd beslist dat. */
+function volgnummer(id: string): number {
+  return /^\d+$/.test(id) ? Number(id) : Number.MAX_SAFE_INTEGER;
+}
+
 /** Alle opmerkingen, oudste eerst — zoals een gesprek leest. */
 export function opmerkingenUit(ruw: unknown, orderId: number): OpmerkingVol[] {
   return lijstUit(ruw)
     .map((x) => leesOpmerkingVol(x, orderId))
     .filter((o): o is OpmerkingVol => o !== null)
-    .sort((a, b) => (a.op ?? "").localeCompare(b.op ?? ""));
+    .sort((a, b) => (a.op ?? "").localeCompare(b.op ?? "") || volgnummer(a.id) - volgnummer(b.id));
 }
 
 /**
