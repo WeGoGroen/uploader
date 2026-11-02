@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leesOpmerkingVol, lijstUit, opmerkingenUit, vindAccount } from "@/lib/mediatask-opmerkingen";
+import { leesOpmerkingVol, lijstUit, opmerkingenUit, tijdUit, vindAccount, zonderHtml } from "@/lib/mediatask-opmerkingen";
 import type { ClickUpAccount } from "@/lib/clickup";
 
 describe("opmerkingenUit", () => {
@@ -50,5 +50,30 @@ describe("vindAccount", () => {
   });
   it("kiest niet bij een dubbele voornaam", () => {
     expect(vindAccount(accounts, { naam: "Jelle" })).toBeNull();
+  });
+});
+
+describe("zoals Mediatask het live stuurt", () => {
+  it("maakt platte tekst van hun HTML", () => {
+    expect(zonderHtml("<div>Hi,<br>Please check &amp; confirm</div><div>Thanks</div>")).toBe("Hi,\nPlease check & confirm\nThanks");
+    expect(zonderHtml("gewoon")).toBe("gewoon");
+  });
+  it("leest de tijd uit timestamps, in elke vorm", () => {
+    expect(tijdUit({ timestamps: { created_at: "2026-11-02T09:41:00Z" } })).toBe("2026-11-02T09:41:00.000Z");
+    expect(tijdUit({ timestamps: "2026-11-02 09:41:00+00" })).toBe("2026-11-02T09:41:00.000Z");
+    expect(tijdUit({ timestamps: 1793612460 })).toBe(new Date(1793612460000).toISOString());
+    expect(tijdUit({ timestamps: ["2026-11-02T09:41:00Z", "2026-11-02T10:00:00Z"] })).toBe("2026-11-02T09:41:00.000Z");
+    expect(tijdUit({ timestamps: null })).toBeNull();
+  });
+  it("sorteert zonder tijd op het oplopende Mediatask-id", () => {
+    const uit = opmerkingenUit(
+      [
+        { id: 884300, comment: "b", author: "Floris de Laat", username: "floris" },
+        { id: 883529, comment: "a", author: "Floris de Laat", username: "floris" },
+      ],
+      1
+    );
+    expect(uit.map((o) => o.tekst)).toEqual(["a", "b"]);
+    expect(uit[0].door).toBe("Floris de Laat");
   });
 });
