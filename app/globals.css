@@ -338,6 +338,12 @@ body {
 .taal-knop-optie[aria-pressed="true"] .taal-vlag { opacity: 1; filter: none; }
 @media (prefers-reduced-motion: reduce) { .taal-vlag { transition: none; } }
 .taal-knop-optie:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+/* Op het lichte inlogscherm (geen zijbalk): dezelfde knop, lichte kleuren. */
+.login-card .taal-knop { margin-top: 8px; border-color: var(--rule); background: var(--page); }
+.login-card .taal-knop-optie { color: var(--ink-soft); }
+.login-card .taal-knop-optie:hover { color: var(--ink); background: rgba(20, 30, 24, 0.05); }
+.login-card .taal-knop-optie[aria-pressed="true"] { background: var(--paper); color: var(--ink); box-shadow: 0 1px 2px rgba(20, 30, 24, 0.12); }
+.login-card .taal-vlag { box-shadow: 0 0 0 1px rgba(20, 30, 24, 0.15); }
 
 /* ================= hoofdgebied ================= */
 .main { display: flex; flex-direction: column; min-width: 0; gap: 12px; padding: 12px; }
