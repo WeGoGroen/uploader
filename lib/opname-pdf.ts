@@ -83,8 +83,8 @@ export interface Voorgevel {
 }
 
 /**
- * De cv-ketel als beeld: de foto met het plaatje aangewezen, ernaast het
- * knipstuk van merk en type, en wat erop staat uitgeschreven.
+ * Een toestel als beeld (cv-ketel of ventilatie-unit): de foto met het plaatje
+ * aangewezen, ernaast het knipstuk van merk en type, en wat erop staat uitgeschreven.
  */
 export interface KetelBeeld {
   foto: Uint8Array;
@@ -112,8 +112,10 @@ export interface DossierInvoer {
   extraGroepen?: DossierGroep[];
   /** Voor de kompastekening onder groep A. Ontbreekt hij, dan geen tekening. */
   voorgevel?: Voorgevel | null;
-  /** Het ketelpaneel, direct na sectie F. Ontbreekt het, dan geen paneel. */
+  /** De panelen van ketel en ventilatie, direct na sectie F. Ontbreekt er een,
+      dan staat die er niet. */
   ketel?: KetelBeeld | null;
+  ventilatie?: KetelBeeld | null;
   fotos: DossierFoto[];
   /** Bijlagen die geen afbeelding zijn — video's, een LAZ-scan. Die kunnen niet
       afgedrukt worden, maar horen wel vermeld: anders lijkt het dossier
@@ -692,8 +694,8 @@ function tekenKompasPaneel(vel: Vel, v: Voorgevel): void {
   vel.y = top - hoogte - 8;
 }
 
-/** Het ketelpaneel: links de foto, rechts het knipstuk en de uitgeschreven tekst. */
-async function tekenKetelPaneel(vel: Vel, doc: PDFDocument, k: KetelBeeld): Promise<void> {
+/** Een plaatjespaneel: links de foto, rechts het knipstuk en de uitgeschreven tekst. */
+async function tekenPlaatjePaneel(vel: Vel, doc: PDFDocument, k: KetelBeeld, titel: string): Promise<void> {
   const foto = await doc.embedJpg(k.foto);
   const knipBeeld = await doc.embedJpg(k.knip);
   const linksB = 258;
@@ -725,7 +727,7 @@ async function tekenKetelPaneel(vel: Vel, doc: PDFDocument, k: KetelBeeld): Prom
   });
   const x = MARGE.links + PANEEL.padding;
   const bovenkant = top - PANEEL.padding;
-  vel.schrijf("F \u00b7 CV-KETEL", x, bovenkant - REGEL.label + 2, MAAT.kopKlein, KLEUR.zacht, true);
+  vel.schrijf(titel, x, bovenkant - REGEL.label + 2, MAAT.kopKlein, KLEUR.zacht, true);
   const y0 = bovenkant - kop;
 
   vel.pagina.drawImage(foto, { x, y: y0 - linksH, width: linksB, height: linksH });
@@ -946,7 +948,10 @@ export async function bouwOpnameDossier(invoer: DossierInvoer): Promise<Uint8Arr
 
   /* Een beeld dat niet te openen is mag het formulier niet kosten; het paneel
      tekent pas als beide beelden zijn ingeladen. */
-  if (invoer.ketel) await tekenKetelPaneel(vel, doc, invoer.ketel).catch(() => undefined);
+  if (invoer.ketel) await tekenPlaatjePaneel(vel, doc, invoer.ketel, "F \u00b7 CV-KETEL").catch(() => undefined);
+  if (invoer.ventilatie) {
+    await tekenPlaatjePaneel(vel, doc, invoer.ventilatie, "F \u00b7 MECHANISCHE VENTILATIE").catch(() => undefined);
+  }
 
   /* --- De bijlagen die geen foto zijn ------------------------------------- */
 
