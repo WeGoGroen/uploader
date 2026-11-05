@@ -7,6 +7,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { enqueue, getServerSnapshot, getSnapshot, removeTask, subscribe } from "@/lib/upload-queue";
 import { meldAfgerond } from "@/lib/opname-melden";
 import { berekenMd5, type Md5Uitkomst } from "@/lib/md5-client";
+import { useTaal } from "@/components/TaalProvider";
+import type { TaalSleutel } from "@/lib/taal";
 
 // Zelfde 4 mappen als op de NEN-pagina. Optimized en RAW staan allebei
 // pagina-breed (dat zijn de scan-/verwerkingsmappen), Additionals en Photo's
@@ -44,15 +46,19 @@ type MediataskStepStatus = "pending" | "busy" | "done" | "error" | "skipped";
 // RAW-scanbestanden (3D-puntenwolk) zijn altijd te herkennen aan "_raw.dp"
 // in de bestandsnaam — die horen in de RAW-map, nooit in Optimized.
 /** "45 sec", "2 min 10 sec", "1 uur 5 min" — kort en zonder rekenwerk. */
-function formatEta(seconds: number | null | undefined): string {
+function formatEta(
+  seconds: number | null | undefined,
+  t: (sleutel: TaalSleutel, waarden?: Record<string, string | number>) => string
+): string {
   if (seconds == null || !Number.isFinite(seconds)) return "";
-  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} sec`;
+  if (seconds < 60) return t("nenDocumenten.etaSec", { n: Math.max(1, Math.round(seconds)) });
   const minutes = Math.floor(seconds / 60);
   const rest = Math.round(seconds % 60);
-  if (minutes < 60) return rest ? `${minutes} min ${rest} sec` : `${minutes} min`;
+  if (minutes < 60)
+    return rest ? t("nenDocumenten.etaMinSec", { m: minutes, s: rest }) : t("nenDocumenten.etaMin", { m: minutes });
   const hours = Math.floor(minutes / 60);
   const restMin = minutes % 60;
-  return restMin ? `${hours} uur ${restMin} min` : `${hours} uur`;
+  return restMin ? t("nenDocumenten.etaUurMin", { h: hours, m: restMin }) : t("nenDocumenten.etaUur", { h: hours });
 }
 
 function isRawScanFile(name: string): boolean {
@@ -60,6 +66,7 @@ function isRawScanFile(name: string): boolean {
 }
 
 function DocumentenContent() {
+  const { t } = useTaal();
   const params = useSearchParams();
   const router = useRouter();
   const folderPath = params.get("path") ?? "";
@@ -233,11 +240,11 @@ function DocumentenContent() {
 
   useEffect(() => {
     if (!vasteOrderId || !folderPath) return;
-    for (const t of tasks) {
-      if (t.folder !== "Optimized" || t.dropbox !== "done") continue;
-      if (pcGestart.current.has(t.name)) continue;
-      pcGestart.current.add(t.name);
-      const naam = t.name;
+    for (const taak of tasks) {
+      if (taak.folder !== "Optimized" || taak.dropbox !== "done") continue;
+      if (pcGestart.current.has(taak.name)) continue;
+      pcGestart.current.add(taak.name);
+      const naam = taak.name;
       setPcStatus((s) => ({ ...s, [naam]: "bezig" }));
       pcQueue.current = pcQueue.current.then(async () => {
         try {
@@ -256,7 +263,7 @@ function DocumentenContent() {
             }),
           });
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.error ?? "doorsturen mislukt");
+          if (!res.ok) throw new Error(data.error ?? t("nenDocumenten.doorsturenMislukt"));
           setPcStatus((s) => ({ ...s, [naam]: "klaar" }));
         } catch (err) {
           // Geen ramp: bij het afronden gaat alles wat nog niet aan de order
@@ -265,12 +272,12 @@ function DocumentenContent() {
           setPcStatus((s) => ({ ...s, [naam]: "fout" }));
           setPcFout((f) => ({
             ...f,
-            [naam]: err instanceof Error ? err.message : "doorsturen mislukt",
+            [naam]: err instanceof Error ? err.message : t("nenDocumenten.doorsturenMislukt"),
           }));
         }
       });
     }
-  }, [tasks, vasteOrderId, folderPath]);
+  }, [tasks, vasteOrderId, folderPath, t]);
 
   /** Statusregel onder een Optimized-bestand: waar staat hij bij Mediatask? */
   function renderPcStatus(naam: string) {
@@ -280,20 +287,20 @@ function DocumentenContent() {
     if (st === "bezig") {
       return (
         <span className="note" style={{ padding: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span className="spinner" /> Doorsturen naar Mediatask (order #{vasteOrderId})…
+          <span className="spinner" /> {t("nenDocumenten.pcBezig", { id: vasteOrderId })}
         </span>
       );
     }
     if (st === "klaar") {
       return (
         <span className="note" style={{ padding: 0, color: "#1c7a41" }}>
-          ✓ Staat al bij Mediatask (order #{vasteOrderId})
+          {t("nenDocumenten.pcKlaar", { id: vasteOrderId })}
         </span>
       );
     }
     return (
       <span className="note" style={{ padding: 0, color: "var(--bad)" }}>
-        ⚠ Doorsturen naar Mediatask mislukte ({pcFout[naam]}) — gaat bij het afronden opnieuw mee.
+        {t("nenDocumenten.pcFout", { fout: pcFout[naam] ?? "" })}
       </span>
     );
   }
@@ -364,7 +371,7 @@ function DocumentenContent() {
       setExisting((prev) => ({ ...prev, [folder]: (prev[folder] ?? []).filter((f) => f.name !== name) }));
       void refreshFiles();
     } catch {
-      setRawWarning({ name: `${name} kon niet verwijderd worden — probeer het opnieuw.` });
+      setRawWarning({ name: t("nenDocumenten.verwijderenMislukt", { naam: name }) });
     } finally {
       setVerwijderBezig(null);
       setTeVerwijderen(null);
@@ -416,7 +423,7 @@ function DocumentenContent() {
               />
             </svg>
           </span>
-          {compact ? "Nog een bestand" : "Bestand kiezen"}
+          {compact ? t("nenDocumenten.nogEenBestand") : t("nenDocumenten.bestandKiezen")}
         </button>
       </>
     );
@@ -435,7 +442,7 @@ function DocumentenContent() {
     return (
       <>
         <span className="floor-label">
-          Op welke verdieping(en) is deze scan?{chosen.length === 0 && <em> — verplicht</em>}
+          {t("nenDocumenten.welkeVerdiepingen")}{chosen.length === 0 && <em>{t("nenDocumenten.verplicht")}</em>}
         </span>
         <span className="floor-picker">
           {Array.from({ length: 13 }, (_, i) => i - 2).map((n) => {
@@ -475,8 +482,8 @@ function DocumentenContent() {
                 <button
                   type="button"
                   className="doc-file-del"
-                  title={`${f.name} verwijderen`}
-                  aria-label={`${f.name} verwijderen`}
+                  title={t("nenDocumenten.bestandVerwijderen", { naam: f.name })}
+                  aria-label={t("nenDocumenten.bestandVerwijderen", { naam: f.name })}
                   onClick={() =>
                     setTeVerwijderen(teVerwijderen === `${folder}/${f.name}` ? null : `${folder}/${f.name}`)
                   }
@@ -488,17 +495,17 @@ function DocumentenContent() {
                   dit naast de bestandsnaam niet en brak de naam per letter af. */}
               {teVerwijderen === `${folder}/${f.name}` && (
                 <span className="doc-file-confirm">
-                  <span>Verwijderen?</span>
+                  <span>{t("nenDocumenten.verwijderenVraag")}</span>
                   <button
                     type="button"
                     className="doc-file-yes"
                     disabled={verwijderBezig === `${folder}/${f.name}`}
                     onClick={() => verwijderBestand(folder, f.name)}
                   >
-                    {verwijderBezig === `${folder}/${f.name}` ? "Bezig…" : "Ja, verwijder"}
+                    {verwijderBezig === `${folder}/${f.name}` ? t("nenDocumenten.bezig") : t("nenDocumenten.jaVerwijder")}
                   </button>
                   <button type="button" className="doc-file-no" onClick={() => setTeVerwijderen(null)}>
-                    Nee
+                    {t("nenDocumenten.nee")}
                   </button>
                 </span>
               )}
@@ -528,7 +535,7 @@ function DocumentenContent() {
             type="button"
             className="doc-col-collapsed"
             onClick={() => setReopened((p) => ({ ...p, [folder]: true }))}
-            title="Openen om nog een bestand toe te voegen"
+            title={t("nenDocumenten.openenOmToeTeVoegen")}
           >
             <span className="doc-title">{folder}</span>
             <span className="doc-complete-checks">
@@ -564,8 +571,10 @@ function DocumentenContent() {
                   <div className="doc-upload-bar-fill" style={{ width: `${r.pct}%` }} />
                 </div>
                 <span className="note" style={{ padding: 0 }}>
-                  Dropbox: {r.pct}%
-                  {formatEta(r.etaSeconds) && <span className="upload-eta"> · nog {formatEta(r.etaSeconds)}</span>}
+                  {t("nenDocumenten.dropboxPct", { pct: r.pct })}
+                  {formatEta(r.etaSeconds, t) && (
+                    <span className="upload-eta">{t("nenDocumenten.etaNog", { eta: formatEta(r.etaSeconds, t) })}</span>
+                  )}
                 </span>
               </>
             )}
@@ -585,14 +594,14 @@ function DocumentenContent() {
         ))}
 
         {!folderPath ? (
-          <p className="note" style={{ padding: 0, margin: 0 }}>Geen Dropbox-map bekend.</p>
+          <p className="note" style={{ padding: 0, margin: 0 }}>{t("nenDocumenten.geenMap")}</p>
         ) : loading && !files ? (
-          <p className="note" style={{ padding: 0, margin: 0 }}>Bestanden ophalen…</p>
+          <p className="note" style={{ padding: 0, margin: 0 }}>{t("nenDocumenten.bestandenOphalen")}</p>
         ) : files && files.length > 0 ? (
           renderFileList(folder, files)
         ) : (
           <p className="note" style={{ padding: 0, margin: 0, color: missing ? "#c22b2b" : undefined }}>
-            Nog niets geüpload naar deze map.
+            {t("nenDocumenten.nogNietsGeupload")}
           </p>
         )}
       </div>
@@ -783,7 +792,7 @@ function DocumentenContent() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Order aanmaken bij Mediatask mislukt");
+      if (!res.ok) throw new Error(data.error ?? t("nenDocumenten.orderAanmakenMislukt"));
 
       const doneSteps: Record<string, MediataskStepStatus> = {};
       doneSteps["order"] = "done";
@@ -813,7 +822,7 @@ function DocumentenContent() {
       }[]) {
         setMediataskSteps((s2) => ({ ...s2, [`scan:${uitkomst.naam}`]: uitkomst.ok ? "done" : "error" }));
         if (uitkomst.ok) setScanBevestigd((b) => ({ ...b, [uitkomst.naam]: 1 }));
-        else scanFouten.push(`${uitkomst.naam}: ${uitkomst.fout ?? "versturen mislukt"}`);
+        else scanFouten.push(`${uitkomst.naam}: ${uitkomst.fout ?? t("nenDocumenten.versturenMislukt")}`);
         if (uitkomst.alAanwezig) setScanAlAanwezig((a) => ({ ...a, [uitkomst.naam]: true }));
       }
       // Foto's, video's en 360-opnames: die stuurt de server tijdens het
@@ -833,7 +842,7 @@ function DocumentenContent() {
           ...s2,
           [`media:${uitkomst.map}/${uitkomst.naam}`]: uitkomst.ok ? "done" : "error",
         }));
-        if (!uitkomst.ok) scanFouten.push(`${uitkomst.naam}: ${uitkomst.fout ?? "versturen mislukt"}`);
+        if (!uitkomst.ok) scanFouten.push(`${uitkomst.naam}: ${uitkomst.fout ?? t("nenDocumenten.versturenMislukt")}`);
       }
       setMediaAlsLink(media.some((m) => m.alsLink));
 
@@ -845,7 +854,7 @@ function DocumentenContent() {
         const ingediend = await fetch(`/api/mediatask/orders/${data.order.id}`, { method: "POST" });
         const uitkomst = await ingediend.json().catch(() => ({}));
         setMediataskSteps((s2) => ({ ...s2, submit: ingediend.ok ? "done" : "error" }));
-        if (!ingediend.ok) setMediataskSubmitError(uitkomst.error ?? "Indienen mislukt");
+        if (!ingediend.ok) setMediataskSubmitError(uitkomst.error ?? t("nenDocumenten.indienenMislukt"));
       }
 
       // Ook het NEN-record afsluiten dat de opnamepagina aanmaakte. Zonder dit
@@ -904,7 +913,7 @@ function DocumentenContent() {
       setMediataskElapsed(Math.round((Date.now() - startedAt) / 1000));
     } catch (err) {
       stopMediataskTicker();
-      setMediataskError(err instanceof Error ? err.message : "Order aanmaken bij Mediatask mislukt");
+      setMediataskError(err instanceof Error ? err.message : t("nenDocumenten.orderAanmakenMislukt"));
       setMediataskSteps((s) => {
         const next = { ...s };
         // Een lege map is geen fout: die was bewust overgeslagen. Alleen de
@@ -927,9 +936,9 @@ function DocumentenContent() {
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          Terug naar order
+          {t("nenDocumenten.terugNaarOrder")}
         </Link>
-        <span className="eyebrow">{addr || "Documenten uploaden"}</span>
+        <span className="eyebrow">{addr || t("nenDocumenten.documentenUploaden")}</span>
       </header>
 
       <div className={`dbx-strip${folderPath ? " is-ready" : ""}`} style={{ marginBottom: 12 }}>
@@ -944,22 +953,22 @@ function DocumentenContent() {
           </span>
           {!folderPath && (
             <span className="dbx-strip-text">
-              <span className="spinner" /> Dropbox-map klaarzetten…
+              <span className="spinner" /> {t("nenDocumenten.mapKlaarzetten")}
             </span>
           )}
           {folderPath && (
             <>
               <span className="dbx-strip-text">
                 <span className="dbx-strip-check" aria-hidden="true">✓</span>
-                Map aangemaakt — <span className="dbx-folder-path">{folderPath}</span>
+                {t("nenDocumenten.mapAangemaakt")}<span className="dbx-folder-path">{folderPath}</span>
               </span>
               {/* De order bestaat al sinds de bevestigingspop-up; dat hier
                   tonen maakt duidelijk waar de scans op de achtergrond heen
                   gaan. */}
               {vasteOrderId && (
-                <span className="dbx-strip-progress-label" title={`Mediatask-order #${vasteOrderId}`}>
-                  <span className="dbx-strip-check" aria-hidden="true">✓</span> Order #{vasteOrderId} bij
-                  Mediatask
+                <span className="dbx-strip-progress-label" title={t("nenDocumenten.mediataskOrderTitel", { id: vasteOrderId })}>
+                  <span className="dbx-strip-check" aria-hidden="true">✓</span>{" "}
+                  {t("nenDocumenten.orderBijMediatask", { id: vasteOrderId })}
                 </span>
               )}
               <button
@@ -967,7 +976,7 @@ function DocumentenContent() {
                 className="dbx-strip-refresh"
                 onClick={() => refreshFiles()}
                 disabled={loading}
-                title="Nu verversen"
+                title={t("nenDocumenten.nuVerversen")}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={loading ? "spin" : undefined}>
                   <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -975,7 +984,7 @@ function DocumentenContent() {
               </button>
               {dropboxUrl && (
                 <a href={dropboxUrl} target="_blank" rel="noopener noreferrer" className="btn-open-dbx">
-                  Openen
+                  {t("nenDocumenten.openen")}
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path d="M6 4h6v6M12 4 4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
@@ -1000,7 +1009,7 @@ function DocumentenContent() {
 
         <div className="section">
           <div className="section-head">
-            <h2>Overige mappen</h2>
+            <h2>{t("nenDocumenten.overigeMappen")}</h2>
           </div>
           <div className="doc-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
             {SPLIT_FOLDERS.map((f) => renderFolder(f))}
@@ -1009,8 +1018,8 @@ function DocumentenContent() {
 
         <div className="section">
           <div className="section-head">
-            <h2>Garage &amp; parkeren</h2>
-            {garageZonderVerdieping && <span className="section-missing">1 nog in te vullen</span>}
+            <h2>{t("nenDocumenten.garageParkeren")}</h2>
+            {garageZonderVerdieping && <span className="section-missing">{t("nenDocumenten.nogInTeVullen")}</span>}
           </div>
           <div className="section-body" style={{ gridTemplateColumns: "1fr" }}>
             <button
@@ -1027,8 +1036,8 @@ function DocumentenContent() {
                 </svg>
               </span>
               <span className="garage-toggle-text">
-                <strong>Er is een garage</strong>
-                <span>Tik aan als bij deze woning een garage hoort</span>
+                <strong>{t("nenDocumenten.erIsEenGarage")}</strong>
+                <span>{t("nenDocumenten.erIsEenGarageUitleg")}</span>
               </span>
               <span className="garage-switch" aria-hidden="true" />
             </button>
@@ -1036,10 +1045,10 @@ function DocumentenContent() {
             {garage && (
               <div className="garage-details">
                 <span className="garage-label">
-                  Op welke verdieping ligt de garage?
-                  {garageVerdieping === null && <em> — verplicht, kies er één</em>}
+                  {t("nenDocumenten.garageWelkeVerdieping")}
+                  {garageVerdieping === null && <em>{t("nenDocumenten.verplichtKiesEen")}</em>}
                 </span>
-                <span className="floor-picker garage-floors" role="radiogroup" aria-label="Verdieping van de garage">
+                <span className="floor-picker garage-floors" role="radiogroup" aria-label={t("nenDocumenten.garageVerdiepingLabel")}>
                   {Array.from({ length: 13 }, (_, i) => i - 2).map((n) => {
                     const on = garageVerdieping === n;
                     return (
@@ -1056,7 +1065,7 @@ function DocumentenContent() {
                     );
                   })}
                 </span>
-                <span className="garage-hint">-1 = kelder/souterrain · 0 = begane grond · 1 = eerste verdieping</span>
+                <span className="garage-hint">{t("nenDocumenten.garageHint")}</span>
 
                 <span className="garage-sep" />
 
@@ -1072,8 +1081,8 @@ function DocumentenContent() {
                     </svg>
                   </span>
                   <span className="garage-toggle-text">
-                    <strong>Parkeerplek heeft een elektrische lader</strong>
-                    <span>Laadpaal of wallbox bij de garage of parkeerplek</span>
+                    <strong>{t("nenDocumenten.lader")}</strong>
+                    <span>{t("nenDocumenten.laderUitleg")}</span>
                   </span>
                   <span className="garage-switch" aria-hidden="true" />
                 </button>
@@ -1086,39 +1095,41 @@ function DocumentenContent() {
           <div className="section-body" style={{ gridTemplateColumns: "1fr" }}>
             {!hasMediataskConfig && (
               <p className="note" style={{ padding: 0 }}>
-                ⚠ Product, makelaar of prioriteit ontbreekt nog — pas dit eerst aan via &quot;Terug naar order&quot;.
+                {t("nenDocumenten.configOntbreekt")}
               </p>
             )}
             {filesZonderVerdieping.length > 0 && (
               <p className="note" style={{ padding: 0, color: "var(--bad)", fontWeight: 600 }}>
-                ⚠ Geef eerst per scan aan welke verdiepingen erin zitten:{" "}
+                {t("nenDocumenten.verdiepingenPerScan")}{" "}
                 {filesZonderVerdieping.map((f) => f.name).join(", ")}
               </p>
             )}
             {garageZonderVerdieping && (
               <p className="note" style={{ padding: 0, color: "var(--bad)", fontWeight: 600 }}>
-                ⚠ Geef eerst aan op welke verdieping de garage ligt.
+                {t("nenDocumenten.garageVerdiepingEerst")}
               </p>
             )}
             {garage && garageVerdieping !== null && (
               <p className="note" style={{ padding: 0 }}>
-                Gaat mee in de opmerking bij de Mediatask-order:{" "}
+                {t("nenDocumenten.gaatMeeInOpmerking")}{" "}
                 <strong style={{ color: "var(--ink)" }}>
-                  Garage op{" "}
-                  {garageVerdieping === 0
-                    ? "begane grond"
-                    : garageVerdieping < 0
-                      ? `kelder ${-garageVerdieping}`
-                      : `verdieping ${garageVerdieping}`}
-                  {garageLader ? ", met elektrische lader" : ", zonder lader"}
+                  {t("nenDocumenten.garageOp", {
+                    plek:
+                      garageVerdieping === 0
+                        ? t("nenDocumenten.beganeGrond")
+                        : garageVerdieping < 0
+                          ? t("nenDocumenten.kelder", { n: -garageVerdieping })
+                          : t("nenDocumenten.verdieping", { n: garageVerdieping }),
+                  })}
+                  {garageLader ? t("nenDocumenten.metLader") : t("nenDocumenten.zonderLader")}
                 </strong>
               </p>
             )}
             {teVersturenScans.length > 0 && (
               <p className="note" style={{ padding: 0 }}>
                 {teVersturenScans.length === 1
-                  ? "1 scan gaat als puntenwolk mee naar Mediatask: "
-                  : `${teVersturenScans.length} scans gaan als puntenwolk mee naar Mediatask: `}
+                  ? t("nenDocumenten.scansMeeEen")
+                  : t("nenDocumenten.scansMeeMeer", { n: teVersturenScans.length })}
                 {teVersturenScans.map((s) => s.name).join(", ")}
                 {/* Wat op de achtergrond al is doorgestuurd hoeft bij het
                     afronden niet meer mee — dat scheelt precies de langste
@@ -1126,7 +1137,9 @@ function DocumentenContent() {
                 {(() => {
                   const alKlaar = teVersturenScans.filter((s) => pcStatus[s.name] === "klaar").length;
                   return alKlaar > 0
-                    ? ` — ${alKlaar === teVersturenScans.length ? "allemaal" : alKlaar} al bij Mediatask (order #${vasteOrderId})`
+                    ? alKlaar === teVersturenScans.length
+                      ? t("nenDocumenten.alBijMediatask.allemaal", { id: vasteOrderId ?? "" })
+                      : t("nenDocumenten.alBijMediatask.aantal", { n: alKlaar, id: vasteOrderId ?? "" })
                     : null;
                 })()}
               </p>
@@ -1145,16 +1158,18 @@ function DocumentenContent() {
               onClick={() => void uploadToMediatask()}
             >
               {loading
-                ? "Dropbox-bestanden laden…"
+                ? t("nenDocumenten.knopLaden")
                 : nogAanHetUploaden.length > 0
-                  ? `Wachten op Dropbox — nog ${nogAanHetUploaden.length} bestand${nogAanHetUploaden.length === 1 ? "" : "en"} bezig`
+                  ? nogAanHetUploaden.length === 1
+                    ? t("nenDocumenten.knopWachtenDropbox.een", { n: nogAanHetUploaden.length })
+                    : t("nenDocumenten.knopWachtenDropbox.meer", { n: nogAanHetUploaden.length })
                 : pcNogBezig > 0
-                  ? `Scans gaan al naar Mediatask — nog ${pcNogBezig} bezig`
+                  ? t("nenDocumenten.knopScansBezig", { n: pcNogBezig })
                 : filesZonderVerdieping.length > 0
-                  ? "Verdiepingen ontbreken nog"
+                  ? t("nenDocumenten.knopVerdiepingenOntbreken")
                 : garageZonderVerdieping
-                  ? "Verdieping garage ontbreekt nog"
-                  : "Uploaden naar Mediatask"}
+                  ? t("nenDocumenten.knopGarageOntbreekt")
+                  : t("nenDocumenten.uploadenNaarMediatask")}
             </button>
           </div>
         </div>
@@ -1162,22 +1177,24 @@ function DocumentenContent() {
 
       {rawWarning && (
         <div className="compass-overlay" onClick={() => setRawWarning(null)}>
-          <div className="compass-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="RAW-bestand hoort niet bij Optimized">
+          <div className="compass-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("nenDocumenten.rawLabel")}>
             <div className="compass-modal-head">
-              <h3>Dit hoort bij RAW</h3>
-              <button className="compass-close" onClick={() => setRawWarning(null)} aria-label="Sluiten">
+              <h3>{t("nenDocumenten.rawTitel")}</h3>
+              <button className="compass-close" onClick={() => setRawWarning(null)} aria-label={t("nenDocumenten.sluiten")}>
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
                 </svg>
               </button>
             </div>
             <p style={{ margin: "0 0 20px", fontSize: 15 }}>
-              <strong>{rawWarning.name}</strong> is een RAW-scanbestand (herkenbaar aan &quot;_raw.dp&quot;) — dat moet
-              je uploaden bij <strong>RAW</strong>, niet bij Optimized. De Optimized-map is leeggehouden.
+              <strong>{rawWarning.name}</strong>
+              {t("nenDocumenten.rawUitleg1")}
+              <strong>RAW</strong>
+              {t("nenDocumenten.rawUitleg2")}
             </p>
             <div style={{ display: "flex", gap: 10 }}>
               <button type="button" className="btn btn-quiet" style={{ flex: 1 }} onClick={() => setRawWarning(null)}>
-                Sluiten
+                {t("nenDocumenten.sluiten")}
               </button>
               {rawWarning.file ? (
                 <button
@@ -1190,7 +1207,7 @@ function DocumentenContent() {
                     uploadFile("RAW", file);
                   }}
                 >
-                  Verplaats naar RAW
+                  {t("nenDocumenten.verplaatsNaarRaw")}
                 </button>
               ) : (
                 <button
@@ -1202,7 +1219,7 @@ function DocumentenContent() {
                     pickFile("RAW");
                   }}
                 >
-                  Ga naar RAW
+                  {t("nenDocumenten.gaNaarRaw")}
                 </button>
               )}
             </div>
@@ -1212,7 +1229,7 @@ function DocumentenContent() {
 
       {showMediataskModal && (
         <div className="upload-overlay">
-          <div className="upload-modal mt-modal" role="dialog" aria-label="Uploaden naar Mediatask">
+          <div className="upload-modal mt-modal" role="dialog" aria-label={t("nenDocumenten.uploadenNaarMediatask")}>
             {(() => {
               const klaar = !!mediataskOrderId && !mediataskError && !mediataskSubmitError;
               const fout = !!mediataskError || !!mediataskSubmitError;
@@ -1230,26 +1247,26 @@ function DocumentenContent() {
               const orderTekst =
                 orderSt === "done" && submitSt === "done"
                   ? vasteOrderId
-                    ? "Afgemaakt en ingediend"
-                    : "Aangemaakt en ingediend"
+                    ? t("nenDocumenten.afgemaaktIngediend")
+                    : t("nenDocumenten.aangemaaktIngediend")
                   : vasteOrderId
-                    ? `#${vasteOrderId} afmaken`
+                    ? t("nenDocumenten.orderAfmaken", { id: vasteOrderId })
                     : orderSt === "done"
-                      ? "Aangemaakt"
-                      : "Order aanmaken";
+                      ? t("nenDocumenten.aangemaakt")
+                      : t("nenDocumenten.orderAanmaken");
               const orderStatus =
                 orderSt === "error" ? (
-                  <span className="mt-s is-error">⚠ mislukt</span>
+                  <span className="mt-s is-error">{t("nenDocumenten.stMislukt")}</span>
                 ) : submitSt === "error" || (mediataskSubmitError && mediataskOrderId) ? (
-                  <span className="mt-s is-error">⚠ niet ingediend</span>
+                  <span className="mt-s is-error">{t("nenDocumenten.stNietIngediend")}</span>
                 ) : orderSt === "done" && submitSt === "done" ? (
                   <span className="mt-s is-done">✓</span>
                 ) : orderSt === "busy" || submitSt === "busy" ? (
                   <span className="mt-s">{spinner}</span>
                 ) : orderSt === "done" ? (
-                  <span className="mt-s">wacht op indienen</span>
+                  <span className="mt-s">{t("nenDocumenten.stWachtOpIndienen")}</span>
                 ) : (
-                  <span className="mt-s">wacht</span>
+                  <span className="mt-s">{t("nenDocumenten.stWacht")}</span>
                 );
 
               const mediaKlaar = mediaSleutels.filter((k) => mediataskSteps[k] === "done").length;
@@ -1267,19 +1284,23 @@ function DocumentenContent() {
                     <div className="mt-head-tekst">
                       <h3>
                         {mediataskError
-                          ? "Uploaden naar Mediatask mislukt"
+                          ? t("nenDocumenten.kopMislukt")
                           : mediataskSubmitError && mediataskOrderId
-                            ? `Order #${mediataskOrderId} aangemaakt, indienen mislukt`
+                            ? t("nenDocumenten.kopIndienenMislukt", { id: mediataskOrderId })
                             : klaar
-                              ? `Order #${mediataskOrderId} staat bij Mediatask`
-                              : "Bezig met uploaden naar Mediatask"}
+                              ? t("nenDocumenten.kopKlaar", { id: mediataskOrderId ?? "" })
+                              : t("nenDocumenten.kopBezig")}
                       </h3>
                       {klaar && (
                         <p>
-                          Ingediend{mediataskState ? ` · status: ${mediataskState}` : ""}
+                          {t("nenDocumenten.ingediend")}
+                          {mediataskState ? t("nenDocumenten.statusSuffix", { status: mediataskState }) : ""}
                           {/* Het aantal komt uit Mediatask zelf, ná het koppelen:
                               dit is de bevestiging dat de scans er ook echt aan hangen. */}
-                          {puntenwolken > 0 && ` · ${puntenwolken} puntenwolk${puntenwolken === 1 ? "" : "en"} aan de order`}
+                          {puntenwolken > 0 &&
+                            (puntenwolken === 1
+                              ? t("nenDocumenten.puntenwolken.een", { n: puntenwolken })
+                              : t("nenDocumenten.puntenwolken.meer", { n: puntenwolken }))}
                         </p>
                       )}
                       {!mediataskOrderId && !mediataskError && (
@@ -1299,8 +1320,7 @@ function DocumentenContent() {
                     {mediataskError && <p className="mt-alert">{mediataskError}</p>}
                     {mediataskOrderId && mediataskSubmitError && (
                       <p className="mt-alert">
-                        Het indienen mislukte ({mediataskSubmitError}). Dien de order handmatig in bij Mediatask.
-                        Niet opnieuw uploaden, anders ontstaat er een dubbele order.
+                        {t("nenDocumenten.indienenMisluktUitleg", { fout: mediataskSubmitError })}
                       </p>
                     )}
 
@@ -1309,7 +1329,7 @@ function DocumentenContent() {
                         duwde de knop onder de vouw. */}
                     <ul className="mt-rows">
                       <li className="mt-row">
-                        <span className="mt-k">Order</span>
+                        <span className="mt-k">{t("nenDocumenten.rijOrder")}</span>
                         <span className="mt-v">{orderTekst}</span>
                         {orderStatus}
                       </li>
@@ -1320,18 +1340,18 @@ function DocumentenContent() {
                         const laatste = i === scanSleutels.length - 1;
                         return (
                           <li key={k} className="mt-row">
-                            <span className="mt-k">{i === 0 ? (scanSleutels.length > 1 ? "Scans" : "Scan") : ""}</span>
+                            <span className="mt-k">{i === 0 ? (scanSleutels.length > 1 ? t("nenDocumenten.rijScans") : t("nenDocumenten.rijScan")) : ""}</span>
                             <span className="mt-v mt-file">{naam}</span>
                             {/* Kort houden: een lange toelichting hier drukte de
                                 bestandsnaam tot één letter per regel samen. */}
                             {st === "busy" ? (
-                              <span className="mt-s">{spinner} doorsturen…</span>
+                              <span className="mt-s">{spinner} {t("nenDocumenten.scanDoorsturen")}</span>
                             ) : st === "done" ? (
-                              <span className="mt-s is-done">✓ {scanAlAanwezig[naam] ? "stond er al" : "staat er"}</span>
+                              <span className="mt-s is-done">✓ {scanAlAanwezig[naam] ? t("nenDocumenten.scanStondErAl") : t("nenDocumenten.scanStaatEr")}</span>
                             ) : st === "error" ? (
-                              <span className="mt-s is-error">⚠ niet aangekomen</span>
+                              <span className="mt-s is-error">{t("nenDocumenten.scanNietAangekomen")}</span>
                             ) : (
-                              <span className="mt-s">in de wachtrij</span>
+                              <span className="mt-s">{t("nenDocumenten.scanWachtrij")}</span>
                             )}
 
                             {/* Wat er ná het versturen bij Mediatask gebeurt. Zonder
@@ -1348,13 +1368,15 @@ function DocumentenContent() {
                                 <span>
                                   <b>
                                     {verwerking.klaar >= verwerking.totaal
-                                      ? "Scans zijn verwerkt en goedgekeurd"
-                                      : `Mediatask verwerkt de scan${verwerking.totaal === 1 ? "" : "s"} · ${verwerking.klaar} van ${verwerking.totaal}`}
+                                      ? t("nenDocumenten.verwerkt")
+                                      : verwerking.totaal === 1
+                                        ? t("nenDocumenten.verwerkt.bezigEen", { klaar: verwerking.klaar, totaal: verwerking.totaal })
+                                        : t("nenDocumenten.verwerkt.bezigMeer", { klaar: verwerking.klaar, totaal: verwerking.totaal })}
                                   </b>
                                   <span>
                                     {verwerking.klaar >= verwerking.totaal
-                                      ? "Er is niets meer te doen."
-                                      : "Duurt tot een kwartier. Je kunt dit scherm sluiten."}
+                                      ? t("nenDocumenten.verwerktNietsMeer")
+                                      : t("nenDocumenten.verwerktDuurt")}
                                   </span>
                                 </span>
                               </div>
@@ -1365,14 +1387,18 @@ function DocumentenContent() {
 
                       {mediaSleutels.length > 0 && (
                         <li className="mt-row">
-                          <span className="mt-k">Media</span>
+                          <span className="mt-k">{t("nenDocumenten.rijMedia")}</span>
                           <span className="mt-v">
                             {mediaKlaar === mediaSleutels.length
-                              ? `${mediaKlaar} ${mediaAlsLink ? "als link in de opmerking" : "als foto aan de order"}`
-                              : `${mediaKlaar} van ${mediaSleutels.length} ${mediaAlsLink ? "meegegeven" : "aan de order"}`}
+                              ? mediaAlsLink
+                                ? t("nenDocumenten.mediaAlsLink", { n: mediaKlaar })
+                                : t("nenDocumenten.mediaAlsFoto", { n: mediaKlaar })
+                              : mediaAlsLink
+                                ? t("nenDocumenten.mediaMeegegeven", { n: mediaKlaar, totaal: mediaSleutels.length })
+                                : t("nenDocumenten.mediaAanOrder", { n: mediaKlaar, totaal: mediaSleutels.length })}
                           </span>
                           {mediaFout > 0 ? (
-                            <span className="mt-s is-error">⚠ {mediaFout} niet aangekomen</span>
+                            <span className="mt-s is-error">{t("nenDocumenten.mediaNietAangekomen", { n: mediaFout })}</span>
                           ) : mediaBezig ? (
                             <span className="mt-s">{spinner}</span>
                           ) : (
@@ -1381,7 +1407,7 @@ function DocumentenContent() {
                           {/* De bestandsnamen ingeklapt: wie wil controleren klapt
                               open, en bij een fout staat de lijst al open. */}
                           <details className="mt-details" open={mediaFout > 0}>
-                            <summary>Toon bestanden</summary>
+                            <summary>{t("nenDocumenten.toonBestanden")}</summary>
                             <ul>
                               {mediaSleutels.map((k) => {
                                 const st = mediataskSteps[k];
@@ -1398,7 +1424,7 @@ function DocumentenContent() {
 
                       {gevuld.length > 0 && (
                         <li className="mt-row">
-                          <span className="mt-k">Dropbox</span>
+                          <span className="mt-k">{t("nenDocumenten.rijDropbox")}</span>
                           <span className="mt-v mt-chips">
                             {gevuld.map((f) => (
                               <span key={f} className="mt-chip">
@@ -1412,7 +1438,7 @@ function DocumentenContent() {
 
                       {leeg.length > 0 && (
                         <li className="mt-row is-muted">
-                          <span className="mt-k">Leeg</span>
+                          <span className="mt-k">{t("nenDocumenten.rijLeeg")}</span>
                           <span className="mt-v">{leeg.join(", ")}</span>
                           <span className="mt-s" />
                         </li>
@@ -1426,11 +1452,11 @@ function DocumentenContent() {
                 is "Sluiten en afronden" altijd in beeld. */}
             <div className="mt-foot">
               {!mediataskOrderId && !mediataskError && (
-                <span className="mt-foot-tekst">Laat dit scherm open tot het klaar is</span>
+                <span className="mt-foot-tekst">{t("nenDocumenten.laatOpen")}</span>
               )}
               {mediataskError && (
                 <button type="button" className="btn btn-quiet" onClick={() => setShowMediataskModal(false)}>
-                  Sluiten
+                  {t("nenDocumenten.sluiten")}
                 </button>
               )}
               {mediataskOrderId && (
@@ -1446,7 +1472,7 @@ function DocumentenContent() {
                     router.push("/");
                   }}
                 >
-                  Sluiten en afronden
+                  {t("nenDocumenten.sluitenAfronden")}
                 </button>
               )}
             </div>
