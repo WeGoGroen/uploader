@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import MeerMenu from "@/components/MeerMenu";
+import { useTaal } from "@/components/TaalProvider";
 
 /**
  * Verwerkingsstatus van de scans bij Mediatask, op het dashboard.
@@ -24,6 +25,7 @@ interface ScanStatus {
 }
 
 export default function ScanStatusKaart() {
+  const { t } = useTaal();
   const [rijen, setRijen] = useState<ScanStatus[] | null>(null);
   const [herstelBezig, setHerstelBezig] = useState<number | null>(null);
   const [melding, setMelding] = useState<string | null>(null);
@@ -44,8 +46,8 @@ export default function ScanStatusKaart() {
     // order, en met meerdere dashboards open loopt dat hard op. De cache van
     // drie minuten aan de serverkant is voor een verwerking van een kwartier
     // ruim vers genoeg.
-    const t = setInterval(() => laad(), 120000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => laad(), 120000);
+    return () => clearInterval(timer);
   }, []);
 
   async function herstel(orderId: number) {
@@ -58,14 +60,14 @@ export default function ScanStatusKaart() {
       const mis = d.problemen?.[0]?.nietGelukt ?? [];
       setMelding(
         opnieuw.length > 0
-          ? `${opnieuw.join(", ")} opnieuw verstuurd — verwerking duurt weer even.`
+          ? t("dashboard.scans.opnieuwVerstuurd", { scans: opnieuw.join(", ") })
           : mis.length > 0
-            ? `Niet gelukt: ${mis.join(", ")}`
-            : d.problemen?.[0]?.reden ?? "Niets om opnieuw te versturen."
+            ? t("dashboard.scans.nietGelukt", { scans: mis.join(", ") })
+            : d.problemen?.[0]?.reden ?? t("dashboard.scans.nietsOpnieuw")
       );
       laad(true);
     } catch {
-      setMelding("Opnieuw versturen mislukt.");
+      setMelding(t("dashboard.scans.opnieuwMislukt"));
     } finally {
       setHerstelBezig(null);
     }
@@ -88,18 +90,18 @@ export default function ScanStatusKaart() {
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMelding(d.error ?? "Verbergen mislukt.");
+        setMelding(d.error ?? t("dashboard.scans.verbergenMislukt"));
         return;
       }
       // Meteen uit de lijst, niet pas na de volgende peiling.
       setRijen((rs) => (rs ? rs.filter((r) => r.orderId !== orderId) : rs));
       setMelding(
         d.alAlsnogVerwerkt
-          ? "Mediatask had de scan intussen alsnog verwerkt."
-          : "Verborgen. Komt er later een nieuwe afgekeurde scan bij deze order, dan zie je die weer."
+          ? t("dashboard.scans.alsnogVerwerkt")
+          : t("dashboard.scans.verborgen")
       );
     } catch {
-      setMelding("Verbergen mislukt.");
+      setMelding(t("dashboard.scans.verbergenMislukt"));
     } finally {
       setVerbergBezig(null);
     }
@@ -118,9 +120,9 @@ export default function ScanStatusKaart() {
   if (tonen.length === 0) return null;
 
   return (
-    <section className="dash-card" aria-label="Scans bij Mediatask" style={{ marginTop: 12 }}>
+    <section className="dash-card" aria-label={t("dashboard.scans.titel")} style={{ marginTop: 12 }}>
       <div className="dash-card-head">
-        <h2>Scans bij Mediatask</h2>
+        <h2>{t("dashboard.scans.titel")}</h2>
         <span className="section-count">{tonen.length}</span>
       </div>
 
@@ -137,10 +139,10 @@ export default function ScanStatusKaart() {
               <b>{r.adres}</b>
               <span>
                 {r.stand === "mislukt"
-                  ? `${r.totaal - r.klaar} van ${r.totaal} scans afgekeurd door Mediatask`
+                  ? t("dashboard.scans.afgekeurd", { n: r.totaal - r.klaar, totaal: r.totaal })
                   : r.stand === "verwerkt"
-                    ? `${r.totaal} ${r.totaal === 1 ? "scan" : "scans"} verwerkt en goedgekeurd`
-                    : `${r.klaar} van ${r.totaal} scans verwerkt — dit duurt tot een kwartier`}
+                    ? t(r.totaal === 1 ? "dashboard.scans.verwerkt.een" : "dashboard.scans.verwerkt.meer", { n: r.totaal })
+                    : t("dashboard.scans.bezig", { n: r.klaar, totaal: r.totaal })}
               </span>
             </span>
             {r.stand === "mislukt" && (
@@ -151,12 +153,18 @@ export default function ScanStatusKaart() {
                   disabled={herstelBezig === r.orderId || verbergBezig === r.orderId}
                   onClick={() => herstel(r.orderId)}
                 >
-                  {herstelBezig === r.orderId ? "Bezig…" : "Opnieuw versturen"}
+                  {herstelBezig === r.orderId ? t("dashboard.bezig") : t("dashboard.scans.opnieuwVersturen")}
                 </button>
                 <MeerMenu
-                  label={`Meer opties voor ${r.adres}`}
+                  label={t("dashboard.meerOpties", { adres: r.adres })}
                   bezig={verbergBezig === r.orderId}
-                  items={[{ label: "Verbergen", uitleg: "Staat goed bij Mediatask", onClick: () => verberg(r.orderId) }]}
+                  items={[
+                    {
+                      label: t("dashboard.scans.verbergen"),
+                      uitleg: t("dashboard.scans.verbergenUitleg"),
+                      onClick: () => verberg(r.orderId),
+                    },
+                  ]}
                 />
               </span>
             )}

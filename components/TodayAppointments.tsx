@@ -16,6 +16,10 @@ import {
   type MediataskOrderSamenvatting,
 } from "@/lib/afspraak-status";
 import MeerMenu from "@/components/MeerMenu";
+import { useTaal } from "@/components/TaalProvider";
+import { taalLocale, type Taal, type TaalSleutel } from "@/lib/taal";
+
+type Vertaal = (sleutel: TaalSleutel, waarden?: Record<string, string | number>) => string;
 
 interface CalendarEvent {
   id: string;
@@ -50,21 +54,26 @@ async function haalKlaarMeldingen(): Promise<KlaarMeldingen | null> {
 }
 
 /** Het label op een kaartje per status; null = geen statuslabel. */
-function statusLabel(dienst: Dienst, status: DienstStatus): { tekst: string; klasse: string } | null {
-  const naam = dienst === "nen" ? "NEN2580" : "Energielabel";
+function statusLabel(dienst: Dienst, status: DienstStatus, t: Vertaal): { tekst: string; klasse: string } | null {
   switch (status) {
     case "geupload":
-      return { tekst: dienst === "nen" ? "NEN2580 ingediend" : "Energielabel geüpload", klasse: "is-uploaded" };
+      return {
+        tekst: dienst === "nen" ? t("dashboard.nenIngediend") : t("dashboard.energielabelGeupload"),
+        klasse: "is-uploaded",
+      };
     case "elders":
       return {
-        tekst: dienst === "nen" ? "In Mediatask · buiten uploader" : "In ClickUp · buiten uploader",
+        tekst: `${dienst === "nen" ? t("dashboard.inMediatask") : t("dashboard.inClickUp")} · ${t("dashboard.buitenUploader")}`,
         klasse: "is-uploaded",
       };
     case "handmatig":
-      return { tekst: `${naam} al gedaan · handmatig`, klasse: "is-uploaded" };
+      return {
+        tekst: `${dienst === "nen" ? t("dashboard.nenAlGedaan") : t("dashboard.energielabelAlGedaan")} · ${t("dashboard.handmatig")}`,
+        klasse: "is-uploaded",
+      };
     case "onaf":
       return {
-        tekst: dienst === "nen" ? "NEN2580: concept, nog niet ingediend" : "Bijlages ontbreken",
+        tekst: dienst === "nen" ? t("dashboard.nenConcept") : t("dashboard.bijlagesOntbreken"),
         klasse: "is-warning",
       };
     default:
@@ -72,11 +81,11 @@ function statusLabel(dienst: Dienst, status: DienstStatus): { tekst: string; kla
   }
 }
 
-function formatTime(iso: string | null): string {
+function formatTime(iso: string | null, taal: Taal): string {
   if (!iso || iso.length === 10) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString(taalLocale(taal), { hour: "2-digit", minute: "2-digit" });
 }
 
 /**
@@ -106,6 +115,7 @@ export default function TodayAppointments({
       adressen te vinden zijn: adressen in de buurt via GPS. */
   onUseLocation?: () => void;
 }) {
+  const { t, taal } = useTaal();
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);
   const [drafts, setDrafts] = useState<DraftRecord[]>([]);
   const [mediataskOrders, setMediataskOrders] = useState<MediataskOrderSamenvatting[]>([]);
@@ -210,8 +220,8 @@ export default function TodayAppointments({
             <path d="M3 9h18M8 2v4M16 2v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
           </svg>
           <span>
-            Log in met Google Agenda om je afspraken van vandaag hier te laden.{" "}
-            <a href="/instellingen">Naar Koppelingen</a>
+            {t("dashboard.agendaInloggen")}{" "}
+            <a href="/instellingen">{t("dashboard.naarKoppelingen")}</a>
           </span>
         </div>
       </div>
@@ -253,13 +263,13 @@ export default function TodayAppointments({
   return (
     <div className="today-appts is-compact">
       <div className="list-head">
-        <span className="eyebrow">Afspraken vandaag</span>
+        <span className="eyebrow">{t("dashboard.afsprakenVandaag")}</span>
       </div>
       <ul className="today-appts-list">
         {withAddress.map((e) => {
           const address = e.location!.trim();
           const { street, cityLine } = splitAddress(address);
-          const time = formatTime(e.start);
+          const time = formatTime(e.start, taal);
           const services = matchServices(e.summary, e.description);
           const draft = findDraft(street);
           const klant = extractKlant(e.description);
@@ -285,7 +295,7 @@ export default function TodayAppointments({
           // blijft juist opvallen, want daar moet nog iets gebeuren.
           const status = statusVoor(street, draft);
           const alreadyUploaded = status !== null && status !== "onaf";
-          const label = context === "media" ? null : statusLabel(context, status);
+          const label = context === "media" ? null : statusLabel(context, status, t);
           const isDimmed = otherServiceOnly || alreadyUploaded;
 
           return (
@@ -309,7 +319,7 @@ export default function TodayAppointments({
                 ) : (
                   (services.energielabel || services.nen || klant || bagMissing) && (
                     <span className="today-appt-services">
-                      {bagMissing && <span className="today-appt-service-tag is-warning">⚠ Niet in BAG</span>}
+                      {bagMissing && <span className="today-appt-service-tag is-warning">{t("dashboard.nietInBag")}</span>}
                       {klant && <span className="today-appt-service-tag is-makelaar">{klant}</span>}
                       {services.energielabel && <span className="today-appt-service-tag">Energielabel</span>}
                       {services.nen && <span className="today-appt-service-tag is-nen">NEN2580</span>}
@@ -323,13 +333,13 @@ export default function TodayAppointments({
               {context !== "media" && (
                 <span className="today-appt-item-meer">
                   <MeerMenu
-                    label={`Meer opties voor ${street}`}
+                    label={t("dashboard.meerOpties", { adres: street })}
                     bezig={meldBezig === street}
                     items={(["nen", "energielabel"] as const).map((d) => {
                       const aan = klaar[d].has(adresSleutel(street));
                       return {
-                        label: d === "nen" ? "NEN2580 al gedaan" : "Energielabel al gedaan",
-                        uitleg: aan ? "Tik om terug te draaien" : "Markeert deze afspraak als klaar",
+                        label: d === "nen" ? t("dashboard.nenAlGedaan") : t("dashboard.energielabelAlGedaan"),
+                        uitleg: aan ? t("dashboard.terugDraaien") : t("dashboard.markeerKlaar"),
                         aan,
                         onClick: () => zetKlaar(street, d, !aan),
                       };
@@ -345,7 +355,7 @@ export default function TodayAppointments({
                 <div className="today-appt-fix">
                   {bag!.similar.length > 0 ? (
                     <>
-                      <span className="today-appt-fix-label">Bedoelde je?</span>
+                      <span className="today-appt-fix-label">{t("dashboard.bedoeldeJe")}</span>
                       {bag!.similar.map((label) => (
                         <button
                           key={label}
@@ -363,7 +373,7 @@ export default function TodayAppointments({
                   ) : (
                     onUseLocation && (
                       <>
-                        <span className="today-appt-fix-label">Geen gelijkend adres gevonden.</span>
+                        <span className="today-appt-fix-label">{t("dashboard.geenGelijkendAdres")}</span>
                         <button
                           type="button"
                           className="today-appt-fix-btn"
@@ -372,7 +382,7 @@ export default function TodayAppointments({
                             onUseLocation();
                           }}
                         >
-                          📍 Adressen in de buurt
+                          {t("dashboard.adressenInDeBuurt")}
                         </button>
                       </>
                     )

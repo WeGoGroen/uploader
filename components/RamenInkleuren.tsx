@@ -2,6 +2,8 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { enqueue } from "@/lib/upload-queue";
+import { useTaal } from "@/components/TaalProvider";
+import type { TaalSleutel } from "@/lib/taal";
 import {
   BUITENGEVEL_SUBMAP,
   GEVELS,
@@ -19,6 +21,18 @@ import {
     kozijn te kunnen lezen, klein genoeg voor het geheugen van een iPad. */
 const MAX_ZIJDE = 2560;
 const JPEG_KWALITEIT = 0.9;
+
+/** Schermnaam van de schrijfkleuren (de namen in lib/ramen-inkleuren blijven de sleutel). */
+const SCHRIJF_KLEUR: Record<string, TaalSleutel> = {
+  Zwart: "energielabel.ramen.kleur.zwart",
+  Wit: "energielabel.ramen.kleur.wit",
+  Rood: "energielabel.ramen.kleur.rood",
+  Blauw: "energielabel.ramen.kleur.blauw",
+  Groen: "energielabel.ramen.kleur.groen",
+  Geel: "energielabel.ramen.kleur.geel",
+  Oranje: "energielabel.ramen.kleur.oranje",
+  Paars: "energielabel.ramen.kleur.paars",
+};
 
 interface Adres {
   straatEnNummer: string;
@@ -155,6 +169,7 @@ export default function RamenInkleuren({
   map: string | null;
   account: string | null;
 }) {
+  const { t } = useTaal();
   const inputRef = useRef<HTMLInputElement>(null);
   const [foto, setFoto] = useState<{
     id: number;
@@ -172,7 +187,7 @@ export default function RamenInkleuren({
       const schaal = Math.min(1, MAX_ZIJDE / Math.max(beeld.width, beeld.height));
       setFoto({ id: Date.now(), beeld, w: Math.round(beeld.width * schaal), h: Math.round(beeld.height * schaal) });
     } catch {
-      setFout("Deze foto kon niet geopend worden. Probeer het nog een keer.");
+      setFout(t("energielabel.ramen.fotoFout"));
     }
   }
 
@@ -194,7 +209,7 @@ export default function RamenInkleuren({
         type="button"
         className="ramen-knop"
         onClick={() => inputRef.current?.click()}
-        aria-label="Foto maken en ramen inkleuren"
+        aria-label={t("energielabel.ramen.knopAria")}
       >
         <span className="ramen-knop-icoon" aria-hidden="true">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -207,7 +222,7 @@ export default function RamenInkleuren({
             <circle cx="12" cy="13" r="3.4" stroke="currentColor" strokeWidth="1.8" />
           </svg>
         </span>
-        <span className="ramen-knop-tekst">Ramen</span>
+        <span className="ramen-knop-tekst">{t("energielabel.ramen.knop")}</span>
       </button>
       {fout && <div className="banner is-bad ramen-fout">{fout}</div>}
       {foto && (
@@ -242,6 +257,8 @@ function Inkleuren({
   onSluit: () => void;
   onKlaar: (file: File) => Promise<void>;
 }) {
+  const { t } = useTaal();
+  const kleurNaam = (naam: string) => (SCHRIJF_KLEUR[naam] ? t(SCHRIJF_KLEUR[naam]) : naam.toLowerCase());
   const vlakRef = useRef<HTMLDivElement>(null);
   const fotoRef = useRef<HTMLCanvasElement>(null);
   const penRef = useRef<HTMLCanvasElement>(null);
@@ -336,15 +353,15 @@ function Inkleuren({
   );
 
   return (
-    <div className="ramen-venster" role="dialog" aria-modal="true" aria-label="Ramen inkleuren">
+    <div className="ramen-venster" role="dialog" aria-modal="true" aria-label={t("energielabel.ramen.dialoog")}>
       <div className="topline ramen-kop">
         <button type="button" className="btn-back" onClick={onSluit}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          Terug naar de opname
+          {t("energielabel.ramen.terug")}
         </button>
-        <h2>Ramen inkleuren · {adres.straatEnNummer}</h2>
+        <h2>{t("energielabel.ramen.titel", { adres: adres.straatEnNummer })}</h2>
       </div>
 
       <div className="ramen-werk">
@@ -385,7 +402,9 @@ function Inkleuren({
               )}
               <div className="ramen-hint" aria-live="polite">
                 <span className="ramen-hint-stip" style={{ background: pen.kleur }} />
-                {pen.soort === "schrijf" ? `Schrijven: ${pen.naam.toLowerCase()}` : `Pen: ${pen.naam} — kleur een raam in`}
+                {pen.soort === "schrijf"
+                  ? t("energielabel.ramen.schrijven", { kleur: kleurNaam(pen.naam) })
+                  : t("energielabel.ramen.pen", { naam: pen.naam })}
               </div>
             </div>
           </div>
@@ -393,8 +412,8 @@ function Inkleuren({
             <button
               type="button"
               className="ramen-vorige"
-              aria-label="Vorige stap ongedaan maken"
-              title="Vorige"
+              aria-label={t("energielabel.ramen.vorigeAria")}
+              title={t("energielabel.ramen.vorige")}
               onClick={() => {
                 lijnen.current.pop();
                 setAantal(lijnen.current.length);
@@ -415,20 +434,20 @@ function Inkleuren({
                 herteken();
               }}
             >
-              Wissen
+              {t("energielabel.ramen.wissen")}
             </button>
             <button type="button" className="btn btn-quiet" onClick={onNieuweFoto}>
-              Nieuwe foto
+              {t("energielabel.ramen.nieuweFoto")}
             </button>
-            {opslaanFout && <span className="ramen-opslaan-fout">Opslaan lukte niet — probeer het nog een keer.</span>}
+            {opslaanFout && <span className="ramen-opslaan-fout">{t("energielabel.ramen.opslaanFout")}</span>}
             <button type="button" className="btn btn-primary ramen-klaar" onClick={() => void klaar()} disabled={bezig}>
-              {bezig ? "Opslaan…" : "Klaar"}
+              {bezig ? t("energielabel.ramen.opslaan") : t("energielabel.ramen.klaar")}
             </button>
           </div>
         </div>
 
         <div className="ramen-paneel">
-          <section className="ramen-kaart" aria-label="Gevel oriëntatie">
+          <section className="ramen-kaart" aria-label={t("energielabel.ramen.sectie.gevel")}>
             <div className="ramen-grid is-2">
               {GEVELS.map((g) => (
                 <button
@@ -444,13 +463,13 @@ function Inkleuren({
               ))}
             </div>
           </section>
-          <section className="ramen-kaart" aria-label="Glas">
+          <section className="ramen-kaart" aria-label={t("energielabel.ramen.sectie.glas")}>
             <div className="ramen-grid is-3">{GLAS.map(knop)}</div>
           </section>
-          <section className="ramen-kaart" aria-label="Grenst aan">
+          <section className="ramen-kaart" aria-label={t("energielabel.ramen.sectie.grenstAan")}>
             <div className="ramen-grid is-2">{GRENST_AAN.map(knop)}</div>
           </section>
-          <section className="ramen-kaart" aria-label="Schrijven">
+          <section className="ramen-kaart" aria-label={t("energielabel.ramen.sectie.schrijven")}>
             <div className="ramen-rondjes">
               {SCHRIJF.map((k) => (
                 <button
@@ -458,7 +477,7 @@ function Inkleuren({
                   type="button"
                   className="ramen-rondje"
                   aria-pressed={pen.naam === k.naam}
-                  aria-label={`Schrijven in ${k.naam.toLowerCase()}`}
+                  aria-label={t("energielabel.ramen.schrijvenIn", { kleur: kleurNaam(k.naam) })}
                   style={{ background: k.kleur }}
                   onClick={() => setPen(k)}
                 />

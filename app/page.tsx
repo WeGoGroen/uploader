@@ -10,6 +10,8 @@ import UploadPanel from "@/components/UploadPanel";
 import { useRechten } from "@/components/RechtenProvider";
 import ScanStatusKaart from "@/components/ScanStatus";
 import MeerMenu from "@/components/MeerMenu";
+import { useTaal } from "@/components/TaalProvider";
+import { taalLocale, type Taal, type TaalSleutel } from "@/lib/taal";
 import {
   energielabelStatus,
   isRecent,
@@ -46,6 +48,8 @@ type DraftRecord = Pick<
 >;
 
 type KlaarMeldingen = Record<"energielabel" | "nen", Set<string>>;
+/** Een foutmelding van de server (as-is) of een eigen melding als sleutel, zodat die meevertaalt. */
+type AgendaFout = { tekst: string } | { sleutel: TaalSleutel };
 const GEEN_MELDINGEN: KlaarMeldingen = { energielabel: new Set(), nen: new Set() };
 
 /**
@@ -63,24 +67,21 @@ const GEENRECHT_LABELS: Record<string, string> = {
 
 /** Apart component omdat useSearchParams() een Suspense-grens nodig heeft. */
 function GeenRechtMelding() {
+  const { t } = useTaal();
   const soort = useSearchParams().get("geenrecht");
   if (!soort) return null;
   return (
     <p className="banner is-bad" style={{ marginBottom: 18 }}>
-      <span>
-        Je hebt geen rechten voor {GEENRECHT_LABELS[soort] ?? soort}-opnames, dus die uploadpagina
-        gaat niet open. Laat de beheerder dit in het Business Control Center bij Werknemers
-        aanzetten.
-      </span>
+      <span>{t("dashboard.geenRecht", { soort: GEENRECHT_LABELS[soort] ?? soort })}</span>
     </p>
   );
 }
 
-function formatTime(iso: string | null): string {
+function formatTime(iso: string | null, taal: Taal): string {
   if (!iso || iso.length === 10) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString(taalLocale(taal), { hour: "2-digit", minute: "2-digit" });
 }
 
 /**
@@ -106,6 +107,7 @@ function StatusPill({
   bron?: string;
   title?: string;
 }) {
+  const { t } = useTaal();
   const metDot = tone === "busy" || tone === "off";
   const cls = tone === "busy" ? "is-busy" : "is-off";
   const inhoud = metDot ? (
@@ -135,7 +137,7 @@ function StatusPill({
       href={href}
       className={klasse}
       style={{ ...(stijl ?? {}), textDecoration: "none" }}
-      title={title ?? "Openen — bijvoorbeeld om nog iets toe te voegen of na te kijken"}
+      title={title ?? t("dashboard.pilOpenen")}
     >
       {inhoud}
     </a>
@@ -143,6 +145,7 @@ function StatusPill({
 }
 
 export default function Dashboard() {
+  const { t, taal } = useTaal();
   // Alles toestaan tot het antwoord binnen is: anders knipperen de knoppen
   // weg en weer terug bij elke paginaopening.
   // Komt server-side mee (zie de layout): er is dus geen moment waarop het
@@ -150,7 +153,7 @@ export default function Dashboard() {
   const rechten = useRechten();
 
   const [events, setEvents] = useState<CalendarEvent[] | null>(null);
-  const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [calendarError, setCalendarError] = useState<AgendaFout | null>(null);
   const [drafts, setDrafts] = useState<DraftRecord[] | null>(null);
   const [mediataskOrders, setMediataskOrders] = useState<MediataskOrderSamenvatting[]>([]);
   const [clickupTaken, setClickupTaken] = useState<ClickUpTaakSamenvatting[]>([]);
@@ -179,14 +182,16 @@ export default function Dashboard() {
         .then(async (res) => {
           if (!res.ok) {
             const data = await res.json().catch(() => null);
-            setCalendarError(data?.error ?? "Google Agenda is niet gekoppeld.");
+            setCalendarError(
+              data?.error != null ? { tekst: data.error } : { sleutel: "dashboard.agendaNietGekoppeld" }
+            );
             return [] as CalendarEvent[];
           }
           const data = await res.json();
           return (data.events ?? []) as CalendarEvent[];
         })
         .catch(() => {
-          setCalendarError("Google Agenda kon niet worden opgehaald.");
+          setCalendarError({ sleutel: "dashboard.agendaOphalenMislukt" });
           return [] as CalendarEvent[];
         }),
       fetch("/api/drafts", { cache: "no-store" })
@@ -294,7 +299,7 @@ export default function Dashboard() {
   return (
     <>
       <header className="topline">
-        <span className="eyebrow">Dashboard</span>
+        <span className="eyebrow">{t("dashboard.titel")}</span>
       </header>
 
       <Suspense fallback={null}>
@@ -329,29 +334,29 @@ export default function Dashboard() {
                 strokeLinejoin="round"
               />
             </svg>
-            {refreshing ? "Bezig met verversen…" : "Afspraken verversen"}
+            {refreshing ? t("dashboard.verversenBezig") : t("dashboard.verversen")}
           </button>
         )}
 
-        {loading && <p className="note">Laden…</p>}
+        {loading && <p className="note">{t("dashboard.laden")}</p>}
 
         {!loading && calendarError && (
           <p className="note" style={{ padding: 0 }}>
-            ⚠ {calendarError}{" "}
+            ⚠ {"tekst" in calendarError ? calendarError.tekst : t(calendarError.sleutel)}{" "}
             <a href="/instellingen" style={{ color: "var(--accent-text)" }}>
-              Naar Instellingen
+              {t("dashboard.naarInstellingen")}
             </a>
           </p>
         )}
 
         {!loading && !calendarError && withAddress.length === 0 && (
-          <p className="note" style={{ padding: 0 }}>Geen afspraken met een adres gevonden voor vandaag.</p>
+          <p className="note" style={{ padding: 0 }}>{t("dashboard.geenAfspraken")}</p>
         )}
 
         {!loading && withAddress.length > 0 && (
           <div className="section">
             <div className="section-head">
-              <h2>Afspraken vandaag</h2>
+              <h2>{t("dashboard.afsprakenVandaag")}</h2>
               <span className="section-count">{withAddress.length}</span>
             </div>
             <div className="draft-list">
@@ -398,7 +403,7 @@ export default function Dashboard() {
                 const energielabelDone = elStatus !== null && elStatus !== "onaf";
                 const energielabelStarted = !!draft;
                 const nenDone = nStatus !== null && nStatus !== "onaf";
-                const time = formatTime(e.start);
+                const time = formatTime(e.start, taal);
                 const gedetecteerd = detectServices(e.summary, e.description);
                 // De agenda zegt wat er op dit adres moet gebeuren; de rechten
                 // zeggen wat deze opnemer mag. Een knop tonen die achter een
@@ -432,13 +437,13 @@ export default function Dashboard() {
                         {cityLine && <div className="draft-meta">{cityLine}</div>}
                         <div className="today-appt-services" style={{ marginTop: 6 }}>
                           {bagBlocking && (
-                            <span className="today-appt-service-tag is-warning">⚠ Niet in BAG</span>
+                            <span className="today-appt-service-tag is-warning">{t("dashboard.nietInBag")}</span>
                           )}
                           {picked && (
                             <button
                               type="button"
                               className="today-appt-service-tag is-picked"
-                              title="Andere keuze maken"
+                              title={t("dashboard.andereKeuze")}
                               onClick={() =>
                                 setChosenAddress((p) => {
                                   const next = { ...p };
@@ -462,7 +467,7 @@ export default function Dashboard() {
                           <div className="today-appt-fix">
                             {bag!.similar.length > 0 ? (
                               <>
-                                <span className="today-appt-fix-label">Bedoelde je?</span>
+                                <span className="today-appt-fix-label">{t("dashboard.bedoeldeJe")}</span>
                                 {bag!.similar.map((label) => (
                                   <button
                                     key={label}
@@ -476,7 +481,7 @@ export default function Dashboard() {
                               </>
                             ) : (
                               <span className="today-appt-fix-label">
-                                Geen gelijkend adres gevonden — zoek het adres via de opnamepagina.
+                                {t("dashboard.geenGelijkendAdresZoek")}
                               </span>
                             )}
                           </div>
@@ -490,33 +495,33 @@ export default function Dashboard() {
                             ? `/energielabel?draft=${draft.id}`
                             : `/energielabel?addr=${encodeURIComponent(bagQuery)}`;
                           if (elStatus === "geupload")
-                            return <StatusPill label="Energielabel geüpload" tone="ok" href={elUrl} />;
+                            return <StatusPill label={t("dashboard.energielabelGeupload")} tone="ok" href={elUrl} />;
                           if (elStatus === "elders")
                             return (
                               <StatusPill
-                                label="In ClickUp"
-                                bron="buiten uploader"
+                                label={t("dashboard.inClickUp")}
+                                bron={t("dashboard.buitenUploader")}
                                 tone="elders"
-                                title="Er staat recent een taak voor dit adres in ClickUp, maar die is niet via de uploader gemaakt"
+                                title={t("dashboard.inClickUpUitleg")}
                               />
                             );
                           if (elStatus === "handmatig")
-                            return <StatusPill label="Energielabel al gedaan" bron="handmatig" tone="handmatig" />;
+                            return <StatusPill label={t("dashboard.energielabelAlGedaan")} bron={t("dashboard.handmatig")} tone="handmatig" />;
                           if (elStatus === "onaf")
                             return (
                               <a
                                 href={`/energielabel?draft=${draft!.id}`}
                                 className="today-appt-service-tag is-warning"
-                                title={`Niet in ClickUp gekomen: ${incompleteDocs.join(", ")}`}
+                                title={t("dashboard.nietInClickUpGekomen", { bestanden: incompleteDocs.join(", ") })}
                               >
-                                ⚠ Bijlages ontbreken ({incompleteDocs.length}) — afmaken
+                                {t("dashboard.bijlagesOntbrekenAfmaken", { n: incompleteDocs.length })}
                               </a>
                             );
                           return energielabelStarted ? (
-                            <StatusPill label="Energielabel: concept" tone="busy" />
+                            <StatusPill label={t("dashboard.energielabelConcept")} tone="busy" />
                           ) : (
                             <a href={elUrl} className="btn btn-quiet">
-                              Energielabel starten
+                              {t("dashboard.energielabelStarten")}
                             </a>
                           );
                         })()}
@@ -524,30 +529,30 @@ export default function Dashboard() {
                         (() => {
                           const nenUrl = `/nen?addr=${encodeURIComponent(bagQuery)}${klant ? `&klant=${encodeURIComponent(klant)}` : ""}${grossFloorArea ? `&m2=${grossFloorArea}` : ""}`;
                           if (nStatus === "geupload")
-                            return <StatusPill label="NEN2580 ingediend" tone="ok" href={nenUrl} />;
+                            return <StatusPill label={t("dashboard.nenIngediend")} tone="ok" href={nenUrl} />;
                           if (nStatus === "elders")
                             return (
                               <StatusPill
-                                label="In Mediatask"
-                                bron="buiten uploader"
+                                label={t("dashboard.inMediatask")}
+                                bron={t("dashboard.buitenUploader")}
                                 tone="elders"
-                                title="Er loopt een order voor dit adres bij Mediatask, maar die is niet via de uploader gemaakt"
+                                title={t("dashboard.inMediataskUitleg")}
                               />
                             );
                           if (nStatus === "handmatig")
-                            return <StatusPill label="NEN2580 al gedaan" bron="handmatig" tone="handmatig" />;
+                            return <StatusPill label={t("dashboard.nenAlGedaan")} bron={t("dashboard.handmatig")} tone="handmatig" />;
                           if (nStatus === "onaf")
                             return (
                               <StatusPill
-                                label="NEN2580: concept, nog niet ingediend"
+                                label={t("dashboard.nenConcept")}
                                 tone="busy"
                                 href={nenUrl}
-                                title="De order staat bij Mediatask als concept — open hem om af te ronden en in te dienen"
+                                title={t("dashboard.nenConceptUitleg")}
                               />
                             );
                           return (
                             <a href={nenUrl} className="btn btn-quiet">
-                              NEN2580 uploaden
+                              {t("dashboard.nenUploaden")}
                             </a>
                           );
                         })()}
@@ -557,18 +562,18 @@ export default function Dashboard() {
                           gemarkeerd is; nog eens tikken draait het terug. */}
                       <span className="today-appt-meer">
                         <MeerMenu
-                          label={`Meer opties voor ${street}`}
+                          label={t("dashboard.meerOpties", { adres: street })}
                           bezig={meldBezig === statusStreet}
                           items={[
                             {
-                              label: "NEN2580 al gedaan",
-                              uitleg: nenHandmatig ? "Tik om terug te draaien" : "Markeert deze afspraak als klaar",
+                              label: t("dashboard.nenAlGedaan"),
+                              uitleg: nenHandmatig ? t("dashboard.terugDraaien") : t("dashboard.markeerKlaar"),
                               aan: nenHandmatig,
                               onClick: () => zetKlaar(statusStreet, "nen", !nenHandmatig),
                             },
                             {
-                              label: "Energielabel al gedaan",
-                              uitleg: elHandmatig ? "Tik om terug te draaien" : "Markeert deze afspraak als klaar",
+                              label: t("dashboard.energielabelAlGedaan"),
+                              uitleg: elHandmatig ? t("dashboard.terugDraaien") : t("dashboard.markeerKlaar"),
                               aan: elHandmatig,
                               onClick: () => zetKlaar(statusStreet, "energielabel", !elHandmatig),
                             },

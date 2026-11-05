@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTaal } from "@/components/TaalProvider";
 
 interface Account {
   name: string;
@@ -43,6 +44,7 @@ function fileToDataUrl(file: File): Promise<string> {
  * gebeurd is.
  */
 function MijnCode() {
+  const { t } = useTaal();
   const [wie, setWie] = useState<{ naam: string; codeGewijzigd: boolean } | null>(null);
   const [huidig, setHuidig] = useState("");
   const [nieuw, setNieuw] = useState("");
@@ -63,7 +65,7 @@ function MijnCode() {
     e.preventDefault();
     setMelding(null);
     if (nieuw !== nogmaals) {
-      setMelding({ ok: false, tekst: "De twee nieuwe codes zijn niet gelijk." });
+      setMelding({ ok: false, tekst: t("beheer.gebruikers.code.nietGelijk") });
       return;
     }
     setBezig(true);
@@ -74,14 +76,14 @@ function MijnCode() {
         body: JSON.stringify({ huidig, nieuw }),
       });
       const body = (await res.json().catch(() => null)) as { error?: string } | null;
-      if (!res.ok) throw new Error(body?.error ?? "Wijzigen mislukt.");
-      setMelding({ ok: true, tekst: "Je code is gewijzigd." });
+      if (!res.ok) throw new Error(body?.error ?? t("beheer.gebruikers.code.mislukt"));
+      setMelding({ ok: true, tekst: t("beheer.gebruikers.code.gewijzigd") });
       setHuidig("");
       setNieuw("");
       setNogmaals("");
       setWie((w) => (w ? { ...w, codeGewijzigd: true } : w));
     } catch (err) {
-      setMelding({ ok: false, tekst: err instanceof Error ? err.message : "Wijzigen mislukt." });
+      setMelding({ ok: false, tekst: err instanceof Error ? err.message : t("beheer.gebruikers.code.mislukt") });
     } finally {
       setBezig(false);
     }
@@ -92,20 +94,20 @@ function MijnCode() {
   return (
     <div className="section">
       <div className="section-head">
-        <h2>Mijn inlogcode</h2>
+        <h2>{t("beheer.gebruikers.code.titel")}</h2>
       </div>
       <p className="note" style={{ padding: 0, marginBottom: 12 }}>
-        Je logt in als <strong>{wie.naam}</strong> met vier cijfers.
+        {t("beheer.gebruikers.code.logtInAlsVoor")} <strong>{wie.naam}</strong>{" "}
+        {t("beheer.gebruikers.code.logtInAlsNa")}
       </p>
       {!wie.codeGewijzigd && (
         <p className="conn-err" style={{ marginBottom: 12 }}>
-          Je gebruikt nog de startcode 0000. Die staat in je uitnodigingsmail en kent iedereen —
-          kies nu je eigen code.
+          {t("beheer.gebruikers.code.startcode")}
         </p>
       )}
       <form onSubmit={opslaan} style={{ display: "grid", gap: 12, maxWidth: 520 }}>
         <div className="field is-wide">
-          <label htmlFor="huidig">Huidige code</label>
+          <label htmlFor="huidig">{t("beheer.gebruikers.code.huidig")}</label>
           <input
             id="huidig"
             className="control"
@@ -117,7 +119,7 @@ function MijnCode() {
         </div>
         <div style={{ display: "grid", gap: 12, gridTemplateColumns: "1fr 1fr" }}>
           <div className="field is-wide">
-            <label htmlFor="nieuw">Nieuwe code</label>
+            <label htmlFor="nieuw">{t("beheer.gebruikers.code.nieuw")}</label>
             <input
               id="nieuw"
               className="control"
@@ -128,7 +130,7 @@ function MijnCode() {
             />
           </div>
           <div className="field is-wide">
-            <label htmlFor="nogmaals">Nogmaals</label>
+            <label htmlFor="nogmaals">{t("beheer.gebruikers.code.nogmaals")}</label>
             <input
               id="nogmaals"
               className="control"
@@ -141,7 +143,7 @@ function MijnCode() {
         </div>
         <div>
           <button className="btn btn-primary" disabled={bezig || huidig.length !== 4 || nieuw.length !== 4}>
-            {bezig ? "Bezig…" : "Code wijzigen"}
+            {bezig ? t("beheer.gebruikers.bezig") : t("beheer.gebruikers.code.wijzigen")}
           </button>
         </div>
         {melding && (
@@ -155,6 +157,7 @@ function MijnCode() {
 }
 
 export default function Gebruikers() {
+  const { t } = useTaal();
   const [accounts, setAccounts] = useState<AccountsResponse | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
@@ -182,7 +185,7 @@ export default function Gebruikers() {
   async function uploadAvatar(accountName: string, file: File) {
     setAvatarError(null);
     if (file.size > 1_500_000) {
-      setAvatarError("Kies een kleinere foto (max 1,5 MB).");
+      setAvatarError(t("beheer.gebruikers.fotoTeGroot"));
       return;
     }
     setUploadingAvatar(accountName);
@@ -194,7 +197,7 @@ export default function Gebruikers() {
         body: JSON.stringify({ name: accountName, avatar: dataUrl }),
       });
       if (!res.ok) {
-        setAvatarError("Foto uploaden is mislukt. Probeer het opnieuw.");
+        setAvatarError(t("beheer.gebruikers.fotoMislukt"));
         return;
       }
       load();
@@ -216,8 +219,8 @@ export default function Gebruikers() {
       if (!res.ok) {
         setMailFout(
           data.error === "ongeldig_adres"
-            ? "Dat lijkt geen geldig mailadres."
-            : (data.error ?? "Opslaan is mislukt.")
+            ? t("beheer.gebruikers.ongeldigAdres")
+            : (data.error ?? t("beheer.gebruikers.opslaanMislukt"))
         );
         return;
       }
@@ -247,8 +250,8 @@ export default function Gebruikers() {
       if (!res.ok) {
         setTokenError(
           data?.error === "invalid_token"
-            ? "Dit token wordt geweigerd door ClickUp. Controleer of je 'm goed hebt gekopieerd."
-            : "Opslaan is mislukt. Probeer het opnieuw."
+            ? t("beheer.gebruikers.tokenGeweigerd")
+            : t("beheer.gebruikers.opslaanMisluktOpnieuw")
         );
         return;
       }
@@ -263,17 +266,15 @@ export default function Gebruikers() {
   return (
     <>
       <header className="topline">
-        <span className="eyebrow">Gebruikers</span>
+        <span className="eyebrow">{t("beheer.gebruikers.titel")}</span>
       </header>
 
       <div className="pad" style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}>
-        <h1>Gebruikers</h1>
+        <h1>{t("beheer.gebruikers.titel")}</h1>
         <p className="lede" style={{ maxWidth: "none" }}>
-          Elk teamlid gebruikt een eigen ClickUp-token, zodat taken op de juiste naam
-          worden aangemaakt. BAG en Dropbox zijn gedeeld en hoeven maar één keer
-          ingesteld te worden — zie{" "}
+          {t("beheer.gebruikers.ledeVoor")}{" "}
           <a href="/instellingen" style={{ color: "var(--accent-text)" }}>
-            Koppelingen
+            {t("beheer.gebruikers.ledeLink")}
           </a>
           .
         </p>
@@ -285,9 +286,9 @@ export default function Gebruikers() {
         {accounts?.beheerder && (
         <div className="section">
           <div className="section-head">
-            <h2>Bestaande gebruikers</h2>
+            <h2>{t("beheer.gebruikers.bestaande")}</h2>
           </div>
-          {!accounts && <p className="note">Laden…</p>}
+          {!accounts && <p className="note">{t("beheer.gebruikers.laden")}</p>}
           {avatarError && <p className="conn-err">{avatarError}</p>}
           {accounts && (
             <div className="user-list">
@@ -300,7 +301,7 @@ export default function Gebruikers() {
                         type="button"
                         className="user-card-avatar"
                         onClick={() => fileInputRefs.current[a.name]?.click()}
-                        title="Profielfoto wijzigen"
+                        title={t("beheer.gebruikers.fotoWijzigen")}
                       >
                         {a.avatar ? (
                           // eslint-disable-next-line @next/next/no-img-element
@@ -331,14 +332,14 @@ export default function Gebruikers() {
                       <div className="user-card-info">
                         <div className="user-card-name">{a.name}</div>
                         <span className={`pill ${isActive ? "is-ok" : "is-off"}`}>
-                          {isActive ? "Actief op dit apparaat" : "Beschikbaar"}
+                          {isActive ? t("beheer.gebruikers.actief") : t("beheer.gebruikers.beschikbaar")}
                         </span>
                         <button
                           type="button"
                           className="user-card-foto"
                           onClick={() => fileInputRefs.current[a.name]?.click()}
                         >
-                          {a.avatar ? "Profielfoto wijzigen" : "Profielfoto toevoegen"}
+                          {a.avatar ? t("beheer.gebruikers.fotoWijzigen") : t("beheer.gebruikers.fotoToevoegen")}
                         </button>
                       </div>
                     </div>
@@ -348,18 +349,18 @@ export default function Gebruikers() {
                           className="btn btn-quiet"
                           onClick={() => (editingToken === a.name ? setEditingToken(null) : startEditingToken(a.name))}
                         >
-                          {editingToken === a.name ? "Annuleren" : "Token aanpassen"}
+                          {editingToken === a.name ? t("beheer.gebruikers.annuleren") : t("beheer.gebruikers.tokenAanpassen")}
                         </button>
                     </div>
                     <div className="user-card-mail">
                       <div className="field is-wide">
-                        <label htmlFor={`mail-${a.name}`}>Mailadres voor meldingen</label>
+                        <label htmlFor={`mail-${a.name}`}>{t("beheer.gebruikers.mailLabel")}</label>
                         <input
                           id={`mail-${a.name}`}
                           className="control"
                           type="email"
                           inputMode="email"
-                          placeholder="naam@wegogroen.nl"
+                          placeholder={t("beheer.gebruikers.mailPlaceholder")}
                           value={mailWaarde[a.name] ?? a.email ?? ""}
                           onChange={(e) =>
                             setMailWaarde((v) => ({ ...v, [a.name]: e.target.value }))
@@ -371,12 +372,12 @@ export default function Gebruikers() {
                         disabled={mailBezig === a.name || (mailWaarde[a.name] ?? a.email ?? "") === (a.email ?? "")}
                         onClick={() => bewaarMail(a.name)}
                       >
-                        {mailBezig === a.name ? "Bezig…" : "Opslaan"}
+                        {mailBezig === a.name ? t("beheer.gebruikers.bezig") : t("beheer.gebruikers.opslaan")}
                       </button>
                     </div>
                     {!a.email && (
                       <p className="conn-hint">
-                        Zonder adres krijgt {a.name} geen bericht als een opname blijft liggen.
+                        {t("beheer.gebruikers.geenMail", { naam: a.name })}
                       </p>
                     )}
                     {mailFout && <p className="conn-err">{mailFout}</p>}
@@ -384,7 +385,7 @@ export default function Gebruikers() {
                     {editingToken === a.name && (
                       <div className="user-card-token">
                         <div className="field">
-                          <label htmlFor={`token-${a.name}`}>Nieuw ClickUp API-token voor {a.name}</label>
+                          <label htmlFor={`token-${a.name}`}>{t("beheer.gebruikers.nieuwToken", { naam: a.name })}</label>
                           <input
                             id={`token-${a.name}`}
                             className="control"
@@ -399,7 +400,7 @@ export default function Gebruikers() {
                           disabled={tokenBusy || !tokenValue.trim()}
                           onClick={() => saveToken(a.name)}
                         >
-                          {tokenBusy ? "Bezig met controleren…" : "Token opslaan"}
+                          {tokenBusy ? t("beheer.gebruikers.bezigControleren") : t("beheer.gebruikers.tokenOpslaan")}
                         </button>
                       </div>
                     )}

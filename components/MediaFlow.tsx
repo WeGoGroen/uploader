@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useIkBen } from "@/components/RechtenProvider";
+import { useTaal } from "@/components/TaalProvider";
+import type { TaalSleutel } from "@/lib/taal";
 import { enqueue, getServerSnapshot, getSnapshot, probeerOpnieuw, subscribe } from "@/lib/upload-queue";
 import { MEDIA_STAPPEN, type MediaStap } from "@/lib/media-folders";
 import { KOP_BYTES, herkenOpNaam, herkenUitKop, leesKop, type Herkenning } from "@/lib/media-herkennen";
@@ -175,6 +177,11 @@ function useDropboxInhoud(projectmap: string | null): { stand: DropboxStand | nu
  * eerder aanmaken liet bij elke adrescorrectie een lege map achter.
  */
 export default function MediaFlow() {
+  const { t, taal } = useTaal();
+  /** Schermnaam van een soort; MEDIA_STAPPEN zelf blijft Nederlands (de map hangt eraan). */
+  const stapNaam = (k: MediaStap["key"]) => t(`media.stap.${k}.naam`);
+  const stapUitleg = (k: MediaStap["key"]) => t(`media.stap.${k}.uitleg`);
+  const bestanden = (n: number) => t(n === 1 ? "media.bestanden.een" : "media.bestanden.meer", { n });
   const [stap, setStap] = useState<Stap>("adres");
   // Opgeslagen opnames van dit apparaat. In state en niet direct uit
   // localStorage gelezen tijdens het renderen: opslag is geen React-bron, dus
@@ -187,7 +194,7 @@ export default function MediaFlow() {
   const [searching, setSearching] = useState(false);
   const [showManualSearch, setShowManualSearch] = useState(false);
   const [locating, setLocating] = useState(false);
-  const [locationError, setLocationError] = useState<string | null>(null);
+  const [locationError, setLocationError] = useState<TaalSleutel | null>(null);
   const [nearby, setNearby] = useState<NearbyAddress[] | null>(null);
 
   const [address, setAddress] = useState<AddressDetails | null>(null);
@@ -352,7 +359,7 @@ export default function MediaFlow() {
     setShowManualSearch(false);
 
     if (!("geolocation" in navigator)) {
-      setLocationError("Locatie wordt niet ondersteund door deze browser. Gebruik handmatig zoeken.");
+      setLocationError("media.locatie.nietOndersteund");
       return;
     }
 
@@ -367,7 +374,7 @@ export default function MediaFlow() {
           const data = await res.json();
           setNearby(data.addresses ?? []);
         } catch {
-          setLocationError("Ophalen van adressen in de buurt is mislukt. Probeer opnieuw of zoek handmatig.");
+          setLocationError("media.locatie.buurtMislukt");
         } finally {
           setLocating(false);
         }
@@ -376,8 +383,8 @@ export default function MediaFlow() {
         setLocating(false);
         setLocationError(
           err.code === err.PERMISSION_DENIED
-            ? "Locatietoegang geweigerd. Zet dit aan in je browserinstellingen, of zoek handmatig. Let op: locatie werkt alleen over https of op localhost."
-            : "Locatie kon niet worden bepaald. Probeer opnieuw of zoek handmatig."
+            ? "media.locatie.geweigerd"
+            : "media.locatie.onbekend"
         );
       },
       { enableHighAccuracy: true, timeout: 10000 }
@@ -445,13 +452,13 @@ export default function MediaFlow() {
         });
         const data = await res.json().catch(() => null);
         if (!res.ok || !data?.path) {
-          setFolderError(data?.error ?? "De Dropbox-map kon niet worden aangemaakt.");
+          setFolderError(data?.error ?? t("media.map.mislukt"));
           return null;
         }
         setFolder(data);
         return data as DropboxFolder;
       } catch {
-        setFolderError("De Dropbox-map kon niet worden aangemaakt.");
+        setFolderError(t("media.map.mislukt"));
         return null;
       } finally {
         setFolderBusy(false);
@@ -638,7 +645,6 @@ export default function MediaFlow() {
           const vanStap = eigen.filter((t) => t.folder === st.map);
           return {
             key: st.key,
-            naam: st.naam,
             bezig: vanStap.filter((t) => t.dropbox === "uploading").length,
             klaar: vanStap.filter((t) => t.dropbox === "done").length,
             mislukt: vanStap.filter((t) => t.dropbox === "error").length,
@@ -670,7 +676,7 @@ export default function MediaFlow() {
           <span className={`dbx-strip-text${folder ? "" : " is-wrap"}`}>
             {folderBusy ? (
               <>
-                <span className="spinner" /> Dropbox-map klaarzetten…
+                <span className="spinner" /> {t("media.balk.klaarzetten")}
               </>
             ) : folderError ? (
               <span className="is-warning-row">⚠ {folderError}</span>
@@ -682,13 +688,13 @@ export default function MediaFlow() {
                 <span className="dbx-folder-path">{folder.path}/In/Raw</span>
               </>
             ) : (
-              "Map wordt klaargezet…"
+              t("media.balk.wordtKlaargezet")
             )}
           </span>
-          {bezigTotaal > 0 && <span className="dbx-strip-progress-label">{bezigTotaal} bezig</span>}
+          {bezigTotaal > 0 && <span className="dbx-strip-progress-label">{t("media.nBezig", { n: bezigTotaal })}</span>}
           {folder && (
             <a href={folder.url} target="_blank" rel="noopener noreferrer" className="btn-open-dbx">
-              Openen
+              {t("media.balk.openen")}
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M6 4h6v6M12 4 4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
@@ -729,11 +735,11 @@ export default function MediaFlow() {
       <div className="mediabalk">
         {regels.map((r) => (
           <div key={r.st.key} className={`mediabalk-rij${r.bezigAantal === 0 ? " is-bad" : ""}`}>
-            <span className="mediabalk-naam">{r.st.naam}</span>
+            <span className="mediabalk-naam">{stapNaam(r.st.key)}</span>
             <span className="mediabalk-staat">
               {r.bezigAantal > 0
-                ? `${r.klaar}/${r.totaal} klaar`
-                : `${r.mislukt} mislukt`}
+                ? t("media.voortgang.klaar", { klaar: r.klaar, totaal: r.totaal })
+                : t("media.nMislukt", { n: r.mislukt })}
             </span>
             {r.pct !== null && (
               <>
@@ -754,7 +760,7 @@ export default function MediaFlow() {
     return (
       <>
         <header className="topline">
-          <span className="eyebrow">Upload media</span>
+          <span className="eyebrow">{t("media.titel")}</span>
         </header>
 
         {loadingAddress ? (
@@ -762,21 +768,18 @@ export default function MediaFlow() {
             className="pad"
             style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}
           >
-            <p className="note">Adresgegevens ophalen…</p>
+            <p className="note">{t("media.adres.ophalen")}</p>
           </div>
         ) : (
           <div className="addr-grid">
-            <section className="addr-find" aria-label="Adres zoeken">
-              <h1>Upload media</h1>
-              <p className="lede">
-                Kies het pand. Daarna upload je alles in één keer: foto&apos;s, video en 360 worden
-                vanzelf over de juiste mappen verdeeld.
-              </p>
+            <section className="addr-find" aria-label={t("media.adres.zoekenLabel")}>
+              <h1>{t("media.titel")}</h1>
+              <p className="lede">{t("media.adres.lede")}</p>
 
               {lopendeOpnames.length > 0 && (
                 <div className="media-lopend">
                   <div className="list-head">
-                    <span className="eyebrow">Openstaande opnames</span>
+                    <span className="eyebrow">{t("media.lopend.kop")}</span>
                   </div>
                   <ul className="media-lopend-list">
                     {lopendeOpnames.map((r) => (
@@ -787,10 +790,10 @@ export default function MediaFlow() {
                           <span className="media-lopend-top">
                             <span className={`up-status is-${r.status}`}>
                               {r.status === "bezig"
-                                ? "Bezig"
+                                ? t("media.lopend.bezig")
                                 : r.status === "mislukt"
-                                  ? "Vastgelopen"
-                                  : "Openstaand"}
+                                  ? t("media.lopend.vastgelopen")
+                                  : t("media.lopend.open")}
                             </span>
                             {r.pct !== null && <span className="media-lopend-pct">{r.pct}%</span>}
                           </span>
@@ -799,10 +802,15 @@ export default function MediaFlow() {
                           </span>
                           <span className="media-lopend-meta">
                             {r.status === "bezig"
-                              ? `${r.bezig} van ${r.totaal} bestand${r.totaal === 1 ? "" : "en"} nog bezig`
+                              ? t(r.totaal === 1 ? "media.lopend.nogBezig.een" : "media.lopend.nogBezig.meer", {
+                                  n: r.bezig,
+                                  totaal: r.totaal,
+                                })
                               : r.status === "mislukt"
-                                ? `${r.mislukt} bestand${r.mislukt === 1 ? "" : "en"} mislukt`
-                                : `${r.klaar} geüpload — verder waar je gebleven was`}
+                                ? t(r.mislukt === 1 ? "media.lopend.mislukt.een" : "media.lopend.mislukt.meer", {
+                                    n: r.mislukt,
+                                  })
+                                : t("media.lopend.geupload", { n: r.klaar })}
                           </span>
                           {r.onderdelen.length > 0 && (
                             <span className="media-lopend-delen">
@@ -813,13 +821,13 @@ export default function MediaFlow() {
                                     o.bezig > 0 ? " is-bezig" : o.mislukt > 0 ? " is-bad" : " is-klaar"
                                   }`}
                                 >
-                                  {o.naam}{" "}
+                                  {stapNaam(o.key)}{" "}
                                   <b>
                                     {o.bezig > 0
                                       ? `${o.klaar}/${o.totaal}`
                                       : o.mislukt > 0
-                                        ? `${o.mislukt} mislukt`
-                                        : `${o.klaar} klaar`}
+                                        ? t("media.nMislukt", { n: o.mislukt })
+                                        : t("media.nKlaar", { n: o.klaar })}
                                   </b>
                                 </span>
                               ))}
@@ -834,8 +842,8 @@ export default function MediaFlow() {
                         <button
                           type="button"
                           className="media-lopend-weg"
-                          aria-label="Uit de lijst halen"
-                          title="Uit de lijst halen"
+                          aria-label={t("media.lopend.weg")}
+                          title={t("media.lopend.weg")}
                           onClick={() => {
                             vergeetMediaSessie(r.sessie.folderPath);
                             setSessies(alleMediaSessies());
@@ -851,10 +859,10 @@ export default function MediaFlow() {
 
               <button className="btn btn-primary btn-block" onClick={startNearbySearch} disabled={locating}>
                 {locating && <span className="spinner on-accent" />}
-                <span>{locating ? "Locatie ophalen…" : "Locatie ophalen"}</span>
+                <span>{locating ? t("media.locatie.bezig") : t("media.locatie.knop")}</span>
               </button>
 
-              {locationError && <p className="note" style={{ color: "var(--bad)" }}>{locationError}</p>}
+              {locationError && <p className="note" style={{ color: "var(--bad)" }}>{t(locationError)}</p>}
 
               <div className="search">
                 <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -868,19 +876,19 @@ export default function MediaFlow() {
                     setAddress(null);
                     setShowManualSearch(true);
                   }}
-                  placeholder="Of zoek op straat of postcode"
-                  aria-label="Zoek handmatig op adres"
+                  placeholder={t("media.zoek.placeholder")}
+                  aria-label={t("media.zoek.label")}
                 />
               </div>
-              {searching && <p className="note">Zoeken…</p>}
+              {searching && <p className="note">{t("media.zoek.bezig")}</p>}
 
-              {nearby && nearby.length === 0 && <p className="note">Geen adressen gevonden in de buurt.</p>}
+              {nearby && nearby.length === 0 && <p className="note">{t("media.zoek.geenInBuurt")}</p>}
 
               {((nearby && nearby.length > 0) || (showManualSearch && suggestions.length > 0)) && (
                 <div>
                   <div className="list-head">
                     <span className="eyebrow">
-                      {showManualSearch && suggestions.length > 0 ? "Zoekresultaten" : "Dichtstbijzijnde adressen"}
+                      {showManualSearch && suggestions.length > 0 ? t("media.zoek.resultaten") : t("media.zoek.dichtstbij")}
                     </span>
                   </div>
                   <ul className="rows">
@@ -914,7 +922,7 @@ export default function MediaFlow() {
               />
             </section>
 
-            <section className="addr-detail" aria-label="Gekozen pand">
+            <section className="addr-detail" aria-label={t("media.adres.gekozenPand")}>
               <div className="placeholder">
                 <span className="placeholder-mark">
                   <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -922,10 +930,7 @@ export default function MediaFlow() {
                     <circle cx="12" cy="10" r="2.6" stroke="currentColor" strokeWidth="1.6" />
                   </svg>
                 </span>
-                <p>
-                  Kies een afspraak van vandaag, bepaal je locatie, of zoek een adres. Daarna gaan de
-                  bestanden per soort naar Dropbox.
-                </p>
+                <p>{t("media.adres.placeholder")}</p>
               </div>
             </section>
           </div>
@@ -944,7 +949,7 @@ export default function MediaFlow() {
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Terug
+              {t("media.terug")}
             </button>
             <h2 style={{ fontSize: 17 }}>
               {address.straatnaam} {houseNumber(address)}
@@ -975,43 +980,43 @@ export default function MediaFlow() {
             const misluktTotaal = perSoort.reduce((som, r) => som + r.mislukt, 0);
             const eersteMislukt = perSoort.find((r) => r.mislukt > 0);
             const nogNietBekeken = !dropbox && takenVanOpname.length === 0;
-            const meervoud = (n: number) => `${n} bestand${n === 1 ? "" : "en"}`;
+            const meervoud = bestanden;
 
             const fout = misluktTotaal > 0 || (nogNietBekeken && dropboxFout) || (!nogNietBekeken && totaalInDropbox === 0);
             const bezig = bezigTotaal > 0 || (nogNietBekeken && !dropboxFout);
             const titel =
               bezigTotaal > 0
-                ? `Nog ${meervoud(bezigTotaal)} onderweg naar Dropbox`
+                ? t("media.klaar.titelOnderweg", { bestanden: meervoud(bezigTotaal) })
                 : nogNietBekeken
                   ? // Zonder blik in Dropbox is "niets geüpload" een gok: via de
                     // Dropbox-app kan de map allang vol staan.
                     dropboxFout
-                    ? "Dropbox kon niet worden bekeken"
-                    : "Even kijken wat er in Dropbox staat…"
+                    ? t("media.klaar.titelNietBekeken")
+                    : t("media.klaar.titelKijken")
                   : totaalInDropbox === 0
                     ? // Niets aangeleverd: dan is "klaar" een loze bevestiging
                       // van werk dat niet gedaan is.
-                      "Er is niets geüpload voor dit adres"
+                      t("media.klaar.titelNiets")
                     : misluktTotaal > 0
-                      ? `${meervoud(misluktTotaal)} niet in Dropbox gekomen`
-                      : `Klaar — ${meervoud(totaalInDropbox)} in Dropbox`;
+                      ? t("media.klaar.titelMislukt", { bestanden: meervoud(misluktTotaal) })
+                      : t("media.klaar.titelKlaar", { bestanden: meervoud(totaalInDropbox) });
             const onderTitel = [
-              bytesInDropbox > 0 ? leesbareOmvang(bytesInDropbox) : null,
+              bytesInDropbox > 0 ? leesbareOmvang(bytesInDropbox, taal) : null,
               // Via de Dropbox-app kan het nog doorlopen; dat eerlijk zeggen
               // i.p.v. "alles staat erin".
-              MEDIA_STAPPEN.some(komtNogBinnen) ? "er komt nog binnen via de Dropbox-app" : null,
+              MEDIA_STAPPEN.some(komtNogBinnen) ? t("media.klaar.komtNogBinnenApp") : null,
             ]
               .filter(Boolean)
               .join(" · ");
             const uitleg =
               bezigTotaal > 0
-                ? "Loopt door, ook als je dit scherm verlaat"
+                ? t("media.klaar.uitlegLoopt")
                 : nogNietBekeken && dropboxFout
-                  ? "Via “Openen” bovenaan zie je wat er staat"
+                  ? t("media.klaar.uitlegOpenen")
                   : !nogNietBekeken && totaalInDropbox === 0
-                    ? "Ga terug om alsnog bestanden te kiezen"
+                    ? t("media.klaar.uitlegNiets")
                     : eersteMislukt
-                      ? `Ga terug om ze bij ${eersteMislukt.s.naam} opnieuw te proberen`
+                      ? t("media.klaar.uitlegMislukt", { naam: stapNaam(eersteMislukt.s.key) })
                       : null;
 
             return (
@@ -1030,27 +1035,27 @@ export default function MediaFlow() {
                   <ul className="mt-rows">
                     {perSoort.map(({ s, aantal, bytes, bezig: bz, mislukt, pct }) => (
                       <li key={s.key} className={`mt-row${aantal === 0 && mislukt === 0 && bz === 0 ? " is-muted" : ""}`}>
-                        <span className="mt-k">{s.naam}</span>
+                        <span className="mt-k">{stapNaam(s.key)}</span>
                         <span className="mt-v">
                           {/* Wat nog onderweg is apart noemen: "0 bestanden" naast een
                               draaiend icoon las alsof er niets gekozen was. */}
                           {aantal === 0 && bz === 0 && mislukt === 0
-                            ? "Niets geüpload"
+                            ? t("media.klaar.nietsGeupload")
                             : aantal === 0 && bz > 0
-                              ? `${meervoud(bz)} onderweg`
-                              : `${meervoud(aantal)}${bytes > 0 ? ` · ${leesbareOmvang(bytes)}` : ""}${bz > 0 ? ` · ${bz} onderweg` : ""}`}
+                              ? t("media.nOnderweg", { n: meervoud(bz) })
+                              : `${meervoud(aantal)}${bytes > 0 ? ` · ${leesbareOmvang(bytes, taal)}` : ""}${bz > 0 ? ` · ${t("media.nOnderweg", { n: bz })}` : ""}`}
                         </span>
                         {bz > 0 ? (
                           <span className="mt-s">
                             <span className="spinner" aria-hidden="true" />
-                            {pct !== null ? `${pct}%` : "bezig"}
+                            {pct !== null ? `${pct}%` : t("media.klaar.bezig")}
                           </span>
                         ) : mislukt > 0 ? (
-                          <span className="mt-s is-error">⚠ {mislukt} mislukt</span>
+                          <span className="mt-s is-error">⚠ {t("media.nMislukt", { n: mislukt })}</span>
                         ) : komtNogBinnen(s) ? (
-                          <span className="mt-s">komt nog binnen</span>
+                          <span className="mt-s">{t("media.klaar.komtNogBinnen")}</span>
                         ) : aantal > 0 ? (
-                          <span className="mt-s is-done">✓ in Dropbox</span>
+                          <span className="mt-s is-done">{t("media.klaar.inDropbox")}</span>
                         ) : (
                           <span className="mt-s">—</span>
                         )}
@@ -1066,7 +1071,7 @@ export default function MediaFlow() {
                 <div className="mt-foot">
                   {uitleg && <span className="mt-foot-tekst">{uitleg}</span>}
                   <button className="btn btn-primary mt-foot-knop" onClick={afronden}>
-                    Afronden
+                    {t("media.klaar.afronden")}
                   </button>
                 </div>
               </>
@@ -1101,7 +1106,7 @@ export default function MediaFlow() {
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            Ander adres
+            {t("media.anderAdres")}
           </button>
           <h2 style={{ fontSize: 17 }}>
             {address.straatnaam} {houseNumber(address)}
@@ -1116,11 +1121,8 @@ export default function MediaFlow() {
         style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}
       >
         <div>
-          <h1>Media uploaden</h1>
-          <p className="lede">
-            Kies alles van deze opname in één keer. De uploader herkent zelf wat een foto, video of
-            360-opname is en zet het in de juiste map.
-          </p>
+          <h1>{t("media.upload.titel")}</h1>
+          <p className="lede">{t("media.upload.lede")}</p>
         </div>
 
         {/* Geen `accept`: zie MEDIA_STAPPEN. Wat er niet hoort laat de
@@ -1163,10 +1165,8 @@ export default function MediaFlow() {
               <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
             </svg>
           </span>
-          <span className="media-upknop-tekst">{ietsGekozen ? "Meer uploaden" : "Uploaden"}</span>
-          <span className="media-upknop-sub">
-            Foto&apos;s, video en 360 — alles door elkaar, we verdelen het zelf
-          </span>
+          <span className="media-upknop-tekst">{ietsGekozen ? t("media.upload.knopMeer") : t("media.upload.knop")}</span>
+          <span className="media-upknop-sub">{t("media.upload.knopSub")}</span>
         </button>
 
         {ietsGekozen && (
@@ -1175,19 +1175,22 @@ export default function MediaFlow() {
               <span>
                 {herkennen > 0 ? (
                   <>
-                    <span className="spinner" /> {herkennen} bestand{herkennen === 1 ? "" : "en"} herkennen…
+                    <span className="spinner" />{" "}
+                    {t(herkennen === 1 ? "media.upload.herkennen.een" : "media.upload.herkennen.meer", { n: herkennen })}
                   </>
                 ) : (
                   <>
-                    <b>{klaarTotaal}</b> van <b>{telbaar.length}</b> in Dropbox
-                    {misluktTotaal > 0 && <span className="media-totaal-fout"> · {misluktTotaal} mislukt</span>}
+                    <b>{klaarTotaal}</b> {t("media.upload.van")} <b>{telbaar.length}</b> {t("media.upload.inDropbox")}
+                    {misluktTotaal > 0 && (
+                      <span className="media-totaal-fout"> · {t("media.nMislukt", { n: misluktTotaal })}</span>
+                    )}
                   </>
                 )}
               </span>
               {bezigTotaal > 0 && (
                 <span>
-                  {bezigTotaal} bezig
-                  {nogTeGaan > 0 && ` · nog ± ${Math.max(1, Math.round(nogTeGaan / 60))} min`}
+                  {t("media.nBezig", { n: bezigTotaal })}
+                  {nogTeGaan > 0 && ` · ${t("media.upload.nogMin", { n: Math.max(1, Math.round(nogTeGaan / 60)) })}`}
                 </span>
               )}
             </div>
@@ -1211,11 +1214,11 @@ export default function MediaFlow() {
                 : 0;
             const inDropbox = dropbox?.stappen[st.key] ?? null;
             return (
-              <section key={st.key} className="media-kolom" aria-label={st.naam}>
+              <section key={st.key} className="media-kolom" aria-label={stapNaam(st.key)}>
                 <header className="media-kolom-kop">
                   <div className="media-kolom-rij">
                     <span className="media-kolom-titel">
-                      {st.naam}
+                      {stapNaam(st.key)}
                       {eigen.length > 0 && klaar === eigen.length && (
                         <span className="media-kolom-ok" aria-hidden="true">
                           {" "}
@@ -1227,7 +1230,7 @@ export default function MediaFlow() {
                       {eigen.length > 0 ? `${klaar}/${eigen.length}` : aantalVoor(st)}
                     </span>
                   </div>
-                  <span className="media-kolom-map">naar {st.map}</span>
+                  <span className="media-kolom-map">{t("media.kolom.naar", { map: st.map })}</span>
                   {eigen.length > 0 && (
                     <span className="up-bar media-kolom-bar">
                       <span
@@ -1239,25 +1242,29 @@ export default function MediaFlow() {
                 </header>
 
                 {eigen.length === 0 ? (
-                  <p className="media-kolom-leeg">{st.uitleg}</p>
+                  <p className="media-kolom-leeg">{stapUitleg(st.key)}</p>
                 ) : (
                   <ul className="media-kolom-lijst">
-                    {eigen.map((t) => (
-                      <li key={t.id}>
+                    {eigen.map((taak) => (
+                      <li key={taak.id}>
                         <span className="media-kolom-r1">
-                          <span className="media-kolom-naam">{t.name}</span>
+                          <span className="media-kolom-naam">{taak.name}</span>
                           {/* Ook bij "klaar" het percentage: 100% is het antwoord
                               op de vraag die je stelt terwijl je staat te wachten. */}
-                          <span className={`media-kolom-st is-${t.dropbox}`}>
-                            {t.dropbox === "error" ? "mislukt" : t.dropbox === "done" ? "✓ 100%" : `${t.pct}%`}
+                          <span className={`media-kolom-st is-${taak.dropbox}`}>
+                            {taak.dropbox === "error"
+                              ? t("media.kolom.mislukt")
+                              : taak.dropbox === "done"
+                                ? "✓ 100%"
+                                : `${taak.pct}%`}
                           </span>
                         </span>
-                        {redenen[`${st.map}/${t.name}`] && (
-                          <span className="media-kolom-r2">{redenen[`${st.map}/${t.name}`]}</span>
+                        {redenen[`${st.map}/${taak.name}`] && (
+                          <span className="media-kolom-r2">{redenen[`${st.map}/${taak.name}`]}</span>
                         )}
-                        {t.dropbox === "uploading" && t.pct > 0 && (
+                        {taak.dropbox === "uploading" && taak.pct > 0 && (
                           <span className="up-bar media-kolom-bar-klein">
-                            <span className="up-bar-fill" style={{ width: `${t.pct}%` }} />
+                            <span className="up-bar-fill" style={{ width: `${taak.pct}%` }} />
                           </span>
                         )}
                       </li>
@@ -1269,8 +1276,8 @@ export default function MediaFlow() {
                     van een eerdere keer of via de Dropbox-app. */}
                 {inDropbox && inDropbox.aantal > 0 && (
                   <p className="media-kolom-dbx">
-                    In Dropbox: <strong>{aantalVoor(st)}</strong> · {leesbareOmvang(inDropbox.bytes)}
-                    {inDropbox.laatste && ` · ${relatieveTijd(Date.parse(inDropbox.laatste))}`}
+                    {t("media.kolom.inDropbox")} <strong>{aantalVoor(st)}</strong> · {leesbareOmvang(inDropbox.bytes, taal)}
+                    {inDropbox.laatste && ` · ${relatieveTijd(Date.parse(inDropbox.laatste), undefined, taal)}`}
                   </p>
                 )}
 
@@ -1280,7 +1287,7 @@ export default function MediaFlow() {
                     className="media-kolom-opnieuw"
                     onClick={() => void probeerOpnieuw(mislukt.map((t) => t.id))}
                   >
-                    ↻ Mislukte opnieuw proberen
+                    {t("media.kolom.opnieuw")}
                   </button>
                 )}
               </section>
@@ -1290,7 +1297,7 @@ export default function MediaFlow() {
 
         {overgeslagen.length > 0 && (
           <details className="media-overgeslagen">
-            <summary>Niet meegenomen ({overgeslagen.length})</summary>
+            <summary>{t("media.overgeslagen", { n: overgeslagen.length })}</summary>
             <ul>
               {overgeslagen.map((o) => (
                 <li key={o.naam}>
@@ -1303,13 +1310,13 @@ export default function MediaFlow() {
 
         <div className="form-foot">
           <button className="btn btn-quiet" onClick={opnieuwBeginnen}>
-            Ander adres
+            {t("media.anderAdres")}
           </button>
           {/* Niet "Afronden": dat is de knop op het slotscherm zelf. Deze
               brengt je daarheen, naar het overzicht van wat er staat. De
               uploads lopen op de achtergrond door. */}
           <button className="btn btn-primary" onClick={naarKlaar}>
-            Klaar →
+            {t("media.upload.klaar")}
           </button>
         </div>
       </div>
