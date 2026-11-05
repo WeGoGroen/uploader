@@ -20,6 +20,8 @@ import { axisSpreadDeg, buildingOutline, findNoise, wallAlignment } from "@/lib/
 import { overallVerdict, referenceChecklist, runReferenceChecks } from "@/lib/dp-checks";
 import { CHECK_VERSION, computeScanFeatures } from "@/lib/scan-features";
 import { blobReader, readDpScan } from "@/lib/dp-scan";
+import { useTaal } from "@/components/TaalProvider";
+import { vertaal, type TaalSleutel } from "@/lib/taal";
 
 /**
  * Controleert de geoptimaliseerde scan vlak vóór het versturen naar Mediatask.
@@ -40,13 +42,28 @@ const MAX_FLOOR_PLANS = 5;
 
 type Fase = "lezen" | "meten" | "tekenen" | "beoordelen" | "klaar" | "fout";
 
+type Vertaler = (sleutel: TaalSleutel, waarden?: Record<string, string | number>) => string;
+
+/**
+ * Een fout die de client zelf schrijft: de sleutel gaat mee, zodat de melding
+ * in de taal van het scherm verschijnt. De message blijft Nederlands.
+ */
+class SchermFout extends Error {
+  constructor(public sleutel: TaalSleutel) {
+    super(vertaal("nl", sleutel));
+  }
+}
+
 interface Beoordeling {
   visual: CheckResult[];
   aandachtsplekken: { bouwlaag: number; cel: string; reden: string }[];
 }
 
 interface Weergave {
+  /** Nederlandse naam; gaat ook als titel mee in de render naar de server. */
   naam: string;
+  /** 0 = hele scan, anders het laagnummer (voor het label op het scherm). */
+  nr: number;
   range: { low: number; high: number };
   marks: Aandachtsplek[];
 }
@@ -66,14 +83,19 @@ export interface ScanCheckProps {
   onRecord?: (id: string) => void;
 }
 
-const STATUS_LABEL: Record<CheckStatus | "onvolledig", string> = {
-  ok: "In orde",
-  twijfel: "Controleer",
-  afwijking: "Afwijking",
-  afkeuren: "Afkeuren",
-  onbekend: "Onbekend",
-  onvolledig: "Deels gecontroleerd",
+const STATUS_LABEL: Record<CheckStatus | "onvolledig", TaalSleutel> = {
+  ok: "nen.scan.status.ok",
+  twijfel: "nen.scan.status.twijfel",
+  afwijking: "nen.scan.status.afwijking",
+  afkeuren: "nen.scan.status.afkeuren",
+  onbekend: "nen.scan.status.onbekend",
+  onvolledig: "nen.scan.status.onvolledig",
 };
+
+/** Label van een weergave op het scherm. */
+function weergaveLabel(w: Weergave, t: Vertaler): string {
+  return w.nr === 0 ? t("nen.scan.heleScan") : t("nen.scan.laag", { n: w.nr });
+}
 
 /** Checklistpunten met een eigen weergave op de kaart. */
 const MET_KAARTLAAG = new Set(["pc-ruis", "pc-rechte-muren", "pc-uitlijning"]);
@@ -87,16 +109,17 @@ const MET_KAARTLAAG = new Set(["pc-ruis", "pc-rechte-muren", "pc-uitlijning"]);
  * kleuren, zodat de lijst ook te scannen is zonder op kleur te letten.
  */
 function StatusIcon({ status }: { status: CheckStatus | null }) {
-  if (status === null) return <span className="scan-icon is-bezig" aria-label="Bezig" />;
+  const { t } = useTaal();
+  if (status === null) return <span className="scan-icon is-bezig" aria-label={t("nen.scan.icoon.bezig")} />;
 
   const label =
     status === "ok"
-      ? "In orde"
+      ? t("nen.scan.status.ok")
       : status === "afkeuren"
-        ? "Afkeuren"
+        ? t("nen.scan.status.afkeuren")
         : status === "onbekend"
-          ? "Niet beoordeeld"
-          : "Let op";
+          ? t("nen.scan.icoon.nietBeoordeeld")
+          : t("nen.scan.icoon.letOp");
 
   return (
     <span className={`scan-icon is-${status}`} title={label} role="img" aria-label={label}>
@@ -144,14 +167,15 @@ export default function ScanCheck({
   onApprove,
   onRecord,
 }: ScanCheckProps) {
+  const { t } = useTaal();
   const [fase, setFase] = useState<Fase>("lezen");
-  const [fout, setFout] = useState<string | null>(null);
+  const [fout, setFout] = useState<{ tekst: string } | { sleutel: TaalSleutel } | null>(null);
   const [weergaven, setWeergaven] = useState<Weergave[]>([]);
   const [actieveLaag, setActieveLaag] = useState(0);
   const [gekozenCheck, setGekozenCheck] = useState<string | null>(null);
   const [metingen, setMetingen] = useState<CheckResult[]>([]);
   const [beoordeling, setBeoordeling] = useState<Beoordeling | null>(null);
-  const [kerncijfers, setKerncijfers] = useState<{ label: string; waarde: string }[]>([]);
+  const [kerncijfers, setKerncijfers] = useState<{ label: TaalSleutel; waarde: string | null }[]>([]);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
@@ -232,23 +256,25 @@ export default function ScanCheck({
     const grondvlak = breedte * diepte * Math.max(floors.length, 1);
     const verschil = bagAreaM2 !== undefined ? grondvlak - bagAreaM2 : null;
     setKerncijfers([
-      { label: "Hoogtelagen", waarde: String(floors.length) },
-      { label: "Grondvlak", waarde: `${(breedte * diepte).toFixed(0)} m²` },
-      { label: "Totaal gescand", waarde: `${grondvlak.toFixed(0)} m²` },
+      { label: "nen.scan.kern.hoogtelagen", waarde: String(floors.length) },
+      { label: "nen.scan.kern.grondvlak", waarde: `${(breedte * diepte).toFixed(0)} m²` },
+      { label: "nen.scan.kern.totaal", waarde: `${grondvlak.toFixed(0)} m²` },
       {
-        label: "Volgens BAG",
+        label: "nen.scan.kern.bag",
+        // null = onbekend; vertaald bij het tekenen.
         waarde:
           bagAreaM2 === undefined
-            ? "onbekend"
+            ? null
             : `${bagAreaM2.toFixed(0)} m² · ${verschil! >= 0 ? "+" : "−"}${Math.abs(verschil!).toFixed(0)} m²`,
       },
     ]);
 
     setFase("tekenen");
     const lagen: Weergave[] = [
-      { naam: "Hele scan", range: { low: pc.bounds.minZ, high: pc.bounds.maxZ }, marks: [] },
+      { naam: "Hele scan", nr: 0, range: { low: pc.bounds.minZ, high: pc.bounds.maxZ }, marks: [] },
       ...zichtbaar.map((_, i) => ({
         naam: `Laag ${i + 1}`,
+        nr: i + 1,
         range: floorRange(floors, i, pc.bounds.maxZ),
         marks: [],
       })),
@@ -275,7 +301,10 @@ export default function ScanCheck({
       }),
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error ?? "Beoordeling mislukt");
+    if (!response.ok) {
+      if (data.error != null) throw new Error(data.error);
+      throw new SchermFout("nen.scan.fout.beoordeling");
+    }
     const oordeel = data as Beoordeling;
     setBeoordeling(oordeel);
 
@@ -329,7 +358,13 @@ export default function ScanCheck({
     if (gestart.current) return;
     gestart.current = true;
     analyseer().catch((err: unknown) => {
-      setFout(err instanceof Error ? err.message : "Onbekende fout");
+      setFout(
+        err instanceof SchermFout
+          ? { sleutel: err.sleutel }
+          : err instanceof Error
+            ? { tekst: err.message }
+            : { sleutel: "nen.scan.fout.onbekend" }
+      );
       setFase("fout");
     });
   }, [analyseer]);
@@ -365,8 +400,15 @@ export default function ScanCheck({
     const laag = weergaven[actieveLaag];
     if (!wolk || !laag) return null;
     const hoek = analyse?.walls[Math.max(actieveLaag - 1, 0)]?.axisDeg ?? 0;
-    return tekenNaarDataUrl(wolk, laag, laag.marks, overlay, hoek);
-  }, [weergaven, actieveLaag, overlay, wolk, analyse]);
+    // Op het scherm de titel in de gekozen taal; de renders naar de server
+    // houden de Nederlandse titel.
+    const titel = t("nen.scan.kaartTitel", {
+      naam: weergaveLabel(laag, t),
+      laag: laag.range.low.toFixed(1),
+      hoog: laag.range.high.toFixed(1),
+    });
+    return tekenNaarDataUrl(wolk, laag, laag.marks, overlay, hoek, titel);
+  }, [weergaven, actieveLaag, overlay, wolk, analyse, t]);
 
   const uitkomsten = new Map<string, CheckResult>();
   for (const r of [...metingen, ...(beoordeling?.visual ?? [])]) uitkomsten.set(r.id, r);
@@ -380,12 +422,12 @@ export default function ScanCheck({
 
   return (
     <div className="upload-overlay">
-      <div className="scan-modal is-wide" role="dialog" aria-label="Scancontrole">
+      <div className="scan-modal is-wide" role="dialog" aria-label={t("nen.scan.titel")}>
         <div className="scan-modal-head">
-          <h3>Scancontrole — {file.name}</h3>
+          <h3>{t("nen.scan.kop", { bestand: file.name })}</h3>
           {eindoordeel && (
             <span className={`scan-verdict is-${eindoordeel}`}>
-              AI controle: {STATUS_LABEL[eindoordeel]}
+              {t("nen.scan.oordeel", { oordeel: t(STATUS_LABEL[eindoordeel]) })}
             </span>
           )}
         </div>
@@ -418,7 +460,7 @@ export default function ScanCheck({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={beeld}
-                    alt={`Bovenaanzicht: ${laag.naam}`}
+                    alt={t("nen.scan.bovenaanzicht", { naam: weergaveLabel(laag, t) })}
                     className="scan-render"
                     style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
                     draggable={false}
@@ -434,7 +476,7 @@ export default function ScanCheck({
                         className={`scan-tab${i === actieveLaag ? " is-active" : ""}`}
                         onClick={() => setActieveLaag(i)}
                       >
-                        {w.naam}
+                        {weergaveLabel(w, t)}
                       </button>
                     ))}
                   </div>
@@ -442,7 +484,7 @@ export default function ScanCheck({
                     <button
                       type="button"
                       onClick={() => setZoom((z) => Math.max(1, z / 1.4))}
-                      aria-label="Uitzoomen"
+                      aria-label={t("nen.scan.uitzoomen")}
                     >
                       −
                     </button>
@@ -450,7 +492,7 @@ export default function ScanCheck({
                     <button
                       type="button"
                       onClick={() => setZoom((z) => Math.min(8, z * 1.4))}
-                      aria-label="Inzoomen"
+                      aria-label={t("nen.scan.inzoomen")}
                     >
                       +
                     </button>
@@ -461,7 +503,7 @@ export default function ScanCheck({
                         setPan({ x: 0, y: 0 });
                       }}
                     >
-                      Passend
+                      {t("nen.scan.passend")}
                     </button>
                   </div>
                 </div>
@@ -481,12 +523,12 @@ export default function ScanCheck({
               </>
             ) : (
               <p className="note scan-progress">
-                {fase === "lezen" && "Puntenwolk uitlezen…"}
-                {fase === "meten" && "Muurrichtingen en ruis meten…"}
-                {fase === "tekenen" && "Bovenaanzicht tekenen…"}
+                {fase === "lezen" && t("nen.scan.voortgang.lezen")}
+                {fase === "meten" && t("nen.scan.voortgang.meten")}
+                {fase === "tekenen" && t("nen.scan.voortgang.tekenen")}
                 {(fase === "fout" || fase === "beoordelen" || fase === "klaar") &&
                   weergaven.length === 0 &&
-                  "Geen verdiepingen gevonden om te tekenen"}
+                  t("nen.scan.geenVerdiepingen")}
               </p>
             )}
           </div>
@@ -496,8 +538,8 @@ export default function ScanCheck({
               <dl className="scan-facts">
                 {kerncijfers.map((k) => (
                   <div key={k.label}>
-                    <dt>{k.label}</dt>
-                    <dd>{k.waarde}</dd>
+                    <dt>{t(k.label)}</dt>
+                    <dd>{k.waarde ?? t("nen.scan.kern.onbekend")}</dd>
                   </div>
                 ))}
               </dl>
@@ -505,8 +547,8 @@ export default function ScanCheck({
 
             {fase === "fout" && (
               <p className="scan-error">
-                {fout}
-                {beeldMislukt && " — de meetbare controles hiernaast zijn wel gedaan."}
+                {fout && ("sleutel" in fout ? t(fout.sleutel) : fout.tekst)}
+                {beeldMislukt && ` ${t("nen.scan.fout.deelsGedaan")}`}
               </p>
             )}
 
@@ -530,11 +572,11 @@ export default function ScanCheck({
                       <strong>
                         {item.titel}
                         {kaart && (
-                          <span className="scan-kaart-tag">{gekozen ? "op de kaart" : "toon"}</span>
+                          <span className="scan-kaart-tag">{gekozen ? t("nen.scan.opDeKaart") : t("nen.scan.toon")}</span>
                         )}
                       </strong>
                       <span>
-                        {r?.toelichting ?? (beeldMislukt ? "Niet beoordeeld" : "Wordt gecontroleerd…")}
+                        {r?.toelichting ?? (beeldMislukt ? t("nen.scan.nietBeoordeeld") : t("nen.scan.wordtGecontroleerd"))}
                       </span>
                       {gekozen && <em>{item.bron_gids}</em>}
                     </button>
@@ -547,7 +589,7 @@ export default function ScanCheck({
 
         <div className="scan-actions">
           <button type="button" className="btn btn-quiet" onClick={onClose}>
-            Terug naar de bestanden
+            {t("nen.scan.terug")}
           </button>
           {onApprove && (
             <button
@@ -556,7 +598,7 @@ export default function ScanCheck({
               onClick={onApprove}
               disabled={fase === "lezen" || fase === "meten" || fase === "tekenen"}
             >
-              {eindoordeel === "ok" ? "Doorsturen naar Mediatask" : "Toch doorsturen"}
+              {eindoordeel === "ok" ? t("nen.scan.doorsturen") : t("nen.scan.tochDoorsturen")}
             </button>
           )}
         </div>
@@ -570,20 +612,21 @@ function tekenNaarDataUrl(
   laag: Weergave,
   marks: Aandachtsplek[],
   overlay: Overlay,
-  rasterHoek = 0
+  rasterHoek = 0,
+  titel = `${laag.naam} — ${laag.range.low.toFixed(1)} tot ${laag.range.high.toFixed(1)} m`
 ): string {
   const canvas = document.createElement("canvas");
   canvas.width = RENDER_PX;
   canvas.height = RENDER_PX;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas niet beschikbaar");
+  if (!ctx) throw new SchermFout("nen.scan.fout.canvas");
   drawFloorPlan(
     ctx,
     pc,
     laag.range,
     RENDER_PX,
     RENDER_PX,
-    `${laag.naam} — ${laag.range.low.toFixed(1)} tot ${laag.range.high.toFixed(1)} m`,
+    titel,
     marks,
     overlay,
     rasterHoek

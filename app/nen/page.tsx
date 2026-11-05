@@ -10,22 +10,25 @@ import { normalizeForMatch } from "@/lib/address-format";
 import { configVoorProduct } from "@/lib/mediatask-format";
 import { meldGestart, startHartslag, type OpnameMelding } from "@/lib/opname-melden";
 import { tijdslimiet } from "@/lib/tijdslimiet";
+import { useTaal } from "@/components/TaalProvider";
+import type { TaalSleutel } from "@/lib/taal";
 
 // Zelfde submap-structuur als het NEN2580-sjabloon in Dropbox ("Voorbeeld
 // Map NEN2580"). Optimized staat vooraan: dat is de map waar de opnemer
 // tijdens de opname het vaakst een bestand in kiest.
 const NEN_DOC_FOLDERS = ["Optimized", "Additionals", "Photo's", "Video", "RAW"] as const;
 
-// Leesbare Nederlandse labels voor de dynamische productconfiguratie-velden
-// van Mediatask (die zelf alleen de Engelse veldnaam teruggeven).
-const MEDIATASK_FIELD_LABELS: Record<string, string> = {
-  gross_floor_area: "Bruto vloeroppervlak",
-  option: "2D of 3D",
-  style: "Stijl",
-  measurement_type: "Metingstype",
-  measurement_date: "Meetdatum",
-  property_type: "Pandtype",
-  house_type: "Woningtype",
+// Leesbare labels voor de dynamische productconfiguratie-velden van Mediatask
+// (die zelf alleen de Engelse veldnaam teruggeven). Sleutels in het
+// woordenboek; vertaald bij het renderen.
+const MEDIATASK_FIELD_LABELS: Record<string, TaalSleutel> = {
+  gross_floor_area: "nen.veld.gross_floor_area",
+  option: "nen.veld.option",
+  style: "nen.veld.style",
+  measurement_type: "nen.veld.measurement_type",
+  measurement_date: "nen.veld.measurement_date",
+  property_type: "nen.veld.property_type",
+  house_type: "nen.veld.house_type",
 };
 
 /**
@@ -39,8 +42,9 @@ function vandaagIso(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Amsterdam" }).format(new Date());
 }
 
-function mediataskFieldLabel(name: string): string {
-  return MEDIATASK_FIELD_LABELS[name] ?? name;
+function mediataskFieldLabel(name: string, t: (sleutel: TaalSleutel) => string): string {
+  const sleutel = MEDIATASK_FIELD_LABELS[name];
+  return sleutel ? t(sleutel) : name;
 }
 
 type DraftRecord = Pick<ServerDraftRecord, "id" | "status" | "straatnaam" | "state">;
@@ -104,6 +108,7 @@ function koppelOrderAanConcept(
 
 export default function UploadNen() {
   const router = useRouter();
+  const { t } = useTaal();
   // ---------- Stap 1: adres zoeken — identiek aan de ClickUp-opnameflow ----------
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
@@ -166,7 +171,7 @@ export default function UploadNen() {
     setShowManualSearch(false);
 
     if (!("geolocation" in navigator)) {
-      setLocationError("Locatie wordt niet ondersteund door deze browser. Gebruik handmatig zoeken.");
+      setLocationError(t("nen.locatie.nietOndersteund"));
       return;
     }
 
@@ -181,7 +186,7 @@ export default function UploadNen() {
           const data = await res.json();
           setNearby(data.addresses ?? []);
         } catch {
-          setLocationError("Ophalen van adressen in de buurt is mislukt. Probeer opnieuw of zoek handmatig.");
+          setLocationError(t("nen.locatie.ophalenMislukt"));
         } finally {
           setLocating(false);
         }
@@ -190,8 +195,8 @@ export default function UploadNen() {
         setLocating(false);
         setLocationError(
           err.code === err.PERMISSION_DENIED
-            ? "Locatietoegang geweigerd. Zet dit aan in je browserinstellingen, of zoek handmatig. Let op: locatie werkt alleen over https of op localhost."
-            : "Locatie kon niet worden bepaald. Probeer opnieuw of zoek handmatig."
+            ? t("nen.locatie.geweigerd")
+            : t("nen.locatie.onbepaald")
         );
       },
       { enableHighAccuracy: true, timeout: 10000 }
@@ -408,8 +413,8 @@ export default function UploadNen() {
   // adres, en dan zou de makelaar pas bij de volgende hartslag vastliggen.
   useEffect(() => {
     if (!nenMelding || !keuzesGeladen) return;
-    const t = setTimeout(() => meldGestart(nenMelding), 800);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => meldGestart(nenMelding), 800);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agencyId, manualAgencyId, productId, manualProductId, priorityId, manualPriorityId, productConfig, keuzesGeladen]);
   const [extraPhotoUrls, setExtraPhotoUrls] = useState("");
@@ -537,11 +542,11 @@ export default function UploadNen() {
     const configPromise = fetch("/api/mediatask/config", { cache: "no-store" })
       .then(async (res) => {
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "Mediatask niet bereikbaar");
+        if (!res.ok) throw new Error(data.error ?? t("nen.mediatask.onbereikbaar"));
         return data;
       })
       .catch((err) => {
-        setConfigError(err instanceof Error ? err.message : "Mediatask niet bereikbaar");
+        setConfigError(err instanceof Error ? err.message : t("nen.mediatask.onbereikbaar"));
         return null;
       });
 
@@ -686,16 +691,14 @@ export default function UploadNen() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setSendError(data.error ?? "Versturen naar Mediatask mislukt.");
+        setSendError(data.error ?? t("nen.order.versturenMislukt"));
         return;
       }
       setResult({ orderId: data.order.id, state: data.order.state });
       // Order staat er wél, alleen het indienen faalde — melden zonder de
       // upload als mislukt te tonen (opnieuw versturen zou dubbelen).
       if (data.submitError) {
-        setSendError(
-          `Order #${data.order.id} is aangemaakt, maar het indienen mislukte (${data.submitError}). Dien 'm handmatig in bij Mediatask — niet opnieuw versturen, dan ontstaat er een dubbele order.`
-        );
+        setSendError(t("nen.order.indienenMislukt", { id: data.order.id, fout: data.submitError }));
       }
 
       // Koppeling bewaren op het bestaande concept (indien er een is), zodat
@@ -716,7 +719,7 @@ export default function UploadNen() {
         }).catch(() => {});
       }
     } catch {
-      setSendError("Versturen naar Mediatask mislukt.");
+      setSendError(t("nen.order.versturenMislukt"));
     } finally {
       setSending(false);
     }
@@ -767,14 +770,14 @@ export default function UploadNen() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.path) {
-        setFolderError(data?.error ?? "De Dropbox-map kon niet worden aangemaakt.");
+        setFolderError(data?.error ?? t("nen.map.mislukt"));
         return null;
       }
       setDropboxFolder(data);
       void refreshFileCounts(data);
       return data as DropboxFolder;
     } catch {
-      setFolderError("De Dropbox-map kon niet worden aangemaakt. Tik nog een keer op Documenten uploaden.");
+      setFolderError(t("nen.map.misluktOpnieuw"));
       return null;
     } finally {
       setFolderBusy(false);
@@ -797,7 +800,7 @@ export default function UploadNen() {
             <span className={`dbx-strip-text${dropboxFolder ? "" : " is-wrap"}`}>
               {folderBusy ? (
                 <>
-                  <span className="spinner" /> Dropbox-map klaarzetten…
+                  <span className="spinner" /> {t("nen.map.klaarzetten")}
                 </>
               ) : folderError ? (
                 <span className="is-warning-row">⚠ {folderError}</span>
@@ -805,7 +808,7 @@ export default function UploadNen() {
                 // Geen spinner zolang er niets loopt: de map komt pas bij
                 // "Documenten uploaden", en een eeuwig draaiend rondje zou
                 // suggereren dat de app vastzit.
-                "Map wordt aangemaakt zodra je de documenten opent"
+                t("nen.map.wachtOpDocumenten")
               )}
             </span>
           )}
@@ -813,11 +816,11 @@ export default function UploadNen() {
             <>
               <span className="dbx-strip-text">
                 <span className="dbx-strip-check" aria-hidden="true">✓</span>
-                Map aangemaakt — <span className="dbx-folder-path">{dropboxFolder.path}</span>
+                {t("nen.map.aangemaakt")} <span className="dbx-folder-path">{dropboxFolder.path}</span>
               </span>
               {result && (
-                <span className="dbx-strip-progress-label" title={`Mediatask-order #${result.orderId}`}>
-                  <span className="dbx-strip-check" aria-hidden="true">✓</span> Gelinked in Mediatask
+                <span className="dbx-strip-progress-label" title={t("nen.map.orderTitel", { id: result.orderId })}>
+                  <span className="dbx-strip-check" aria-hidden="true">✓</span> {t("nen.map.gelinkt")}
                 </span>
               )}
               <button
@@ -825,14 +828,14 @@ export default function UploadNen() {
                 className="dbx-strip-refresh"
                 onClick={() => refreshFileCounts(dropboxFolder)}
                 disabled={filesLoading}
-                title="Nu verversen"
+                title={t("nen.map.verversen")}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={filesLoading ? "spin" : undefined}>
                   <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </button>
               <a href={dropboxFolder.url} target="_blank" rel="noopener noreferrer" className="btn-open-dbx">
-                Openen
+                {t("nen.map.openen")}
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M6 4h6v6M12 4 4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
@@ -856,7 +859,7 @@ export default function UploadNen() {
                   )}
                   <span className="dbx-strip-doc-label">{name}</span>
                   <span className="dbx-strip-doc-status">
-                    {filesLoading ? "…" : `${count} bestand${count === 1 ? "" : "en"}`}
+                    {filesLoading ? "…" : t(count === 1 ? "nen.bestanden.een" : "nen.bestanden.meer", { n: count })}
                   </span>
                 </div>
               );
@@ -890,17 +893,17 @@ export default function UploadNen() {
     const items: { label: string; value: string }[] = [];
 
     const productLabel = selectedProduct?.full_name ?? (manualProductId || null);
-    if (productLabel) items.push({ label: "Product", value: productLabel });
+    if (productLabel) items.push({ label: t("nen.samenvatting.product"), value: productLabel });
 
     const agencyLabel = config?.agencies.find((a) => a.id === agencyId)?.name ?? (manualAgencyId || null);
-    if (agencyLabel) items.push({ label: "Makelaar", value: agencyLabel });
+    if (agencyLabel) items.push({ label: t("nen.samenvatting.makelaar"), value: agencyLabel });
 
     const priorityLabel = config?.priorities.find((p) => p.id === priorityId)?.name ?? (manualPriorityId || null);
-    if (priorityLabel && !(zonderPrio && spoedKeuze)) items.push({ label: "Prioriteit", value: priorityLabel });
+    if (priorityLabel && !(zonderPrio && spoedKeuze)) items.push({ label: t("nen.samenvatting.prioriteit"), value: priorityLabel });
 
     for (const [key, value] of Object.entries(finalProductConfig)) {
       if (!value) continue;
-      items.push({ label: mediataskFieldLabel(key), value });
+      items.push({ label: mediataskFieldLabel(key, t), value });
     }
 
     // Ontbrekende makelaar prominent rood bovenaan — dit is het enige veld
@@ -914,8 +917,8 @@ export default function UploadNen() {
         {missingAgency && (
           <div className="dbx-strip-doc-row is-warning-row">
             <span aria-hidden="true">⚠</span>
-            <span className="dbx-strip-doc-label">Makelaar</span>
-            <span className="dbx-strip-doc-status">nog niet gekozen</span>
+            <span className="dbx-strip-doc-label">{t("nen.samenvatting.makelaar")}</span>
+            <span className="dbx-strip-doc-status">{t("nen.samenvatting.nogNietGekozen")}</span>
           </div>
         )}
         {items.map((it) => (
@@ -1000,7 +1003,7 @@ export default function UploadNen() {
           if (existingDraft) koppelOrderAanConcept(existingDraft, orderId, data.order.state);
         } else {
           setOrderSetup("fout");
-          setOrderSetupFout(data.error ?? `Mediatask gaf foutcode ${res.status}.`);
+          setOrderSetupFout(data.error ?? t("nen.order.foutcode", { status: res.status }));
           // Hier stoppen in plaats van doorlopen. Zonder order gaan de scans
           // tijdens de opname niet mee, en loopt het afronden straks op
           // dezelfde fout vast — maar dan sta je bij de klant in huis.
@@ -1009,7 +1012,7 @@ export default function UploadNen() {
       } catch (err) {
         setOrderSetup("fout");
         setOrderSetupFout(
-          err instanceof Error ? err.message : "Mediatask was niet bereikbaar."
+          err instanceof Error ? err.message : t("nen.order.nietBereikbaar")
         );
         if (!negeerFout) return;
       }
@@ -1054,17 +1057,17 @@ export default function UploadNen() {
   return (
     <>
       <header className="topline">
-        <span className="eyebrow">Upload NEN2580</span>
+        <span className="eyebrow">{t("nen.titel")}</span>
       </header>
 
       {!address && !loadingAddress && (
         <div className="addr-grid">
-          <section className="addr-find" aria-label="Adres zoeken">
-            <h1>Upload NEN2580</h1>
+          <section className="addr-find" aria-label={t("nen.zoek.label")}>
+            <h1>{t("nen.titel")}</h1>
 
             <button className="btn btn-primary btn-block" onClick={startNearbySearch} disabled={locating}>
               {locating && <span className="spinner on-accent" />}
-              <span>{locating ? "Locatie ophalen…" : "📍 Locatie ophalen"}</span>
+              <span>{locating ? t("nen.locatie.ophalenBezig") : t("nen.locatie.ophalen")}</span>
             </button>
 
             {locationError && <p className="note" style={{ color: "var(--bad)" }}>{locationError}</p>}
@@ -1081,19 +1084,19 @@ export default function UploadNen() {
                   setAddress(null);
                   setShowManualSearch(true);
                 }}
-                placeholder="Of zoek op straat of postcode"
-                aria-label="Zoek handmatig op adres"
+                placeholder={t("nen.zoek.placeholder")}
+                aria-label={t("nen.zoek.ariaLabel")}
               />
             </div>
-            {searching && <p className="note">Zoeken…</p>}
+            {searching && <p className="note">{t("nen.zoek.bezig")}</p>}
 
-            {nearby && nearby.length === 0 && <p className="note">Geen adressen gevonden in de buurt.</p>}
+            {nearby && nearby.length === 0 && <p className="note">{t("nen.zoek.geenInBuurt")}</p>}
 
             {((nearby && nearby.length > 0) || (showManualSearch && suggestions.length > 0)) && (
               <div>
                 <div className="list-head">
                   <span className="eyebrow">
-                    {showManualSearch && suggestions.length > 0 ? "Zoekresultaten" : "Dichtstbijzijnde adressen"}
+                    {showManualSearch && suggestions.length > 0 ? t("nen.zoek.resultaten") : t("nen.zoek.dichtstbij")}
                   </span>
                 </div>
                 <ul className="rows">
@@ -1121,7 +1124,7 @@ export default function UploadNen() {
             <TodayAppointments onPick={pickFromAppointment} context="nen" onUseLocation={startNearbySearch} />
           </section>
 
-          <section className="addr-detail" aria-label="Gekozen pand">
+          <section className="addr-detail" aria-label={t("nen.pand.label")}>
             <div className="placeholder">
               <span className="placeholder-mark">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1129,7 +1132,7 @@ export default function UploadNen() {
                   <circle cx="12" cy="10" r="2.6" stroke="currentColor" strokeWidth="1.6" />
                 </svg>
               </span>
-              <p>Bepaal je locatie of zoek een adres. Daarna kies je het NEN-product en versturen we de foto&apos;s uit Dropbox naar Mediatask.</p>
+              <p>{t("nen.pand.uitleg")}</p>
             </div>
           </section>
         </div>
@@ -1139,7 +1142,7 @@ export default function UploadNen() {
         <div className="pad" style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}>
           <div className="banner" style={{ background: "var(--inset)" }}>
             <span className="spinner" />
-            <span>Pandgegevens ophalen uit de BAG…</span>
+            <span>{t("nen.bag.ophalen")}</span>
           </div>
         </div>
       )}
@@ -1152,7 +1155,7 @@ export default function UploadNen() {
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                Ander adres
+                {t("nen.adres.ander")}
               </button>
               <h2 style={{ fontSize: 17 }}>
                 {address.straatnaam} {houseNumber(address)}
@@ -1161,36 +1164,36 @@ export default function UploadNen() {
           )}
 
         <div className="pad" style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}>
-          <span className="eyebrow">Controleer het adres</span>
+          <span className="eyebrow">{t("nen.adres.controleer")}</span>
           <div className="card">
             {editingAddr ? (
               <div className="addr-edit">
                 <div className="addr-edit-row">
                   <div className="field">
-                    <label htmlFor="f-huisnr">Huisnummer</label>
+                    <label htmlFor="f-huisnr">{t("nen.adres.huisnummer")}</label>
                     <input id="f-huisnr" className="control" inputMode="numeric" value={addrHuisnummer} onChange={(e) => setAddrHuisnummer(e.target.value)} />
                   </div>
                   <div className="field">
-                    <label htmlFor="f-huisletter">Letter</label>
+                    <label htmlFor="f-huisletter">{t("nen.adres.letter")}</label>
                     <input id="f-huisletter" className="control" value={addrHuisletter} onChange={(e) => setAddrHuisletter(e.target.value)} />
                   </div>
                   <div className="field">
-                    <label htmlFor="f-toevoeging">Toevoeging</label>
+                    <label htmlFor="f-toevoeging">{t("nen.adres.toevoeging")}</label>
                     <input id="f-toevoeging" className="control" value={addrToevoeging} onChange={(e) => setAddrToevoeging(e.target.value)} />
                   </div>
                 </div>
                 <div className="addr-edit-row">
                   <div className="field is-wide">
-                    <label htmlFor="f-postcode">Postcode</label>
+                    <label htmlFor="f-postcode">{t("nen.adres.postcode")}</label>
                     <input id="f-postcode" className="control" value={addrPostcode} onChange={(e) => setAddrPostcode(e.target.value)} />
                   </div>
                 </div>
                 <div className="addr-edit-actions">
                   <button className="btn btn-quiet" onClick={() => setEditingAddr(false)}>
-                    Annuleren
+                    {t("nen.annuleren")}
                   </button>
                   <button className="btn btn-primary" onClick={saveAddressEdit}>
-                    Opslaan
+                    {t("nen.opslaan")}
                   </button>
                 </div>
               </div>
@@ -1210,13 +1213,13 @@ export default function UploadNen() {
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <path d="M4 16.5V20h3.5L18.4 9.1a1.5 1.5 0 0 0 0-2.1l-1.4-1.4a1.5 1.5 0 0 0-2.1 0L4 16.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
                       </svg>
-                      Aanpassen
+                      {t("nen.aanpassen")}
                     </button>
                   </div>
                   {configLoading && !renderMediataskSummary() && (
                     <div className="card-mediatask-summary">
                       <span className="note" style={{ padding: 0, display: "inline-flex", alignItems: "center", gap: 8 }}>
-                        <span className="spinner" /> Mediatask-gegevens ophalen…
+                        <span className="spinner" /> {t("nen.mediatask.gegevensOphalen")}
                       </span>
                     </div>
                   )}
@@ -1227,7 +1230,7 @@ export default function UploadNen() {
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                           <path d="M4 16.5V20h3.5L18.4 9.1a1.5 1.5 0 0 0 0-2.1l-1.4-1.4a1.5 1.5 0 0 0-2.1 0L4 16.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
                         </svg>
-                        Aanpassen
+                        {t("nen.aanpassen")}
                       </button>
                     </div>
                   )}
@@ -1238,7 +1241,7 @@ export default function UploadNen() {
 
           <div className="section">
             <div className="section-head">
-              <h2>Documenten</h2>
+              <h2>{t("nen.documenten.titel")}</h2>
               <button
                 type="button"
                 className="btn btn-primary"
@@ -1252,10 +1255,10 @@ export default function UploadNen() {
                 }}
               >
                 {configLoading
-                  ? "Mediatask-gegevens laden…"
+                  ? t("nen.mediatask.gegevensLaden")
                   : folderBusy
-                    ? "Dropbox-map klaarzetten…"
-                    : "Documenten uploaden"}
+                    ? t("nen.map.klaarzetten")
+                    : t("nen.documenten.uploaden")}
               </button>
             </div>
           </div>
@@ -1263,24 +1266,23 @@ export default function UploadNen() {
           {showMediataskForm && (
           <div className="section" id="mediatask-order-section">
             <div className="section-head">
-              <h2>Mediatask-order</h2>
+              <h2>{t("nen.order.sectie")}</h2>
               <button type="button" className="btn-refresh" onClick={() => setShowMediataskForm(false)}>
-                Verbergen
+                {t("nen.verbergen")}
               </button>
             </div>
             <div className="section-body">
-              {configLoading && <p className="note">Mediatask-configuratie ophalen…</p>}
+              {configLoading && <p className="note">{t("nen.mediatask.configOphalen")}</p>}
               {configError && (
                 <p className="note" style={{ padding: 0, margin: 0 }}>
-                  ⚠ Mediatask nog niet gekoppeld ({configError}) — vul hieronder de gegevens handmatig in, dat werkt
-                  al zodra jullie het token en de basis-URL hebben doorgegeven.
+                  ⚠ {t("nen.mediatask.nietGekoppeld", { fout: configError })}
                 </p>
               )}
 
               {!result && (
                 <>
                   <div className="field is-wide">
-                    <label htmlFor="mt-product">Product</label>
+                    <label htmlFor="mt-product">{t("nen.samenvatting.product")}</label>
                     {config?.products.length ? (
                       <select
                         id="mt-product"
@@ -1313,7 +1315,7 @@ export default function UploadNen() {
                           );
                         }}
                       >
-                        <option value="">Kies…</option>
+                        <option value="">{t("nen.kies")}</option>
                         {config.products.map((p) => (
                           <option key={p.id} value={p.id}>
                             {p.full_name}
@@ -1324,7 +1326,7 @@ export default function UploadNen() {
                       <input
                         id="mt-product"
                         className="control"
-                        placeholder="Product-id (bv. 6 voor Floorplanner NEN2580 plans)"
+                        placeholder={t("nen.order.productPlaceholder")}
                         inputMode="numeric"
                         value={manualProductId}
                         onChange={(e) => setManualProductId(e.target.value)}
@@ -1335,7 +1337,7 @@ export default function UploadNen() {
                   {selectedProduct ? (
                     selectedProduct.configuration.map((c) => (
                       <div className="field" key={c.name}>
-                        <label htmlFor={`mt-cfg-${c.name}`}>{mediataskFieldLabel(c.name)}</label>
+                        <label htmlFor={`mt-cfg-${c.name}`}>{mediataskFieldLabel(c.name, t)}</label>
                         {c.type === "select" ? (
                           <select
                             id={`mt-cfg-${c.name}`}
@@ -1343,7 +1345,7 @@ export default function UploadNen() {
                             value={productConfig[c.name] ?? ""}
                             onChange={(e) => setProductConfig((v) => ({ ...v, [c.name]: e.target.value }))}
                           >
-                            <option value="">Kies…</option>
+                            <option value="">{t("nen.kies")}</option>
                             {c.values?.map((v) => (
                               <option key={v} value={v}>
                                 {v}
@@ -1363,13 +1365,13 @@ export default function UploadNen() {
                     ))
                   ) : (
                     <div className="field is-wide">
-                      <label>Productconfiguratie (bv. house_type, style, option)</label>
+                      <label>{t("nen.order.productconfig")}</label>
                       <div className="draft-list">
                         {manualConfigRows.map((row, i) => (
                           <div key={i} className="addr-edit-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8 }}>
                             <input
                               className="control"
-                              placeholder="veldnaam"
+                              placeholder={t("nen.order.veldnaam")}
                               value={row.key}
                               onChange={(e) =>
                                 setManualConfigRows((rows) => rows.map((r, j) => (j === i ? { ...r, key: e.target.value } : r)))
@@ -1377,7 +1379,7 @@ export default function UploadNen() {
                             />
                             <input
                               className="control"
-                              placeholder="waarde"
+                              placeholder={t("nen.order.waarde")}
                               value={row.value}
                               onChange={(e) =>
                                 setManualConfigRows((rows) => rows.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)))
@@ -1397,7 +1399,7 @@ export default function UploadNen() {
                           className="btn-text"
                           onClick={() => setManualConfigRows((rows) => [...rows, { key: "", value: "" }])}
                         >
-                          + Veld toevoegen
+                          {t("nen.order.veldToevoegen")}
                         </button>
                       </div>
                     </div>
@@ -1405,8 +1407,8 @@ export default function UploadNen() {
 
                   <div className="field">
                     <label htmlFor="mt-agency">
-                      Makelaar
-                      {klantHint && agencyId && <span className="field-year-tag">via agenda: {klantHint}</span>}
+                      {t("nen.samenvatting.makelaar")}
+                      {klantHint && agencyId && <span className="field-year-tag">{t("nen.order.viaAgenda", { klant: klantHint })}</span>}
                     </label>
                     {config?.agencies.length ? (
                       config.agencies.length > 1 ? (
@@ -1416,7 +1418,7 @@ export default function UploadNen() {
                           value={agencyId}
                           onChange={(e) => setAgencyId(e.target.value)}
                         >
-                          <option value="">Kies…</option>
+                          <option value="">{t("nen.kies")}</option>
                           {config.agencies.map((a) => (
                             <option key={a.id} value={a.id}>
                               {a.name}
@@ -1424,13 +1426,13 @@ export default function UploadNen() {
                           ))}
                         </select>
                       ) : (
-                        <p className="note" style={{ padding: 0, margin: 0 }}>{config.agencies[0].name} (automatisch gekozen)</p>
+                        <p className="note" style={{ padding: 0, margin: 0 }}>{t("nen.order.automatischGekozen", { naam: config.agencies[0].name })}</p>
                       )
                     ) : (
                       <input
                         id="mt-agency"
                         className="control"
-                        placeholder="Makelaar-id"
+                        placeholder={t("nen.order.makelaarPlaceholder")}
                         value={manualAgencyId}
                         onChange={(e) => setManualAgencyId(e.target.value)}
                       />
@@ -1438,7 +1440,7 @@ export default function UploadNen() {
                   </div>
 
                   <div className="field">
-                    <label htmlFor="mt-priority">Prioriteit</label>
+                    <label htmlFor="mt-priority">{t("nen.samenvatting.prioriteit")}</label>
                     {config?.priorities.length ? (
                       config.priorities.length > 1 ? (
                         <select
@@ -1447,7 +1449,7 @@ export default function UploadNen() {
                           value={priorityId}
                           onChange={(e) => setPriorityId(e.target.value)}
                         >
-                          <option value="">Kies…</option>
+                          <option value="">{t("nen.kies")}</option>
                           {config.priorities.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.name}
@@ -1455,13 +1457,13 @@ export default function UploadNen() {
                           ))}
                         </select>
                       ) : (
-                        <p className="note" style={{ padding: 0, margin: 0 }}>{config.priorities[0].name} (automatisch gekozen)</p>
+                        <p className="note" style={{ padding: 0, margin: 0 }}>{t("nen.order.automatischGekozen", { naam: config.priorities[0].name })}</p>
                       )
                     ) : (
                       <input
                         id="mt-priority"
                         className="control"
-                        placeholder="Prioriteit-id"
+                        placeholder={t("nen.order.prioriteitPlaceholder")}
                         value={manualPriorityId}
                         onChange={(e) => setManualPriorityId(e.target.value)}
                       />
@@ -1469,7 +1471,7 @@ export default function UploadNen() {
                   </div>
 
                   <div className="field is-wide">
-                    <label htmlFor="mt-extra-photos">Extra foto-URL&apos;s (optioneel, één per regel)</label>
+                    <label htmlFor="mt-extra-photos">{t("nen.order.extraFotos")}</label>
                     <textarea
                       id="mt-extra-photos"
                       className="control"
@@ -1480,7 +1482,7 @@ export default function UploadNen() {
                     />
                   </div>
                   <div className="field is-wide">
-                    <label htmlFor="mt-extra-drawings">Extra tekening-URL&apos;s (optioneel, één per regel)</label>
+                    <label htmlFor="mt-extra-drawings">{t("nen.order.extraTekeningen")}</label>
                     <textarea
                       id="mt-extra-drawings"
                       className="control"
@@ -1498,7 +1500,7 @@ export default function UploadNen() {
                       disabled={sending || !finalProductId || !finalPriorityId || !finalAgencyId}
                       onClick={send}
                     >
-                      {sending ? "Bezig…" : "Versturen naar Mediatask"}
+                      {sending ? t("nen.bezig") : t("nen.order.versturen")}
                     </button>
                   </div>
                 </>
@@ -1507,13 +1509,13 @@ export default function UploadNen() {
               {result && (
                 <>
                   <div className="banner is-ok">
-                    ✓ Order #{result.orderId} bij Mediatask — status: {result.state}
+                    {t("nen.order.status", { id: result.orderId, status: result.state })}
                   </div>
                   <button className="btn-refresh" onClick={refreshStatus} disabled={statusRefreshing}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={statusRefreshing ? "spin" : undefined}>
                       <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                    {statusRefreshing ? "Bezig met verversen…" : "Status verversen"}
+                    {statusRefreshing ? t("nen.order.statusVerversenBezig") : t("nen.order.statusVerversen")}
                   </button>
                 </>
               )}
@@ -1536,17 +1538,17 @@ export default function UploadNen() {
             className={`compass-modal${!agencyChosen ? " is-invalid" : ""}`}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
-            aria-label="Bevestig makelaar"
+            aria-label={t("nen.bevestig.aria")}
           >
             <div className="compass-modal-head">
-              <h3>{!agencyChosen ? "Kies een makelaar" : agencyEditMode ? "Makelaar aanpassen" : "Klopt dit?"}</h3>
+              <h3>{!agencyChosen ? t("nen.bevestig.kiesMakelaar") : agencyEditMode ? t("nen.bevestig.makelaarAanpassen") : t("nen.bevestig.kloptDit")}</h3>
               <button
                 className="compass-close"
                 onClick={() => {
                   setShowAgencyConfirm(false);
                   setAgencyEditMode(false);
                 }}
-                aria-label="Sluiten"
+                aria-label={t("nen.bevestig.sluiten")}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -1561,13 +1563,13 @@ export default function UploadNen() {
               // nergens aan, dus de schakelaar mag dan niets beloven.
               <label className={`prio-schakel${priorityId === spoedKeuze.ja ? " is-aan" : ""}${result ? " is-vast" : ""}`}>
                 <span className="prio-tekst">
-                  <b>Spoed</b>
+                  <b>{t("nen.bevestig.spoed")}</b>
                   <span>
                     {result
-                      ? `Staat vast op order #${result.orderId}. Wijzigen kan in Mediatask zelf.`
+                      ? t("nen.bevestig.spoedVast", { id: result.orderId })
                       : priorityId === spoedKeuze.ja
-                        ? "Mediatask pakt deze order met voorrang op."
-                        : "Normale planning bij Mediatask."}
+                        ? t("nen.bevestig.spoedAan")
+                        : t("nen.bevestig.spoedUit")}
                   </span>
                 </span>
                 <input
@@ -1585,11 +1587,11 @@ export default function UploadNen() {
               <>
                 {!agencyChosen && (
                   <p style={{ margin: "0 0 14px", fontSize: 14.5, fontWeight: 600, color: "var(--bad)" }}>
-                    ⚠ Er is nog geen makelaar gekozen — kies er één om verder te kunnen.
+                    ⚠ {t("nen.bevestig.geenMakelaar")}
                   </p>
                 )}
                 <div className="field is-wide" style={{ margin: "4px 0 20px" }}>
-                  <label htmlFor="mt-agency-modal">Makelaar</label>
+                  <label htmlFor="mt-agency-modal">{t("nen.samenvatting.makelaar")}</label>
                   {config?.agencies.length ? (
                     <select
                       id="mt-agency-modal"
@@ -1597,7 +1599,7 @@ export default function UploadNen() {
                       value={agencyId}
                       onChange={(e) => setAgencyId(e.target.value)}
                     >
-                      <option value="">Kies…</option>
+                      <option value="">{t("nen.kies")}</option>
                       {config.agencies.map((a) => (
                         <option key={a.id} value={a.id}>
                           {a.name}
@@ -1608,7 +1610,7 @@ export default function UploadNen() {
                     <input
                       id="mt-agency-modal"
                       className="control"
-                      placeholder="Makelaar-id"
+                      placeholder={t("nen.order.makelaarPlaceholder")}
                       value={manualAgencyId}
                       onChange={(e) => setManualAgencyId(e.target.value)}
                     />
@@ -1616,24 +1618,24 @@ export default function UploadNen() {
                 </div>
                 {agencyChosen ? (
                   <button type="button" className="btn btn-primary btn-block" onClick={() => setAgencyEditMode(false)}>
-                    Opslaan
+                    {t("nen.opslaan")}
                   </button>
                 ) : (
                   // Bewust zichtbaar maar geblokkeerd: zonder makelaar kan er
                   // niet doorgeklikt worden naar de documentenpagina.
                   <button type="button" className="btn btn-primary btn-block" disabled>
-                    Ja, klopt
+                    {t("nen.bevestig.jaKlopt")}
                   </button>
                 )}
               </>
             ) : (
               <>
                 <p style={{ margin: "16px 0 20px", fontSize: 15, fontWeight: 600 }}>
-                  Klopt het dat het gaat om{" "}
+                  {t("nen.bevestig.vraagVoor")}{" "}
                   <span style={{ color: "var(--accent-text)" }}>
                     {config?.agencies.find((a) => a.id === agencyId)?.name || manualAgencyId}
                   </span>
-                  ?
+                  {t("nen.bevestig.vraagNa")}
                 </p>
 
                 {/* Terwijl de concept-order naar Mediatask gaat is er niets te
@@ -1642,32 +1644,29 @@ export default function UploadNen() {
                 {orderSetup === "bezig" ? (
                   <div className="banner" style={{ background: "var(--inset)" }}>
                     <span className="spinner" />
-                    <span>Order aanmaken bij Mediatask…</span>
+                    <span>{t("nen.bevestig.orderAanmaken")}</span>
                   </div>
                 ) : (
                   <>
                     {result && (
                       <p className="note" style={{ padding: 0, margin: "0 0 12px" }}>
-                        ✓ Order #{result.orderId} staat al klaar bij Mediatask — de scans gaan er tijdens het
-                        uploaden direct naartoe.
+                        ✓ {t("nen.bevestig.orderKlaar", { id: result.orderId })}
                       </p>
                     )}
                     {orderSetup === "fout" && (
                       <div className="banner is-bad" style={{ marginBottom: 12, alignItems: "flex-start" }}>
                         <span>
-                          <b>De order kon niet aangemaakt worden.</b>
+                          <b>{t("nen.bevestig.orderMislukt")}</b>
                           <br />
                           {orderSetupFout}
                           <br />
-                          Ga terug met “Aanpassen” en vul de ontbrekende velden aan. Ga je toch door,
-                          dan gaan de scans tijdens de opname niet vast naar Mediatask en moet de
-                          order aan het einde alsnog aangemaakt worden.
+                          {t("nen.bevestig.orderMisluktUitleg")}
                         </span>
                       </div>
                     )}
                     <div style={{ display: "flex", gap: 10 }}>
                       <button type="button" className="btn btn-quiet" style={{ flex: 1 }} onClick={() => setAgencyEditMode(true)}>
-                        Aanpassen
+                        {t("nen.aanpassen")}
                       </button>
                       <button
                         type="button"
@@ -1675,7 +1674,7 @@ export default function UploadNen() {
                         style={{ flex: 1 }}
                         onClick={() => void bevestigEnDoor(orderSetup === "fout")}
                       >
-                        {orderSetup === "fout" ? "Toch doorgaan" : "Ja, klopt"}
+                        {orderSetup === "fout" ? t("nen.bevestig.tochDoorgaan") : t("nen.bevestig.jaKlopt")}
                       </button>
                     </div>
                   </>
