@@ -120,6 +120,9 @@ function DocumentenContent() {
   const [garage, setGarage] = useState(false);
   const [garageVerdieping, setGarageVerdieping] = useState<number | null>(null);
   const [garageLader, setGarageLader] = useState(false);
+  // Vrije opmerking voor de verwerker. Mag Nederlands zijn: de server vertaalt
+  // hem naar het Engels voordat hij bij de Mediatask-order komt.
+  const [opmerking, setOpmerking] = useState("");
   async function refreshFiles() {
     if (!folderPath) return;
     setLoading(true);
@@ -780,6 +783,7 @@ function DocumentenContent() {
           floorsByFile,
           garage:
             garage && garageVerdieping !== null ? { verdieping: garageVerdieping, lader: garageLader } : null,
+          opmerking: opmerking.trim() || undefined,
         }),
       });
       const data = await res.json();
@@ -1079,6 +1083,29 @@ function DocumentenContent() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+
+        <div className="section">
+          <div className="section-head">
+            <h2>Opmerkingen</h2>
+          </div>
+          <div className="section-body" style={{ gridTemplateColumns: "1fr" }}>
+            <textarea
+              className="opmerking-veld"
+              rows={5}
+              value={opmerking}
+              onChange={(e) => setOpmerking(e.target.value)}
+              aria-label="Opmerkingen voor de tekenaar"
+              placeholder="Bijvoorbeeld: zolder niet toegankelijk, alleen vanaf het trapgat gescand. Berging in de tuin hoort erbij."
+            />
+            <span className="opmerking-hint">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 5h8M8 3v2M5.5 5c.8 3 3 5.5 6 7M10.5 5c-.8 3-3 5.5-6 7" />
+                <path d="m13 21 4-10 4 10M14.5 17.5h5" />
+              </svg>
+              Schrijf gerust in het Nederlands: we vertalen het automatisch naar het Engels voor de tekenaar.
+            </span>
           </div>
         </div>
 
