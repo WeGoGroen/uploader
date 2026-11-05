@@ -321,14 +321,22 @@ body {
   padding: 4px; border-radius: 12px;
   border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03);
 }
-.taal-knop-icon { flex: none; margin: 0 6px 0 6px; color: var(--side-faint); }
 .taal-knop-optie {
-  flex: 1; min-height: 34px; border: 0; border-radius: 9px;
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 34px; border: 0; border-radius: 9px;
   background: none; color: var(--side-faint);
   font: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; cursor: pointer;
 }
 .taal-knop-optie:hover { color: var(--side-ink); background: rgba(255,255,255,0.06); }
 .taal-knop-optie[aria-pressed="true"] { background: var(--side-active); color: #6ee7a0; cursor: default; }
+.taal-vlag {
+  flex: none; width: 21px; height: 14px; border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.18);
+  opacity: 0.55; filter: saturate(0.6); transition: opacity 0.15s ease, filter 0.15s ease;
+}
+.taal-knop-optie:hover .taal-vlag,
+.taal-knop-optie[aria-pressed="true"] .taal-vlag { opacity: 1; filter: none; }
+@media (prefers-reduced-motion: reduce) { .taal-vlag { transition: none; } }
 .taal-knop-optie:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 
 /* ================= hoofdgebied ================= */

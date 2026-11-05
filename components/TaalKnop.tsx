@@ -1,23 +1,62 @@
 "use client";
 
-import { TALEN } from "@/lib/taal";
+import { useId } from "react";
+import { TALEN, type Taal } from "@/lib/taal";
 import { useTaal } from "@/components/TaalProvider";
 
 /**
- * NL | EN-schakelaar onderin de zijbalk.
+ * Vlaggetjes als SVG en niet als emoji: Windows tekent 🇳🇱 en 🇬🇧 als losse
+ * letters "NL" en "GB", dan valt het hele idee weg.
+ */
+function Vlag({ taal }: { taal: Taal }) {
+  // Unieke id's per keer dat de vlag op het scherm staat; clipPath-id's zijn
+  // documentbreed en botsen anders.
+  const id = useId();
+  if (taal === "nl") {
+    return (
+      <svg className="taal-vlag" viewBox="0 0 9 6" preserveAspectRatio="none" aria-hidden="true">
+        <rect width="9" height="2" fill="#AE1C28" />
+        <rect y="2" width="9" height="2" fill="#FFFFFF" />
+        <rect y="4" width="9" height="2" fill="#21468B" />
+      </svg>
+    );
+  }
+  // Union Jack. Engels krijgt de Britse vlag: dat herkent iedereen als "Engels".
+  const s = `${id}-s`;
+  const t = `${id}-t`;
+  return (
+    <svg className="taal-vlag" viewBox="0 0 60 30" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs>
+        <clipPath id={s}>
+          <path d="M0,0 v30 h60 v-30 z" />
+        </clipPath>
+        <clipPath id={t}>
+          <path d="M30,15 h30 v15 z v15 h-30 z h-30 v-15 z v-15 h30 z" />
+        </clipPath>
+      </defs>
+      <g clipPath={`url(#${s})`}>
+        <path d="M0,0 v30 h60 v-30 z" fill="#012169" />
+        <path d="M0,0 L60,30 M60,0 L0,30" stroke="#FFFFFF" strokeWidth="6" />
+        <path d="M0,0 L60,30 M60,0 L0,30" clipPath={`url(#${t})`} stroke="#C8102E" strokeWidth="4" />
+        <path d="M30,0 v30 M0,15 h60" stroke="#FFFFFF" strokeWidth="10" />
+        <path d="M30,0 v30 M0,15 h60" stroke="#C8102E" strokeWidth="6" />
+      </g>
+    </svg>
+  );
+}
+
+/**
+ * NL | EN-schakelaar onderin de zijbalk, met vlaggetje.
  *
- * Een gesegmenteerde knop i.p.v. een vlaggetje of een dropdown: twee talen
- * passen naast elkaar, je ziet meteen welke aan staat, en het is één tik op
- * een iPad met handschoenen of stoffige vingers.
+ * Een gesegmenteerde knop i.p.v. een dropdown: twee talen passen naast
+ * elkaar, je ziet meteen welke aan staat, en het is één tik op een iPad met
+ * handschoenen of stoffige vingers. De vlag maakt hem herkenbaar zonder te
+ * lezen; de code ernaast houdt hem duidelijk voor wie kleuren slecht ziet.
  */
 export default function TaalKnop() {
   const { taal, t, zetTaal } = useTaal();
   return (
     <div className="taal-knop" role="group" aria-label={t("taal.label")}>
-      <svg className="taal-knop-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.7" />
-        <path d="M3.5 12h17M12 3.5c2.4 2.4 3.5 5.2 3.5 8.5s-1.1 6.1-3.5 8.5c-2.4-2.4-3.5-5.2-3.5-8.5S9.6 5.9 12 3.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-      </svg>
       {TALEN.map((code) => (
         <button
           key={code}
@@ -27,6 +66,7 @@ export default function TaalKnop() {
           title={t(`taal.${code}`)}
           onClick={() => taal !== code && zetTaal(code)}
         >
+          <Vlag taal={code} />
           {code.toUpperCase()}
         </button>
       ))}
