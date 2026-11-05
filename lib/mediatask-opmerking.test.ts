@@ -134,4 +134,21 @@ describe("bouwOrderOpmerking", () => {
     });
     expect(zonderLader).toBe("Garage: yes, on the ground floor.\nEV charger at the parking space: no.");
   });
+
+  it("zet de opmerking van de opnemer na de garage en vóór de links", () => {
+    const tekst = bouwOrderOpmerking({
+      verdiepingenPerBestand: { "scan.ply": [0] },
+      garage: { verdieping: 0, lader: false },
+      opmerking: "  The attic was not accessible.  ",
+      mappen: [optimized],
+    });
+    expect(tekst).toContain("Surveyor's note:\nThe attic was not accessible.");
+    expect(tekst.indexOf("Garage:")).toBeLessThan(tekst.indexOf("Surveyor's note:"));
+    expect(tekst.indexOf("Surveyor's note:")).toBeLessThan(tekst.indexOf("Point clouds"));
+  });
+
+  it("laat een lege opmerking weg", () => {
+    const tekst = bouwOrderOpmerking({ verdiepingenPerBestand: {}, opmerking: "   ", mappen: [] });
+    expect(tekst).toBe("");
+  });
 });
