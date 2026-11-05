@@ -7,7 +7,7 @@ import type { AddressDetails, AddressSuggestion, NearbyAddress } from "@/lib/pdo
 import TodayAppointments from "@/components/TodayAppointments";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
 import { normalizeForMatch } from "@/lib/address-format";
-import { configVoorProduct } from "@/lib/mediatask-format";
+import { configVoorProduct, productVoorSoort } from "@/lib/mediatask-format";
 import { meldGestart, startHartslag, type OpnameMelding } from "@/lib/opname-melden";
 import { tijdslimiet } from "@/lib/tijdslimiet";
 import { useTaal } from "@/components/TaalProvider";
@@ -345,6 +345,9 @@ export default function UploadNen() {
   const [priorityId, setPriorityId] = useState("");
   const [agencyId, setAgencyId] = useState("");
   const [productConfig, setProductConfig] = useState<Record<string, string>>({});
+  // Soort plattegrond: leeg is een gewone NEN2580-opname. Huurpuntentelling
+  // en commercieel gaan als basisproduct; er staat er altijd hoogstens één aan.
+  const [soortPlattegrond, setSoortPlattegrond] = useState<"" | "huurpunten" | "commercieel">("");
 
   // Handmatige invoer — zichtbaar zolang Mediatask nog niet gekoppeld is (of
   // als de live lijst een keuze niet bevat), zodat het formulier nu al
@@ -386,6 +389,7 @@ export default function UploadNen() {
     priorityId,
     manualPriorityId,
     productConfig,
+    soortPlattegrond,
   };
   const nenMelding: OpnameMelding | null = address
     ? {
@@ -416,7 +420,7 @@ export default function UploadNen() {
     const timer = setTimeout(() => meldGestart(nenMelding), 800);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agencyId, manualAgencyId, productId, manualProductId, priorityId, manualPriorityId, productConfig, keuzesGeladen]);
+  }, [agencyId, manualAgencyId, productId, manualProductId, priorityId, manualPriorityId, productConfig, soortPlattegrond, keuzesGeladen]);
   const [extraPhotoUrls, setExtraPhotoUrls] = useState("");
   const [extraDrawingUrls, setExtraDrawingUrls] = useState("");
 
@@ -481,6 +485,7 @@ export default function UploadNen() {
     setOrderSetup("idle");
     setProductId("");
     setProductConfig({});
+    setSoortPlattegrond("");
     setManualProductId("");
     setManualPriorityId("");
     setManualAgencyId("");
@@ -634,6 +639,7 @@ export default function UploadNen() {
             priorityId?: string;
             manualPriorityId?: string;
             productConfig?: Record<string, string>;
+            soortPlattegrond?: "" | "huurpunten" | "commercieel";
           }
         | undefined;
       if (keuzes) {
@@ -646,6 +652,7 @@ export default function UploadNen() {
         if (keuzes.productConfig && Object.keys(keuzes.productConfig).length > 0) {
           setProductConfig(keuzes.productConfig);
         }
+        if (keuzes.soortPlattegrond) setSoortPlattegrond(keuzes.soortPlattegrond);
       }
     }
 
@@ -655,6 +662,27 @@ export default function UploadNen() {
   }
 
   const selectedProduct = config?.products.find((p) => p.id === productId) ?? null;
+
+  /*
+    Soort plattegrond wisselen: het product schuift mee.
+
+    Huurpuntentelling en commercieel gaan als basisproduct, zonder keuze is het
+    weer NEN2580. De configuratie gaat via configVoorProduct, zodat wat er al
+    staat (oppervlakte, 2D/3D, stijl) blijft en meetsoort en meetdatum alleen
+    bij NEN2580 horen.
+  */
+  function kiesSoortPlattegrond(soort: "huurpunten" | "commercieel") {
+    const nieuw = soortPlattegrond === soort ? "" : soort;
+    setSoortPlattegrond(nieuw);
+    const product = productVoorSoort(config?.products ?? [], nieuw);
+    if (!product) return;
+    setProductId(product.id);
+    setProductConfig((huidig) =>
+      configVoorProduct(product, { m2: grossFloorAreaHint, vandaag: vandaagIso(), huidig })
+    );
+  }
+  const soortProductOntbreekt =
+    !!soortPlattegrond && !!config?.products.length && !productVoorSoort(config.products, soortPlattegrond);
 
   const finalProductId = config?.products.length ? productId : manualProductId ? Number(manualProductId) : "";
   const finalPriorityId = config?.priorities.length ? priorityId : manualPriorityId;
@@ -1241,6 +1269,57 @@ export default function UploadNen() {
 
           <div className="section">
             <div className="section-head">
+              <h2>{t("nen.soortPlattegrond.titel")}</h2>
+            </div>
+            <div className="section-body" style={{ gridTemplateColumns: "1fr" }}>
+              <button
+                type="button"
+                className={`garage-toggle${soortPlattegrond === "huurpunten" ? " is-on" : ""}`}
+                aria-pressed={soortPlattegrond === "huurpunten"}
+                onClick={() => kiesSoortPlattegrond("huurpunten")}
+              >
+                <span className="garage-toggle-icon" aria-hidden="true">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 10.5 12 4l9 6.5V20H3z" />
+                    <path d="M9 20v-6h6v6" />
+                  </svg>
+                </span>
+                <span className="garage-toggle-text">
+                  <strong>{t("nen.soortPlattegrond.huurpunten")}</strong>
+                  <span>{t("nen.soortPlattegrond.huurpuntenUitleg")}</span>
+                </span>
+                <span className="garage-switch" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={`garage-toggle${soortPlattegrond === "commercieel" ? " is-on" : ""}`}
+                aria-pressed={soortPlattegrond === "commercieel"}
+                onClick={() => kiesSoortPlattegrond("commercieel")}
+              >
+                <span className="garage-toggle-icon" aria-hidden="true">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 21V5l8-2v18" />
+                    <path d="M12 9h8v12" />
+                    <path d="M3 21h18" />
+                    <path d="M7 8h2M7 12h2M7 16h2M15 13h2M15 17h2" />
+                  </svg>
+                </span>
+                <span className="garage-toggle-text">
+                  <strong>{t("nen.soortPlattegrond.commercieel")}</strong>
+                  <span>{t("nen.soortPlattegrond.commercieelUitleg")}</span>
+                </span>
+                <span className="garage-switch" aria-hidden="true" />
+              </button>
+              {soortProductOntbreekt && (
+                <p className="note" style={{ padding: 0, color: "var(--bad)", fontWeight: 600 }}>
+                  {t("nen.soortPlattegrond.productOntbreekt")}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="section">
+            <div className="section-head">
               <h2>{t("nen.documenten.titel")}</h2>
               <button
                 type="button"
@@ -1258,7 +1337,7 @@ export default function UploadNen() {
                   ? t("nen.mediatask.gegevensLaden")
                   : folderBusy
                     ? t("nen.map.klaarzetten")
-                    : t("nen.documenten.uploaden")}
+                    : t("nen.volgendeStap")}
               </button>
             </div>
           </div>

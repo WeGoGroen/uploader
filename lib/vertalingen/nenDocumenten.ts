@@ -129,6 +129,10 @@ export const nl = {
   "nenDocumenten.rijLeeg": "Leeg",
   "nenDocumenten.laatOpen": "Laat dit scherm open tot het klaar is",
   "nenDocumenten.sluitenAfronden": "Sluiten en afronden",
+  "nenDocumenten.opmerkingen.titel": "Opmerkingen",
+  "nenDocumenten.opmerkingen.label": "Opmerkingen voor de tekenaar",
+  "nenDocumenten.opmerkingen.placeholder": "Bijvoorbeeld: zolder niet toegankelijk, alleen vanaf het trapgat gescand. Berging in de tuin hoort erbij.",
+  "nenDocumenten.opmerkingen.hint": "Schrijf gerust in het Nederlands: we vertalen het automatisch naar het Engels voor de tekenaar.",
 } as const;
 
 export const en: Partial<Record<keyof typeof nl, string>> = {
@@ -251,4 +255,8 @@ export const en: Partial<Record<keyof typeof nl, string>> = {
   "nenDocumenten.rijLeeg": "Empty",
   "nenDocumenten.laatOpen": "Keep this screen open until it is done",
   "nenDocumenten.sluitenAfronden": "Close and finish",
+  "nenDocumenten.opmerkingen.titel": "Comments",
+  "nenDocumenten.opmerkingen.label": "Comments for the draughtsperson",
+  "nenDocumenten.opmerkingen.placeholder": "For example: attic not accessible, only scanned from the stairwell. The garden shed is included.",
+  "nenDocumenten.opmerkingen.hint": "Feel free to write in Dutch or English: comments are automatically translated into English for the draughtsperson.",
 };

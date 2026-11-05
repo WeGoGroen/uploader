@@ -1409,6 +1409,21 @@ textarea.control { min-height: 96px; padding: 12px 14px; resize: vertical; line-
 @media (prefers-reduced-motion: reduce) {
   .garage-toggle, .garage-switch, .garage-switch::after { transition: none; }
 }
+
+/* ================= opmerkingen ================= */
+.opmerking-veld {
+  width: 100%; min-height: 132px; padding: 14px 16px; resize: vertical;
+  border: 1px solid var(--rule-strong); border-radius: 12px; background: var(--paper);
+  color: var(--ink); font: inherit; font-size: 15.5px; line-height: 1.5;
+}
+.opmerking-veld:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(26, 135, 72, 0.18);
+}
+.opmerking-hint {
+  display: flex; align-items: center; gap: 8px; margin-top: -6px;
+  font-size: 12.5px; color: var(--ink-soft);
+}
+.opmerking-hint svg { flex: none; color: var(--accent-text); }
 .scan-icon.is-afwijking { background: var(--bad); }
 .scan-list li.is-afwijking .scan-dot { background: var(--bad); }
 .scan-verdict.is-afwijking { background: var(--bad-wash); color: var(--bad); }

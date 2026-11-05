@@ -132,7 +132,7 @@ async function haalAfbeeldingen(
  */
 export async function dossierVoorTaak(
   taskId: string,
-  opties: { opnieuw?: boolean; extraGroepen?: DossierGroep[]; kaartAlsTerugval?: boolean; ketel?: KetelBeeld | null } = {}
+  opties: { opnieuw?: boolean; extraGroepen?: DossierGroep[]; kaartAlsTerugval?: boolean; ketel?: KetelBeeld | null; ventilatie?: KetelBeeld | null } = {}
 ): Promise<DossierUitkomst> {
   let token: string;
   try {
@@ -245,6 +245,7 @@ export async function dossierVoorTaak(
     extraGroepen: opties.extraGroepen,
     voorgevel,
     ketel: opties.ketel,
+    ventilatie: opties.ventilatie,
     fotos,
     andereBijlagen: anders.map((b) => ({ code: b.code, naam: b.naam })),
     opgehaaldOp: new Date(),

@@ -51,7 +51,7 @@ export const nl = {
   "nen.map.wachtOpDocumenten": "Map wordt aangemaakt zodra je de documenten opent",
   "nen.map.aangemaakt": "Map aangemaakt —",
   "nen.map.mislukt": "De Dropbox-map kon niet worden aangemaakt.",
-  "nen.map.misluktOpnieuw": "De Dropbox-map kon niet worden aangemaakt. Tik nog een keer op Documenten uploaden.",
+  "nen.map.misluktOpnieuw": "De Dropbox-map kon niet worden aangemaakt. Tik nog een keer op Volgende stap.",
   "nen.map.verversen": "Nu verversen",
   "nen.map.openen": "Openen",
   "nen.map.gelinkt": "Gelinked in Mediatask",
@@ -73,7 +73,13 @@ export const nl = {
 
   // documenten
   "nen.documenten.titel": "Documenten",
-  "nen.documenten.uploaden": "Documenten uploaden",
+  "nen.volgendeStap": "Volgende stap",
+  "nen.soortPlattegrond.titel": "Soort plattegrond",
+  "nen.soortPlattegrond.huurpunten": "Huurpuntentelling plattegrond?",
+  "nen.soortPlattegrond.huurpuntenUitleg": "Plattegrond voor de puntentelling, geen NEN2580-meetrapport",
+  "nen.soortPlattegrond.commercieel": "Commercieel gebouw?",
+  "nen.soortPlattegrond.commercieelUitleg": "Kantoor, winkel of bedrijfspand",
+  "nen.soortPlattegrond.productOntbreekt": "⚠ Het product \"Floorplanner basic plans\" staat niet in Mediatask. Kies het product hieronder bij de Mediatask-order zelf.",
 
   // Mediatask-orderformulier
   "nen.order.sectie": "Mediatask-order",
@@ -209,7 +215,7 @@ export const en: Partial<Record<keyof typeof nl, string>> = {
   "nen.map.wachtOpDocumenten": "The folder will be created when you open the documents",
   "nen.map.aangemaakt": "Folder created —",
   "nen.map.mislukt": "The Dropbox folder couldn't be created.",
-  "nen.map.misluktOpnieuw": "The Dropbox folder couldn't be created. Tap Upload documents again.",
+  "nen.map.misluktOpnieuw": "The Dropbox folder couldn't be created. Tap Next step again.",
   "nen.map.verversen": "Refresh now",
   "nen.map.openen": "Open",
   "nen.map.gelinkt": "Linked in Mediatask",
@@ -229,7 +235,13 @@ export const en: Partial<Record<keyof typeof nl, string>> = {
     "Mediatask isn't connected yet ({fout}) — fill in the details manually below. This works as soon as the token and base URL have been provided.",
 
   "nen.documenten.titel": "Documents",
-  "nen.documenten.uploaden": "Upload documents",
+  "nen.volgendeStap": "Next step",
+  "nen.soortPlattegrond.titel": "Floor plan type",
+  "nen.soortPlattegrond.huurpunten": "Rent points floor plan?",
+  "nen.soortPlattegrond.huurpuntenUitleg": "Floor plan for the rent points assessment, not an NEN2580 measurement report",
+  "nen.soortPlattegrond.commercieel": "Commercial building?",
+  "nen.soortPlattegrond.commercieelUitleg": "Office, shop or business premises",
+  "nen.soortPlattegrond.productOntbreekt": "⚠ The product \"Floorplanner basic plans\" isn't in Mediatask. Choose the product below in the Mediatask order itself.",
 
   "nen.order.sectie": "Mediatask order",
   "nen.order.productPlaceholder": "Product ID (e.g. 6 for Floorplanner NEN2580 plans)",
