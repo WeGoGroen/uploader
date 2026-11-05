@@ -9,6 +9,14 @@
  * op het Nederlands in plaats van een sleutel of een lege knop te tonen.
  */
 
+import * as algemeen from "@/lib/vertalingen/algemeen";
+import * as energielabel from "@/lib/vertalingen/energielabel";
+import * as nen from "@/lib/vertalingen/nen";
+import * as nenDocumenten from "@/lib/vertalingen/nenDocumenten";
+import * as media from "@/lib/vertalingen/media";
+import * as dashboard from "@/lib/vertalingen/dashboard";
+import * as beheer from "@/lib/vertalingen/beheer";
+
 export type Taal = "nl" | "en";
 
 export const TALEN: Taal[] = ["nl", "en"];
@@ -19,68 +27,42 @@ export function isTaal(v: unknown): v is Taal {
   return v === "nl" || v === "en";
 }
 
+/*
+  Eén woordenboekbestand per onderdeel in lib/vertalingen/, zodat aanpassingen
+  aan het ene scherm niet botsen met die aan het andere.
+*/
 const nl = {
-  // zijbalk
-  "zijbalk.ondertitel": "Upload portaal",
-  "zijbalk.hoofdmenu": "Hoofdmenu",
-  "zijbalk.dashboard": "Dashboard",
-  "zijbalk.uploaden": "Uploaden",
-  "zijbalk.binnenkort": "binnenkort",
-  "zijbalk.status": "Status",
-  "zijbalk.gebruikers": "Gebruikers",
-  "zijbalk.instellingen": "Instellingen",
-  "zijbalk.inloggen": "INLOGGEN",
-  "zijbalk.herstellen": "HERSTELLEN",
-  "zijbalk.uploadenBezig.een": "{n} project aan het uploaden",
-  "zijbalk.uploadenBezig.meer": "{n} projecten aan het uploaden",
-  "zijbalk.laden": "Laden…",
-  "zijbalk.ingelogd": "ingelogd",
-  "zijbalk.mijnGegevens": "Mijn gegevens en code",
-  "zijbalk.bezig": "Bezig…",
-  "zijbalk.uitloggen": "Uitloggen",
-  // taalknop
-  "taal.label": "Taal",
-  "taal.nl": "Nederlands",
-  "taal.en": "Engels",
-  // dashboard
-  "dashboard.titel": "Dashboard",
-  "dashboard.verversen": "Afspraken verversen",
-  "dashboard.verversenBezig": "Bezig met verversen…",
-} as const;
+  ...algemeen.nl,
+  ...energielabel.nl,
+  ...nen.nl,
+  ...nenDocumenten.nl,
+  ...media.nl,
+  ...dashboard.nl,
+  ...beheer.nl,
+};
 
 export type TaalSleutel = keyof typeof nl;
 
 const en: Partial<Record<TaalSleutel, string>> = {
-  "zijbalk.ondertitel": "Upload portal",
-  "zijbalk.hoofdmenu": "Main menu",
-  "zijbalk.dashboard": "Dashboard",
-  "zijbalk.uploaden": "Upload",
-  "zijbalk.binnenkort": "coming soon",
-  "zijbalk.status": "Status",
-  "zijbalk.gebruikers": "Users",
-  "zijbalk.instellingen": "Settings",
-  "zijbalk.inloggen": "SIGN IN",
-  "zijbalk.herstellen": "FIX",
-  "zijbalk.uploadenBezig.een": "{n} project uploading",
-  "zijbalk.uploadenBezig.meer": "{n} projects uploading",
-  "zijbalk.laden": "Loading…",
-  "zijbalk.ingelogd": "signed in",
-  "zijbalk.mijnGegevens": "My details and code",
-  "zijbalk.bezig": "Working…",
-  "zijbalk.uitloggen": "Sign out",
-  "taal.label": "Language",
-  "taal.nl": "Dutch",
-  "taal.en": "English",
-  "dashboard.titel": "Dashboard",
-  "dashboard.verversen": "Refresh appointments",
-  "dashboard.verversenBezig": "Refreshing…",
+  ...algemeen.en,
+  ...energielabel.en,
+  ...nen.en,
+  ...nenDocumenten.en,
+  ...media.en,
+  ...dashboard.en,
+  ...beheer.en,
 };
 
 const WOORDENBOEK: Record<Taal, Partial<Record<TaalSleutel, string>>> = { nl, en };
 
 /** Vertaal een sleutel; {naam}-plekken worden ingevuld vanuit `waarden`. */
 export function vertaal(taal: Taal, sleutel: TaalSleutel, waarden?: Record<string, string | number>): string {
-  const tekst = WOORDENBOEK[taal][sleutel] ?? nl[sleutel];
+  const tekst = WOORDENBOEK[taal][sleutel] ?? nl[sleutel] ?? sleutel;
   if (!waarden) return tekst;
   return tekst.replace(/\{(\w+)\}/g, (_, k: string) => String(waarden[k] ?? `{${k}}`));
+}
+
+/** Locale voor datums en getallen (toLocaleDateString, Intl.NumberFormat, …). */
+export function taalLocale(taal: Taal): string {
+  return taal === "en" ? "en-GB" : "nl-NL";
 }
