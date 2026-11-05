@@ -6,6 +6,9 @@ import { huidigeSessie } from "@/lib/sessie-server";
 import RechtenProvider from "@/components/RechtenProvider";
 import LocationPermission from "@/components/LocationPermission";
 import UploadResume from "@/components/UploadResume";
+import TaalProvider from "@/components/TaalProvider";
+import { STANDAARD_TAAL, TAAL_COOKIE, isTaal } from "@/lib/taal";
+import { cookies } from "next/headers";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -35,21 +38,26 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   */
   const { rechten } = await huidigeRechten();
   const sessie = await huidigeSessie();
+  // Alleen de schermtaal; de workflow (mapnamen, ClickUp, Mediatask) blijft Nederlands.
+  const taalCookie = (await cookies()).get(TAAL_COOKIE)?.value;
+  const taal = isTaal(taalCookie) ? taalCookie : STANDAARD_TAAL;
 
   return (
     <html
-      lang="nl"
+      lang={taal}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <LocationPermission />
         <UploadResume />
-        <RechtenProvider rechten={rechten} naam={sessie?.naam ?? null}>
-          <div className="shell">
-            <Sidebar rechten={rechten} />
-            <div className="main">{children}</div>
-          </div>
-        </RechtenProvider>
+        <TaalProvider taal={taal}>
+          <RechtenProvider rechten={rechten} naam={sessie?.naam ?? null}>
+            <div className="shell">
+              <Sidebar rechten={rechten} />
+              <div className="main">{children}</div>
+            </div>
+          </RechtenProvider>
+        </TaalProvider>
       </body>
     </html>
   );

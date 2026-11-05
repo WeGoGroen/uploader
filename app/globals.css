@@ -315,6 +315,22 @@ body {
 }
 .side-tile[aria-current="true"] .side-tile-icon { background: rgba(110, 231, 160, 0.16); }
 
+/* taalknop (NL | EN) — alleen de schermtaal, de workflow blijft Nederlands */
+.taal-knop {
+  display: flex; align-items: center; gap: 4px; margin-top: -12px;
+  padding: 4px; border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03);
+}
+.taal-knop-icon { flex: none; margin: 0 6px 0 6px; color: var(--side-faint); }
+.taal-knop-optie {
+  flex: 1; min-height: 34px; border: 0; border-radius: 9px;
+  background: none; color: var(--side-faint);
+  font: inherit; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; cursor: pointer;
+}
+.taal-knop-optie:hover { color: var(--side-ink); background: rgba(255,255,255,0.06); }
+.taal-knop-optie[aria-pressed="true"] { background: var(--side-active); color: #6ee7a0; cursor: default; }
+.taal-knop-optie:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
 /* ================= hoofdgebied ================= */
 .main { display: flex; flex-direction: column; min-width: 0; gap: 12px; padding: 12px; }
 @media (min-width: 760px) { .main { padding: 0; height: 100%; overflow-y: auto; } }

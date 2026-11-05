@@ -3,6 +3,8 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { getServerSnapshot, getSnapshot, subscribe } from "@/lib/upload-queue";
+import { useTaal } from "@/components/TaalProvider";
+import TaalKnop from "@/components/TaalKnop";
 
 interface ConnectionStatus {
   connected: boolean;
@@ -51,6 +53,7 @@ const INLOG_ROUTE: Record<string, string> = {
 };
 
 function SvcRow({ name, status }: { name: string; status: ConnectionStatus }) {
+  const { t } = useTaal();
   const isOk = status.connected && status.ok;
 
   /*
@@ -92,7 +95,7 @@ function SvcRow({ name, status }: { name: string; status: ConnectionStatus }) {
         <span className="svc-live">LIVE</span>
       ) : (
         <span className="svc-fix" title={status.error ?? undefined}>
-          {INLOG_ROUTE[name] ? "INLOGGEN" : "HERSTELLEN"}
+          {INLOG_ROUTE[name] ? t("zijbalk.inloggen") : t("zijbalk.herstellen")}
           <svg width="9" height="9" viewBox="0 0 12 12" fill="none" aria-hidden="true">
             <path d="M3 9l6-6M4.2 3H9v4.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -121,6 +124,7 @@ function NavUpload({
   /** Bijschrift achter de naam: "bèta" of "binnenkort". */
   tag?: { woord: string; soort: "beta" | "binnenkort" };
 }) {
+  const { t } = useTaal();
   return (
     <a href={href} className="nav-upload" aria-current={actief ? "true" : undefined}>
       <span className="nav-upload-icon" aria-hidden="true">
@@ -134,7 +138,7 @@ function NavUpload({
         {tag && <span className={`nav-upload-tag is-${tag.soort}`}>{tag.woord}</span>}
       </span>
       {bezig > 0 && (
-        <span className="nav-upload-teller" title={`${bezig} ${bezig === 1 ? "project" : "projecten"} aan het uploaden`}>
+        <span className="nav-upload-teller" title={t(bezig === 1 ? "zijbalk.uploadenBezig.een" : "zijbalk.uploadenBezig.meer", { n: bezig })}>
           {bezig}
         </span>
       )}
@@ -150,6 +154,7 @@ export default function Sidebar({
   rechten: { energielabel: boolean; nen: boolean; media: boolean };
 }) {
   const pathname = usePathname();
+  const { t } = useTaal();
   const [accountName, setAccountName] = useState<string | null>(null);
   const [svc, setSvc] = useState<StatusResponse | null>(null);
   const [accounts, setAccounts] = useState<AccountsResponse | null>(null);
@@ -258,10 +263,10 @@ export default function Sidebar({
     <aside className="side">
       <div className="mark">
         <b>WeGoGroen</b>
-        <span>Upload portaal</span>
+        <span>{t("zijbalk.ondertitel")}</span>
       </div>
 
-      <nav className="nav" aria-label="Hoofdmenu">
+      <nav className="nav" aria-label={t("zijbalk.hoofdmenu")}>
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- de hele app navigeert bewust met gewone <a>-tags, niet next/link */}
         <a href="/" className="nav-item" aria-current={pathname === "/" ? "true" : undefined}>
           <span className="nav-icon" aria-hidden="true">
@@ -270,13 +275,13 @@ export default function Sidebar({
               <path d="M6 10.5V20h12v-9.5" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
             </svg>
           </span>
-          Dashboard
+          {t("zijbalk.dashboard")}
         </a>
 
         {/* De drie uploadknoppen apart gezet: dat is het werk waarvoor de app
             bestaat, en als vierde en vijfde regel in een rij gelijkvormige
             links waren ze niet te onderscheiden van navigatie. */}
-        <span className="nav-groep">Uploaden</span>
+        <span className="nav-groep">{t("zijbalk.uploaden")}</span>
         {rechten.energielabel && (
           <NavUpload
             href="/energielabel"
@@ -299,13 +304,13 @@ export default function Sidebar({
             label="Media"
             actief={pathname.startsWith("/media")}
             bezig={bezigMedia}
-            tag={{ woord: "binnenkort", soort: "binnenkort" }}
+            tag={{ woord: t("zijbalk.binnenkort"), soort: "binnenkort" }}
           />
         )}
       </nav>
 
       <div className="side-block is-compact" style={{ marginTop: "auto" }}>
-        <span className="side-title">Status</span>
+        <span className="side-title">{t("zijbalk.status")}</span>
         {svc && (
           <>
             <SvcRow name="ClickUp" status={svc.clickup} />
@@ -326,7 +331,7 @@ export default function Sidebar({
               <path d="M5 20c1.2-4 4-6 7-6s5.8 2 7 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
           </span>
-          Gebruikers
+          {t("zijbalk.gebruikers")}
         </a>
         <a
           href="/instellingen"
@@ -348,9 +353,11 @@ export default function Sidebar({
               />
             </svg>
           </span>
-          Instellingen
+          {t("zijbalk.instellingen")}
         </a>
       </div>
+
+      <TaalKnop />
 
       <div className="user" ref={userMenuRef}>
         <button
@@ -371,8 +378,8 @@ export default function Sidebar({
             )}
           </span>
           <span className="user-id">
-            <b>{accountName ?? "Laden…"}</b>
-            <span>ingelogd</span>
+            <b>{accountName ?? t("zijbalk.laden")}</b>
+            <span>{t("zijbalk.ingelogd")}</span>
           </span>
           <svg className="user-chev" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -382,11 +389,11 @@ export default function Sidebar({
         {menuOpen && (
           <div className="user-menu" role="menu">
             <a href="/gebruikers" className="user-menu-item" onClick={() => setMenuOpen(false)}>
-              Mijn gegevens en code
+              {t("zijbalk.mijnGegevens")}
             </a>
             <div className="user-menu-sep" />
             <button type="button" className="user-menu-item" onClick={uitloggen} disabled={switching}>
-              {switching ? "Bezig…" : "Uitloggen"}
+              {switching ? t("zijbalk.bezig") : t("zijbalk.uitloggen")}
             </button>
           </div>
         )}

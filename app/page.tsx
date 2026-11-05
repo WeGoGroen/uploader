@@ -10,6 +10,7 @@ import UploadPanel from "@/components/UploadPanel";
 import { useRechten } from "@/components/RechtenProvider";
 import ScanStatusKaart from "@/components/ScanStatus";
 import MeerMenu from "@/components/MeerMenu";
+import { useTaal } from "@/components/TaalProvider";
 import {
   energielabelStatus,
   isRecent,
@@ -143,6 +144,7 @@ function StatusPill({
 }
 
 export default function Dashboard() {
+  const { t } = useTaal();
   // Alles toestaan tot het antwoord binnen is: anders knipperen de knoppen
   // weg en weer terug bij elke paginaopening.
   // Komt server-side mee (zie de layout): er is dus geen moment waarop het
@@ -294,7 +296,7 @@ export default function Dashboard() {
   return (
     <>
       <header className="topline">
-        <span className="eyebrow">Dashboard</span>
+        <span className="eyebrow">{t("dashboard.titel")}</span>
       </header>
 
       <Suspense fallback={null}>
@@ -329,7 +331,7 @@ export default function Dashboard() {
                 strokeLinejoin="round"
               />
             </svg>
-            {refreshing ? "Bezig met verversen…" : "Afspraken verversen"}
+            {refreshing ? t("dashboard.verversenBezig") : t("dashboard.verversen")}
           </button>
         )}
 
