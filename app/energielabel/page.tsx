@@ -2,6 +2,8 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useIkBen } from "@/components/RechtenProvider";
+import { useTaal } from "@/components/TaalProvider";
+import type { TaalSleutel } from "@/lib/taal";
 import type { AddressDetails, AddressSuggestion, NearbyAddress } from "@/lib/pdok";
 import { DOCUMENT_FOLDER_MAP } from "@/lib/documents";
 import { enqueue, getServerSnapshot, getSnapshot, removeTask, subscribe } from "@/lib/upload-queue";
@@ -55,29 +57,32 @@ interface DropboxFileEntry {
 // bestanden automatisch als bijlage in ClickUp te zetten.
 const DOCUMENT_FIELDS = DOCUMENT_FOLDER_MAP;
 
+type Vertaler = (sleutel: TaalSleutel, waarden?: Record<string, string | number>) => string;
+
 /** "45 sec", "2 min 10 sec" — zelfde weergave als bij NEN2580. */
-function formatEta(seconds: number | null | undefined): string {
+function formatEta(seconds: number | null | undefined, t: Vertaler): string {
   if (seconds == null || !Number.isFinite(seconds)) return "";
-  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} sec`;
+  if (seconds < 60) return t("energielabel.eta.sec", { n: Math.max(1, Math.round(seconds)) });
   const minutes = Math.floor(seconds / 60);
   const rest = Math.round(seconds % 60);
-  if (minutes < 60) return rest ? `${minutes} min ${rest} sec` : `${minutes} min`;
+  if (minutes < 60) return rest ? t("energielabel.eta.minSec", { m: minutes, s: rest }) : t("energielabel.eta.min", { n: minutes });
   const hours = Math.floor(minutes / 60);
   const restMin = minutes % 60;
-  return restMin ? `${hours} uur ${restMin} min` : `${hours} uur`;
+  return restMin ? t("energielabel.eta.uurMin", { u: hours, m: restMin }) : t("energielabel.eta.uur", { u: hours });
 }
 
 const PRIORITIES = ["Urgent", "High", "Normal", "Low", "Clear"];
 
 // Het team gebruikt zelf al lettercodes in de veldnamen (A1, B2, Mo-7, ...).
 // Daar groeperen we op, i.p.v. een eigen indeling te verzinnen.
-const GROUP_TITLES: Record<string, string> = {
-  A: "Algemeen",
-  B: "Isolatie",
-  C: "Aanbouw",
-  D: "Documentatie",
-  E: "Extra",
-  Mo: "Model-check",
+const GROUP_TITLES: Record<string, TaalSleutel> = {
+  A: "energielabel.groep.A",
+  B: "energielabel.groep.B",
+  C: "energielabel.groep.C",
+  D: "energielabel.groep.D",
+  E: "energielabel.groep.E",
+  Mo: "energielabel.groep.Mo",
+  Overig: "energielabel.groep.Overig",
 };
 const GROUP_ORDER = ["A", "B", "C", "D", "E", "Mo"];
 // Deze secties beginnen ingeklapt: Aanbouw en Extra zijn de uitzondering,
@@ -268,6 +273,7 @@ function CompassPicker({
   onSelect: (id: string, graden?: number) => void;
   onClose: () => void;
 }) {
+  const { t } = useTaal();
   const [heading, setHeading] = useState<number | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [liveStatus, setLiveStatus] = useState<"requesting" | "active" | "unavailable" | "denied">("requesting");
@@ -343,10 +349,10 @@ function CompassPicker({
 
   return (
     <div className="compass-overlay" onClick={onClose}>
-      <div className="compass-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Kies voorgevelrichting">
+      <div className="compass-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t("energielabel.kompas.dialoog")}>
         <div className="compass-modal-head">
-          <h3>Oriëntatie voorgevel</h3>
-          <button type="button" className="compass-close" onClick={onClose} aria-label="Sluiten">
+          <h3>{t("energielabel.kompas.titel")}</h3>
+          <button type="button" className="compass-close" onClick={onClose} aria-label={t("energielabel.sluiten")}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
@@ -406,27 +412,27 @@ function CompassPicker({
         </div>
 
         <p className="compass-legend">
-          <span><span className="compass-legend-dot is-live" /> jouw richting nu</span>
-          <span><span className="compass-legend-dot is-active" /> opgeslagen</span>
+          <span><span className="compass-legend-dot is-live" /> {t("energielabel.kompas.jouwRichting")}</span>
+          <span><span className="compass-legend-dot is-active" /> {t("energielabel.kompas.opgeslagen")}</span>
         </p>
 
-        {liveStatus === "requesting" && <p className="note">Toestemming vragen voor de richtingssensor…</p>}
+        {liveStatus === "requesting" && <p className="note">{t("energielabel.kompas.toestemmingVragen")}</p>}
         {liveStatus === "denied" && (
           <p className="note conn-err">
-            Geen toestemming voor de kompassensor. Zet dit aan bij Instellingen → Safari (of je browser) → Motion &amp; Oriëntatie, of kies hierboven handmatig een richting.
+            {t("energielabel.kompas.geweigerd")}
           </p>
         )}
         {liveStatus === "unavailable" && (
-          <p className="note conn-err">Geen kompassensor gevonden op dit apparaat. Kies hierboven handmatig een richting.</p>
+          <p className="note conn-err">{t("energielabel.kompas.geenSensor")}</p>
         )}
         {liveStatus === "active" && needsCalibration && (
           <p className="note compass-calibrate">
-            〰️ Kompas nog niet nauwkeurig — beweeg je toestel een paar keer in een 8-vorm om te kalibreren.
+            {t("energielabel.kompas.kalibreren")}
           </p>
         )}
         {liveStatus === "active" && heading != null && liveOption && (
           <button type="button" className="btn btn-primary btn-block compass-live-btn" onClick={() => onSelect(liveOption.id, Math.round(heading))}>
-            Gebruik huidige richting: {liveName} ({Math.round(heading)}°)
+            {t("energielabel.kompas.gebruikHuidige", { richting: liveName ?? "", graden: Math.round(heading) })}
           </button>
         )}
       </div>
@@ -435,6 +441,8 @@ function CompassPicker({
 }
 
 export default function Home() {
+  const { t } = useTaal();
+  const groepTitel = (key: string) => (GROUP_TITLES[key] ? t(GROUP_TITLES[key]) : key);
   const [status, setStatus] = useState<Status>("loading");
   const [statusError, setStatusError] = useState<string | null>(null);
   const [meta, setMeta] = useState<ListMeta | null>(null);
@@ -501,7 +509,7 @@ export default function Home() {
     dropboxPath: string,
     d: { key: string; label: string }
   ): Promise<string | null> {
-    let laatsteFout = "onbekende fout";
+    let laatsteFout = t("energielabel.fout.onbekend");
     // Doorgaan waar de vorige poging stopte i.p.v. opnieuw bij bestand één.
     // Elke serveraanroep heeft een tijdsbudget van 45s; een categorie met veel
     // foto's paste daar niet in, en omdat elke poging weer vooraan begon kwam
@@ -517,12 +525,12 @@ export default function Home() {
           body: JSON.stringify({ taskId, docKey: d.key, dropboxFolderPath: dropboxPath, skip }),
         });
         const rd = await r.json();
-        if (!r.ok) throw new Error(rd.error ?? "onbekende fout");
+        if (!r.ok) throw new Error(rd.error ?? t("energielabel.fout.onbekend"));
 
         if (typeof rd.volgendeSkip === "number") skip = rd.volgendeSkip;
 
         if (rd.afgekapt) {
-          laatsteFout = "niet alles paste binnen één poging";
+          laatsteFout = t("energielabel.fout.nietAllesPaste");
           // Even ademruimte voor ClickUp voordat we het restant oppakken.
           await new Promise((res) => setTimeout(res, 2000));
           continue;
@@ -533,7 +541,7 @@ export default function Home() {
 
         // Nog één gerichte herkansing voor precies de bestanden die faalden —
         // niet de hele categorie, anders staan de geslaagde er dubbel in.
-        laatsteFout = `${mislukt.length} van ${rd.fileCount} bestanden mislukten`;
+        laatsteFout = t("energielabel.fout.bestandenMislukten", { n: mislukt.length, totaal: rd.fileCount });
         await new Promise((res) => setTimeout(res, 2000));
         const r2 = await fetch("/api/clickup/attach-document", {
           method: "POST",
@@ -542,9 +550,9 @@ export default function Home() {
         });
         const rd2 = await r2.json();
         if (r2.ok && !rd2.afgekapt && (rd2.mislukt?.length ?? 0) === 0) return null;
-        return `${rd2.mislukt?.length ?? mislukt.length} bestanden bleven mislukken`;
+        return t("energielabel.fout.bestandenBlevenMislukken", { n: rd2.mislukt?.length ?? mislukt.length });
       } catch (err) {
-        laatsteFout = err instanceof Error ? err.message : "onbekende fout";
+        laatsteFout = err instanceof Error ? err.message : t("energielabel.fout.onbekend");
         await new Promise((res) => setTimeout(res, 2000));
       }
     }
@@ -561,7 +569,7 @@ export default function Home() {
       const fout = await zetCategorieOver(createdTaskId, createdDropboxPath, d);
       if (fout) {
         nogSteedsMis.push(d);
-        nieuweWaarschuwingen.push(`${d.label}: overzetten naar ClickUp mislukt (${fout})`);
+        nieuweWaarschuwingen.push(t("energielabel.fout.overzettenMislukt", { label: d.label, fout }));
       }
     }
     setMislukteDocs(nogSteedsMis);
@@ -670,14 +678,16 @@ export default function Home() {
     fetch("/api/clickup/list-meta", { cache: "no-store" })
       .then(async (res) => {
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "Onbekende fout");
+        if (!res.ok) throw new Error(data.error ?? t("energielabel.fout.onbekendHoofdletter"));
         setMeta(data);
         setStatus("ready");
       })
       .catch((err) => {
-        setStatusError(err instanceof Error ? err.message : "Kon ClickUp niet bereiken.");
+        setStatusError(err instanceof Error ? err.message : t("energielabel.fout.clickupNietBereikt"));
         setStatus("error");
       });
+    // Eén keer ophalen bij het openen; een taalwissel hoeft ClickUp niet opnieuw te bevragen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Concept hervatten via /?draft=<id>: alle formuliervelden terugzetten
@@ -867,7 +877,6 @@ export default function Home() {
     });
     return keys.map((key) => ({
       key,
-      title: GROUP_TITLES[key] ?? key,
       fields: [...byGroup.get(key)!].sort(vergelijkOpNummer),
     }));
   }, [meta]);
@@ -972,7 +981,7 @@ export default function Home() {
     setShowManualSearch(false);
 
     if (!("geolocation" in navigator)) {
-      setLocationError("Locatie wordt niet ondersteund door deze browser. Gebruik handmatig zoeken.");
+      setLocationError(t("energielabel.fout.locatieNietOndersteund"));
       return;
     }
 
@@ -987,7 +996,7 @@ export default function Home() {
           const data = await res.json();
           setNearby(data.addresses ?? []);
         } catch {
-          setLocationError("Ophalen van adressen in de buurt is mislukt. Probeer opnieuw of zoek handmatig.");
+          setLocationError(t("energielabel.fout.buurtMislukt"));
         } finally {
           setLocating(false);
         }
@@ -996,8 +1005,8 @@ export default function Home() {
         setLocating(false);
         setLocationError(
           err.code === err.PERMISSION_DENIED
-            ? "Locatietoegang geweigerd. Zet dit aan in je browserinstellingen, of zoek handmatig. Let op: locatie werkt alleen over https of op localhost."
-            : "Locatie kon niet worden bepaald. Probeer opnieuw of zoek handmatig."
+            ? t("energielabel.fout.locatieGeweigerd")
+            : t("energielabel.fout.locatieOnbepaald")
         );
       },
       { enableHighAccuracy: true, timeout: 10000 }
@@ -1244,7 +1253,7 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setCreateError("Taak aanmaken mislukt. Probeer het opnieuw.");
+        setCreateError(t("energielabel.fout.taakAanmaken"));
         setUploadProgress(null);
         return;
       }
@@ -1267,7 +1276,7 @@ export default function Home() {
         for (const d of DOCUMENT_FIELDS) {
           const fout = await zetCategorieOver(data.task.id, dropboxPath, d);
           if (fout) {
-            warnings.push(`${d.label}: overzetten naar ClickUp mislukt (${fout})`);
+            warnings.push(t("energielabel.fout.overzettenMislukt", { label: d.label, fout }));
             mis.push({ key: d.key, label: d.label });
             setUploadProgress((p) => (p ? { ...p, docs: { ...p.docs, [d.key]: "error" } } : p));
           } else {
@@ -1310,7 +1319,7 @@ export default function Home() {
         clearDraftLocal(draftId);
       }
     } catch {
-      setCreateError("Taak aanmaken mislukt. Probeer het opnieuw.");
+      setCreateError(t("energielabel.fout.taakAanmaken"));
     } finally {
       setCreating(false);
       // Alleen vanzelf sluiten als alles goed ging; bij een mislukte bijlage
@@ -1407,13 +1416,13 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setDropboxError(data.error ?? "Dropbox-map aanmaken mislukt.");
+        setDropboxError(data.error ?? t("energielabel.fout.dropboxMap"));
         return;
       }
       setDropboxFolder(data);
       void refreshDocFiles(data);
     } catch {
-      setDropboxError("Dropbox-map aanmaken mislukt. Probeer het opnieuw.");
+      setDropboxError(t("energielabel.fout.dropboxMapOpnieuw"));
     } finally {
       setDropboxLoading(false);
     }
@@ -1423,7 +1432,7 @@ export default function Home() {
     const missing = missingRequiredFields;
     if (missing.length > 0) {
       setShowRequiredErrors(true);
-      setRequiredError(`Vul eerst de verplichte velden in: ${missing.map((f) => f.name).join(", ")}.`);
+      setRequiredError(t("energielabel.fout.verplichteVelden", { velden: missing.map((f) => f.name).join(", ") }));
       window.scrollTo(0, 0);
       return;
     }
@@ -1465,7 +1474,7 @@ export default function Home() {
 
             {dropboxLoading && (
               <span className="dbx-strip-text">
-                <span className="spinner" /> Dropbox-map klaarzetten…
+                <span className="spinner" /> {t("energielabel.dropbox.klaarzetten")}
               </span>
             )}
 
@@ -1473,17 +1482,17 @@ export default function Home() {
               <>
                 <span className="dbx-strip-text">
                   <span className="dbx-strip-check" aria-hidden="true">✓</span>
-                  Map aangemaakt — <span className="dbx-folder-path">{dropboxFolder.path}</span>
+                  {t("energielabel.dropbox.mapAangemaakt")} — <span className="dbx-folder-path">{dropboxFolder.path}</span>
                 </span>
                 <span className="dbx-strip-progress-label">
-                  {uploadedCount}/{DOCUMENT_FIELDS.length} geüpload
+                  {t("energielabel.dropbox.geupload", { n: uploadedCount, totaal: DOCUMENT_FIELDS.length })}
                 </span>
                 <button
                   type="button"
                   className="dbx-strip-refresh"
                   onClick={() => refreshDocFiles(dropboxFolder)}
                   disabled={docFilesLoading}
-                  title="Nu verversen"
+                  title={t("energielabel.dropbox.nuVerversen")}
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={docFilesLoading ? "spin" : undefined}>
                     <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -1495,7 +1504,7 @@ export default function Home() {
                   rel="noopener noreferrer"
                   className="btn-open-dbx"
                 >
-                  Openen
+                  {t("energielabel.dropbox.openen")}
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                     <path
                       d="M6 4h6v6M12 4 4 12"
@@ -1513,7 +1522,7 @@ export default function Home() {
               <>
                 <span className="dbx-strip-text conn-err" style={{ margin: 0 }}>{dropboxError}</span>
                 <a href="/instellingen" className="btn-text">
-                  Naar Verbindingen
+                  {t("energielabel.naarVerbindingen")}
                 </a>
               </>
             )}
@@ -1534,7 +1543,11 @@ export default function Home() {
                     )}
                     <span className="dbx-strip-doc-label">{d.label}</span>
                     <span className="dbx-strip-doc-status">
-                      {done ? `${docFiles[d.key]!.length} bestand${docFiles[d.key]!.length > 1 ? "en" : ""}` : "nog niets"}
+                      {done
+                        ? t(docFiles[d.key]!.length > 1 ? "energielabel.dropbox.bestand.meer" : "energielabel.dropbox.bestand.een", {
+                            n: docFiles[d.key]!.length,
+                          })
+                        : t("energielabel.dropbox.nogNiets")}
                     </span>
                   </div>
                 );
@@ -1598,7 +1611,7 @@ export default function Home() {
               aria-pressed={checked}
               onClick={() => setFieldValue(f.id, !checked)}
             >
-              {checked ? "Geïsoleerd" : "Ongeïsoleerd"}
+              {checked ? t("energielabel.veld.geisoleerd") : t("energielabel.veld.ongeisoleerd")}
             </button>
           </div>
         );
@@ -1629,7 +1642,7 @@ export default function Home() {
           <label htmlFor={`f-${f.id}`}>
             {f.name}
             {requiredMark}
-            {showBouwjaarTag && <span className="field-year-tag">BJ {address!.bouwjaar}</span>}
+            {showBouwjaarTag && <span className="field-year-tag">{t("energielabel.veld.bouwjaarTag", { jaar: address!.bouwjaar! })}</span>}
           </label>
           <div className={isOrientatie ? "field-with-compass" : undefined}>
             <select
@@ -1638,7 +1651,7 @@ export default function Home() {
               value={(fieldValues[f.id] as string) ?? ""}
               onChange={(e) => setFieldValue(f.id, e.target.value)}
             >
-              <option value="">Kies…</option>
+              <option value="">{t("energielabel.veld.kies")}</option>
               {f.options.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name}
@@ -1650,8 +1663,8 @@ export default function Home() {
                 type="button"
                 className="btn-compass"
                 onClick={() => setCompassFieldId(f.id)}
-                title="Kies via kompas"
-                aria-label="Kies voorgevelrichting via kompas"
+                title={t("energielabel.veld.kiesViaKompas")}
+                aria-label={t("energielabel.veld.kiesViaKompasAria")}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
@@ -1760,13 +1773,13 @@ export default function Home() {
     <>
       <header className="topline">
         <div>
-          <span className="eyebrow">Nieuwe opdracht</span>
+          <span className="eyebrow">{t("energielabel.nieuweOpdracht")}</span>
         </div>
       </header>
 
       {status === "loading" && (
         <div className="pad" style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}>
-          <p className="lede">ClickUp-gegevens laden…</p>
+          <p className="lede">{t("energielabel.laden")}</p>
         </div>
       )}
 
@@ -1774,7 +1787,7 @@ export default function Home() {
         <div className="pad" style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}>
           <div className="banner is-bad">{statusError}</div>
           <a href="/instellingen" className="btn-text">
-            Naar Verbindingen
+            {t("energielabel.naarVerbindingen")}
           </a>
         </div>
       )}
@@ -1782,8 +1795,8 @@ export default function Home() {
       {/* ---------- STAP 1: adres + basistaak ---------- */}
       {status === "ready" && meta && !createdTaskUrl && step === "search" && (
         <div className="addr-grid">
-          <section className="addr-find" aria-label="Adres zoeken">
-            <h1>Welk pand neem je op?</h1>
+          <section className="addr-find" aria-label={t("energielabel.zoeken.aria")}>
+            <h1>{t("energielabel.zoeken.titel")}</h1>
 
             <button
               className="btn btn-primary btn-block"
@@ -1791,7 +1804,7 @@ export default function Home() {
               disabled={locating}
             >
               {locating && <span className="spinner on-accent" />}
-              <span>{locating ? "Locatie ophalen…" : "📍 Locatie ophalen"}</span>
+              <span>{locating ? t("energielabel.zoeken.locatieBezig") : t("energielabel.zoeken.locatie")}</span>
             </button>
 
             {locationError && <p className="note" style={{ color: "var(--bad)" }}>{locationError}</p>}
@@ -1809,19 +1822,19 @@ export default function Home() {
                   setCreatedTaskUrl(null);
                   setShowManualSearch(true);
                 }}
-                placeholder="Of zoek op straat of postcode"
-                aria-label="Zoek handmatig op adres"
+                placeholder={t("energielabel.zoeken.placeholder")}
+                aria-label={t("energielabel.zoeken.handmatigAria")}
               />
             </div>
-            {searching && <p className="note">Zoeken…</p>}
+            {searching && <p className="note">{t("energielabel.zoeken.bezig")}</p>}
 
-            {nearby && nearby.length === 0 && <p className="note">Geen adressen gevonden in de buurt.</p>}
+            {nearby && nearby.length === 0 && <p className="note">{t("energielabel.zoeken.geenInDeBuurt")}</p>}
 
             {((nearby && nearby.length > 0) || (showManualSearch && suggestions.length > 0)) && (
               <div>
                 <div className="list-head">
                   <span className="eyebrow">
-                    {showManualSearch && suggestions.length > 0 ? "Zoekresultaten" : "Dichtstbijzijnde adressen"}
+                    {showManualSearch && suggestions.length > 0 ? t("energielabel.zoeken.resultaten") : t("energielabel.zoeken.dichtstbij")}
                   </span>
                 </div>
                 <ul className="rows">
@@ -1851,7 +1864,7 @@ export default function Home() {
             <TodayAppointments onPick={pickFromAppointment} context="energielabel" onUseLocation={startNearbySearch} />
           </section>
 
-          <section className="addr-detail" aria-label="Gekozen pand">
+          <section className="addr-detail" aria-label={t("energielabel.pand.aria")}>
             {!address && !loadingAddress && (
               <div className="placeholder">
                 <span className="placeholder-mark">
@@ -1864,7 +1877,7 @@ export default function Home() {
                     <circle cx="12" cy="10" r="2.6" stroke="currentColor" strokeWidth="1.6" />
                   </svg>
                 </span>
-                <p>Bepaal je locatie of zoek een adres. De pandgegevens verschijnen hier.</p>
+                <p>{t("energielabel.pand.leeg")}</p>
               </div>
             )}
 
@@ -1872,20 +1885,20 @@ export default function Home() {
               <div className="pad">
                 <div className="banner" style={{ background: "var(--inset)" }}>
                   <span className="spinner" />
-                  <span>Pandgegevens ophalen uit de BAG…</span>
+                  <span>{t("energielabel.pand.ophalen")}</span>
                 </div>
               </div>
             )}
 
             {address && !loadingAddress && (
               <div className="pad">
-                <span className="eyebrow">Controleer het adres</span>
+                <span className="eyebrow">{t("energielabel.pand.controleer")}</span>
                 <div className="card">
                   {editingAddr ? (
                     <div className="addr-edit">
                       <div className="addr-edit-row">
                         <div className="field">
-                          <label htmlFor="f-huisnr">Huisnummer</label>
+                          <label htmlFor="f-huisnr">{t("energielabel.adres.huisnummer")}</label>
                           <input
                             id="f-huisnr"
                             className="control"
@@ -1895,7 +1908,7 @@ export default function Home() {
                           />
                         </div>
                         <div className="field">
-                          <label htmlFor="f-huisletter">Letter</label>
+                          <label htmlFor="f-huisletter">{t("energielabel.adres.letter")}</label>
                           <input
                             id="f-huisletter"
                             className="control"
@@ -1904,7 +1917,7 @@ export default function Home() {
                           />
                         </div>
                         <div className="field">
-                          <label htmlFor="f-toevoeging">Toevoeging</label>
+                          <label htmlFor="f-toevoeging">{t("energielabel.adres.toevoeging")}</label>
                           <input
                             id="f-toevoeging"
                             className="control"
@@ -1915,7 +1928,7 @@ export default function Home() {
                       </div>
                       <div className="addr-edit-row">
                         <div className="field is-wide">
-                          <label htmlFor="f-postcode">Postcode</label>
+                          <label htmlFor="f-postcode">{t("energielabel.adres.postcode")}</label>
                           <input
                             id="f-postcode"
                             className="control"
@@ -1926,10 +1939,10 @@ export default function Home() {
                       </div>
                       <div className="addr-edit-actions">
                         <button className="btn btn-quiet" onClick={() => setEditingAddr(false)}>
-                          Annuleren
+                          {t("energielabel.annuleren")}
                         </button>
                         <button className="btn btn-primary" onClick={saveAddressEdit}>
-                          Opslaan
+                          {t("energielabel.opslaan")}
                         </button>
                       </div>
                     </div>
@@ -1954,14 +1967,14 @@ export default function Home() {
                                 strokeLinejoin="round"
                               />
                             </svg>
-                            Aanpassen
+                            {t("energielabel.aanpassen")}
                           </button>
                         </div>
                       </div>
                       <dl className="facts">
                         <div className="fact">
-                          <dt>Bouwjaar</dt>
-                          <dd>{address.bouwjaar ?? "Onbekend"}</dd>
+                          <dt>{t("energielabel.bouwjaar")}</dt>
+                          <dd>{address.bouwjaar ?? t("energielabel.onbekend")}</dd>
                         </div>
                       </dl>
                     </>
@@ -1970,16 +1983,16 @@ export default function Home() {
 
                 <div className="section">
                   <div className="section-head">
-                    <h2>Nieuwe taak in ClickUp</h2>
+                    <h2>{t("energielabel.taak.nieuw")}</h2>
                   </div>
                   <div className="section-body">
                     <div className="field is-wide">
-                      <label>Taaknaam</label>
+                      <label>{t("energielabel.taak.naam")}</label>
                       <p className="note" style={{ padding: 0, margin: 0 }}>{titel}</p>
                     </div>
 
                     <div className="field">
-                      <label htmlFor="f-priority">Prioriteit</label>
+                      <label htmlFor="f-priority">{t("energielabel.taak.prioriteit")}</label>
                       <select
                         id="f-priority"
                         className="control"
@@ -1995,7 +2008,7 @@ export default function Home() {
                     </div>
 
                     <div className="field">
-                      <label htmlFor="f-status">Status</label>
+                      <label htmlFor="f-status">{t("energielabel.taak.status")}</label>
                       <select
                         id="f-status"
                         className="control"
@@ -2013,7 +2026,7 @@ export default function Home() {
                 </div>
 
                 <button className="btn btn-primary btn-block" onClick={goToFields}>
-                  Verder naar technische velden →
+                  {t("energielabel.naarVelden")}
                 </button>
               </div>
             )}
@@ -2030,7 +2043,7 @@ export default function Home() {
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                Terug naar adres
+                {t("energielabel.terugNaarAdres")}
               </button>
               <h2 style={{ fontSize: 17 }}>{titel}</h2>
             </div>
@@ -2054,15 +2067,15 @@ export default function Home() {
                       onClick={() => toggleGroup(group.key)}
                       aria-expanded={!collapsed}
                     >
-                      <h2>{group.title}</h2>
+                      <h2>{groepTitel(group.key)}</h2>
                       {/* Een ingeklapte groep mag niet verbergen dat er nog
                           verplichte velden leeg staan. */}
                       {missingHere > 0 && (
                         <span className="section-missing">
-                          {missingHere} nog leeg
+                          {t("energielabel.groep.nogLeeg", { n: missingHere })}
                         </span>
                       )}
-                      <span className="section-count">{group.fields.length} velden</span>
+                      <span className="section-count">{t("energielabel.groep.velden", { n: group.fields.length })}</span>
                       <svg
                         className={`chev${collapsed ? "" : " is-open"}`}
                         width="16"
@@ -2086,22 +2099,22 @@ export default function Home() {
 
           <div className="form-foot">
             <button className="btn btn-quiet is-danger" onClick={resetSearch}>
-              Annuleren
+              {t("energielabel.annuleren")}
             </button>
             {/* Vóór het klikken laten zien wat er nog mist, met één tik naar
                 het eerste lege veld — i.p.v. een foutmelding bovenaan waarin
                 je zelf de veldnamen moet terugzoeken. */}
             {missingRequiredFields.length > 0 ? (
               <button type="button" className="form-foot-missing" onClick={jumpToFirstMissing}>
-                Nog {missingRequiredFields.length}{" "}
-                {missingRequiredFields.length === 1 ? "verplicht veld" : "verplichte velden"} leeg — ga
-                erheen →
+                {t(missingRequiredFields.length === 1 ? "energielabel.voet.nogLeeg.een" : "energielabel.voet.nogLeeg.meer", {
+                  n: missingRequiredFields.length,
+                })}
               </button>
             ) : (
-              <span className="form-foot-ok">✓ Alle verplichte velden ingevuld</span>
+              <span className="form-foot-ok">{t("energielabel.voet.alleIngevuld")}</span>
             )}
             <button className="btn btn-primary" onClick={goToDropboxStep}>
-              Verder naar Dropbox →
+              {t("energielabel.naarDropbox")}
             </button>
           </div>
         </>
@@ -2116,7 +2129,7 @@ export default function Home() {
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                Terug
+                {t("energielabel.terug")}
               </button>
               <h2 style={{ fontSize: 17 }}>{titel}</h2>
             </div>
@@ -2126,8 +2139,8 @@ export default function Home() {
             {documentationGroup && (
               <div className="section">
                 <div className="section-head">
-                  <h2>Overig — {documentationGroup.title}</h2>
-                  <span className="section-count">{documentationRestFields.length} velden</span>
+                  <h2>{t("energielabel.groep.overig", { groep: groepTitel(documentationGroup.key) })}</h2>
+                  <span className="section-count">{t("energielabel.groep.velden", { n: documentationRestFields.length })}</span>
                 </div>
                 <div className="section-body">{documentationRestFields.map(renderField)}</div>
               </div>
@@ -2136,10 +2149,10 @@ export default function Home() {
 
           <div className="form-foot">
             <button className="btn btn-quiet is-danger" onClick={resetSearch}>
-              Annuleren
+              {t("energielabel.annuleren")}
             </button>
             <button className="btn btn-primary" onClick={goToDocumentsStep}>
-              Verder naar Documenten →
+              {t("energielabel.naarDocumenten")}
             </button>
           </div>
         </>
@@ -2153,7 +2166,7 @@ export default function Home() {
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Terug
+              {t("energielabel.terug")}
             </button>
             <h2 style={{ fontSize: 17 }}>{titel}</h2>
           </div>
@@ -2163,12 +2176,12 @@ export default function Home() {
 
             <div className="section">
               <div className="section-head">
-                <h2>Documenten</h2>
+                <h2>{t("energielabel.documenten")}</h2>
                 <button type="button" className="btn-refresh" onClick={goToDocumentsStep} disabled={docFilesLoading}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={docFilesLoading ? "spin" : undefined}>
                     <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                  {docFilesLoading ? "Bezig met verversen…" : "Verversen"}
+                  {docFilesLoading ? t("energielabel.verversenBezig") : t("energielabel.verversen")}
                 </button>
               </div>
               <div className="doc-list">
@@ -2188,7 +2201,7 @@ export default function Home() {
                               rel="noopener noreferrer"
                               className="doc-open-folder"
                             >
-                              Uploaden
+                              {t("energielabel.uploaden")}
                               <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                                 <path d="M6 4h6v6M12 4 4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                               </svg>
@@ -2226,32 +2239,34 @@ export default function Home() {
                             />
                           </svg>
                         </span>
-                        Bestand kiezen
+                        {t("energielabel.bestandKiezen")}
                       </button>
 
                       {uploadTaken
-                        .filter((t) => t.folder === d.folder && t.dropbox !== "done")
-                        .map((t) => (
-                          <div key={t.id} className="doc-upload-progress">
+                        .filter((taak) => taak.folder === d.folder && taak.dropbox !== "done")
+                        .map((taak) => (
+                          <div key={taak.id} className="doc-upload-progress">
                             <span className="note" style={{ padding: 0, fontWeight: 600, color: "var(--ink)" }}>
-                              {t.name}
+                              {taak.name}
                             </span>
-                            {t.dropbox === "uploading" && (
+                            {taak.dropbox === "uploading" && (
                               <>
                                 <div className="doc-upload-bar">
-                                  <div className="doc-upload-bar-fill" style={{ width: `${t.pct}%` }} />
+                                  <div className="doc-upload-bar-fill" style={{ width: `${taak.pct}%` }} />
                                 </div>
                                 <span className="note" style={{ padding: 0 }}>
-                                  Dropbox: {t.pct}%
-                                  {formatEta(t.etaSeconds) && (
-                                    <span className="upload-eta"> · nog {formatEta(t.etaSeconds)}</span>
+                                  Dropbox: {taak.pct}%
+                                  {formatEta(taak.etaSeconds, t) && (
+                                    <span className="upload-eta">
+                                      {t("energielabel.upload.nog", { tijd: formatEta(taak.etaSeconds, t) })}
+                                    </span>
                                   )}
                                 </span>
                               </>
                             )}
-                            {t.dropbox === "error" && (
+                            {taak.dropbox === "error" && (
                               <span className="note" style={{ padding: 0, color: "var(--bad)" }}>
-                                ⚠ {t.dropboxError}
+                                ⚠ {taak.dropboxError}
                               </span>
                             )}
                           </div>
@@ -2259,10 +2274,10 @@ export default function Home() {
 
                       {!dropboxFolder ? (
                         <p className="note" style={{ padding: 0, margin: 0 }}>
-                          Dropbox-map nog niet aangemaakt.
+                          {t("energielabel.dropbox.nogNietAangemaakt")}
                         </p>
                       ) : docFilesLoading && !files ? (
-                        <p className="note" style={{ padding: 0, margin: 0 }}>Bestanden ophalen…</p>
+                        <p className="note" style={{ padding: 0, margin: 0 }}>{t("energielabel.bestandenOphalen")}</p>
                       ) : files && files.length > 0 ? (
                         <ul className="doc-files">
                           {files.map((f) => (
@@ -2273,7 +2288,7 @@ export default function Home() {
                                 <button
                                   type="button"
                                   className="doc-file-del"
-                                  aria-label={`${f.name} verwijderen`}
+                                  aria-label={t("energielabel.bestand.verwijderenAria", { naam: f.name })}
                                   onClick={() =>
                                     setTeVerwijderen(
                                       teVerwijderen === `${d.folder}/${f.name}` ? null : `${d.folder}/${f.name}`
@@ -2285,17 +2300,17 @@ export default function Home() {
                               </span>
                               {teVerwijderen === `${d.folder}/${f.name}` && (
                                 <span className="doc-file-confirm">
-                                  <span>Verwijderen?</span>
+                                  <span>{t("energielabel.bestand.verwijderen")}</span>
                                   <button
                                     type="button"
                                     className="doc-file-yes"
                                     disabled={verwijderBezig === `${d.folder}/${f.name}`}
                                     onClick={() => verwijderDocBestand(d.folder, f.name)}
                                   >
-                                    {verwijderBezig === `${d.folder}/${f.name}` ? "Bezig…" : "Ja, verwijder"}
+                                    {verwijderBezig === `${d.folder}/${f.name}` ? t("energielabel.bezig") : t("energielabel.jaVerwijder")}
                                   </button>
                                   <button type="button" className="doc-file-no" onClick={() => setTeVerwijderen(null)}>
-                                    Nee
+                                    {t("energielabel.nee")}
                                   </button>
                                 </span>
                               )}
@@ -2304,7 +2319,7 @@ export default function Home() {
                         </ul>
                       ) : (
                         <p className="note" style={{ padding: 0, margin: 0 }}>
-                          Nog niets geüpload naar deze map.
+                          {t("energielabel.nogNietsGeupload")}
                         </p>
                       )}
                     </div>
@@ -2316,7 +2331,7 @@ export default function Home() {
 
           <div className="form-foot">
             <button className="btn btn-quiet is-danger" onClick={resetSearch}>
-              Annuleren
+              {t("energielabel.annuleren")}
             </button>
             <button
               className="btn btn-primary"
@@ -2324,17 +2339,17 @@ export default function Home() {
               disabled={creating || lopendeUploads > 0}
               title={
                 lopendeUploads > 0
-                  ? "De foto's staan nog niet allemaal in Dropbox; ClickUp zou ze dan missen."
+                  ? t("energielabel.uploadsLopenTitel")
                   : undefined
               }
             >
               {(creating || lopendeUploads > 0) && <span className="spinner on-accent" />}
               <span>
                 {lopendeUploads > 0
-                  ? `Nog ${lopendeUploads} bestand${lopendeUploads === 1 ? "" : "en"} aan het uploaden…`
+                  ? t(lopendeUploads === 1 ? "energielabel.uploadsLopen.een" : "energielabel.uploadsLopen.meer", { n: lopendeUploads })
                   : creating
-                    ? "Bezig…"
-                    : "Taak aanmaken in ClickUp"}
+                    ? t("energielabel.bezig")
+                    : t("energielabel.taakAanmaken")}
               </span>
             </button>
           </div>
@@ -2348,7 +2363,7 @@ export default function Home() {
 
       {createdTaskUrl && (
         <div className="pad" style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}>
-          <div className="banner is-ok">✓ Taak aangemaakt in ClickUp.</div>
+          <div className="banner is-ok">{t("energielabel.resultaat.aangemaakt")}</div>
 
           <div className="result-links">
             <a href={createdTaskUrl} target="_blank" rel="noopener noreferrer" className="result-link is-clickup">
@@ -2358,8 +2373,8 @@ export default function Home() {
                 </svg>
               </span>
               <span className="result-link-text">
-                <b>Open taak in ClickUp</b>
-                <span>Bekijk en werk de opname verder af</span>
+                <b>{t("energielabel.resultaat.openTaak")}</b>
+                <span>{t("energielabel.resultaat.openTaakSub")}</span>
               </span>
               <svg className="result-link-arrow" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M6 4h6v6M12 4 4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -2377,8 +2392,8 @@ export default function Home() {
                   </svg>
                 </span>
                 <span className="result-link-text">
-                  <b>Open Dropbox-map</b>
-                  <span>Alle documenten voor dit adres</span>
+                  <b>{t("energielabel.resultaat.openMap")}</b>
+                  <span>{t("energielabel.resultaat.openMapSub")}</span>
                 </span>
                 <svg className="result-link-arrow" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M6 4h6v6M12 4 4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -2386,8 +2401,7 @@ export default function Home() {
               </a>
             ) : (
               <p className="note" style={{ padding: 0, margin: 0 }}>
-                Geen Dropbox-map aangemaakt — Dropbox is nog niet gekoppeld
-                (zie Verbindingen).
+                {t("energielabel.resultaat.geenMap")}
               </p>
             )}
           </div>
@@ -2398,8 +2412,7 @@ export default function Home() {
                 <p key={w} style={{ margin: "2px 0" }}>⚠ {w}</p>
               ))}
               <p style={{ margin: "8px 0 0", color: "var(--ink-soft)" }}>
-                De taak staat er wel — alleen deze bijlagen ontbreken nog. De bestanden staan veilig in
-                Dropbox, dus opnieuw proberen kan zonder risico.
+                {t("energielabel.resultaat.bijlagenOntbreken")}
               </p>
             </div>
           )}
@@ -2416,8 +2429,8 @@ export default function Home() {
               {opnieuwBezig && <span className="spinner on-accent" />}
               <span>
                 {opnieuwBezig
-                  ? "Bezig met opnieuw overzetten…"
-                  : `Bijlagen opnieuw overzetten (${mislukteDocs.length})`}
+                  ? t("energielabel.resultaat.opnieuwBezig")
+                  : t("energielabel.resultaat.opnieuw", { n: mislukteDocs.length })}
               </span>
             </button>
           )}
@@ -2426,7 +2439,7 @@ export default function Home() {
             className={mislukteDocs.length > 0 ? "btn btn-quiet btn-block" : "btn btn-primary btn-block"}
             onClick={resetSearch}
           >
-            Nieuwe opdracht
+            {t("energielabel.nieuweOpdracht")}
           </button>
         </div>
       )}
@@ -2449,7 +2462,7 @@ export default function Home() {
           const spinner = <span className="spinner" aria-hidden="true" />;
           return (
             <div className="upload-overlay">
-              <div className="upload-modal mt-modal" role="dialog" aria-label="Uploaden naar ClickUp">
+              <div className="upload-modal mt-modal" role="dialog" aria-label={t("energielabel.popup.aria")}>
                 <div className="mt-head">
                   <span className={`mt-icon${fouten > 0 ? " is-error" : ""}`} aria-hidden="true">
                     {fouten > 0 ? "!" : afgerond ? "✓" : spinner}
@@ -2457,14 +2470,14 @@ export default function Home() {
                   <div className="mt-head-tekst">
                     <h3>
                       {!afgerond
-                        ? "Bezig met uploaden naar ClickUp"
+                        ? t("energielabel.popup.bezig")
                         : fouten > 0
-                          ? `Taak staat in ClickUp, ${fouten} bijlage${fouten === 1 ? "" : "n"} mislukt`
-                          : "Klaar — taak staat in ClickUp"}
+                          ? t(fouten === 1 ? "energielabel.popup.fouten.een" : "energielabel.popup.fouten.meer", { n: fouten })
+                          : t("energielabel.popup.klaar")}
                     </h3>
                     <p className="mt-num">
-                      {klaar} van {totaal}
-                      {afgerond ? "" : " klaar"} · {formatEta(uploadElapsed)}
+                      {t("energielabel.popup.voortgang", { klaar, totaal })}
+                      {afgerond ? "" : t("energielabel.popup.klaarSuffix")} · {formatEta(uploadElapsed, t)}
                     </p>
                     {!afgerond && (
                       <div className="doc-upload-bar">
@@ -2477,8 +2490,8 @@ export default function Home() {
                 <div className="mt-body">
                   <ul className="mt-rows">
                     <li className="mt-row">
-                      <span className="mt-k">Taak</span>
-                      <span className="mt-v">{uploadProgress.taskDone ? "Aangemaakt in ClickUp" : "Aanmaken in ClickUp"}</span>
+                      <span className="mt-k">{t("energielabel.popup.taak")}</span>
+                      <span className="mt-v">{uploadProgress.taskDone ? t("energielabel.popup.aangemaakt") : t("energielabel.popup.aanmaken")}</span>
                       {uploadProgress.taskDone ? (
                         <span className="mt-s is-done">✓</span>
                       ) : (
@@ -2492,15 +2505,15 @@ export default function Home() {
                           <span className="mt-k">{d.key}</span>
                           <span className="mt-v">{d.label.replace(/^D\d+\s*/, "")}</span>
                           {st === "done" ? (
-                            <span className="mt-s is-done">✓ in ClickUp</span>
+                            <span className="mt-s is-done">{t("energielabel.popup.inClickup")}</span>
                           ) : st === "error" ? (
-                            <span className="mt-s is-error">⚠ mislukt</span>
+                            <span className="mt-s is-error">{t("energielabel.popup.mislukt")}</span>
                           ) : st === "skip" ? (
-                            <span className="mt-s">geen Dropbox</span>
+                            <span className="mt-s">{t("energielabel.popup.geenDropbox")}</span>
                           ) : bezigMet === d.key ? (
-                            <span className="mt-s">{spinner} overzetten…</span>
+                            <span className="mt-s">{spinner} {t("energielabel.popup.overzetten")}</span>
                           ) : (
-                            <span className="mt-s">wacht</span>
+                            <span className="mt-s">{t("energielabel.popup.wacht")}</span>
                           )}
                         </li>
                       );
@@ -2509,16 +2522,16 @@ export default function Home() {
                 </div>
 
                 <div className="mt-foot">
-                  {!afgerond && <span className="mt-foot-tekst">Laat dit scherm open tot het klaar is</span>}
+                  {!afgerond && <span className="mt-foot-tekst">{t("energielabel.popup.openLaten")}</span>}
                   {/* Bij een fout blijft de pop-up staan tot de opnemer zelf
                       sluit: in één seconde is niet te lezen wát er misging. */}
                   {afgerond && fouten > 0 && (
                     <>
                       <span className="mt-foot-tekst">
-                        De bestanden staan veilig in Dropbox. Op het volgende scherm kun je het opnieuw proberen.
+                        {t("energielabel.popup.veilig")}
                       </span>
                       <button type="button" className="btn btn-primary" onClick={() => setUploadProgress(null)}>
-                        Sluiten
+                        {t("energielabel.sluiten")}
                       </button>
                     </>
                   )}
