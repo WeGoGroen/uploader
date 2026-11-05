@@ -11,7 +11,7 @@ import { taskToAddress } from "@/lib/sharepoint-match";
 import { bijlagenUitVelden, bouwGroepen, splitsCode, veldTekst, type RuwVeld } from "@/lib/opname-velden";
 import { bouwOpnameDossier, type DossierFoto } from "@/lib/opname-pdf";
 import type { DossierGroep } from "@/lib/opname-velden";
-import type { Voorgevel } from "@/lib/opname-pdf";
+import type { KetelBeeld, Voorgevel } from "@/lib/opname-pdf";
 
 /**
  * Het opnameformulier uit ClickUp als PDF in de projectmap.
@@ -132,7 +132,7 @@ async function haalAfbeeldingen(
  */
 export async function dossierVoorTaak(
   taskId: string,
-  opties: { opnieuw?: boolean; extraGroepen?: DossierGroep[]; kaartAlsTerugval?: boolean } = {}
+  opties: { opnieuw?: boolean; extraGroepen?: DossierGroep[]; kaartAlsTerugval?: boolean; ketel?: KetelBeeld | null } = {}
 ): Promise<DossierUitkomst> {
   let token: string;
   try {
@@ -244,6 +244,7 @@ export async function dossierVoorTaak(
     groepen,
     extraGroepen: opties.extraGroepen,
     voorgevel,
+    ketel: opties.ketel,
     fotos,
     andereBijlagen: anders.map((b) => ({ code: b.code, naam: b.naam })),
     opgehaaldOp: new Date(),

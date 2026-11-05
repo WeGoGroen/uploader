@@ -82,6 +82,18 @@ export interface Voorgevel {
   opmerking: string | null;
 }
 
+/**
+ * De cv-ketel als beeld: de foto met het plaatje aangewezen, ernaast het
+ * knipstuk van merk en type, en wat erop staat uitgeschreven.
+ */
+export interface KetelBeeld {
+  foto: Uint8Array;
+  fotoNaam: string;
+  knip: Uint8Array;
+  knipNaam: string;
+  regels: { label: string; waarde: string; reden?: string | null }[];
+}
+
 export interface DossierInvoer {
   adres: string;
   postcodePlaats: string;
@@ -100,6 +112,8 @@ export interface DossierInvoer {
   extraGroepen?: DossierGroep[];
   /** Voor de kompastekening onder groep A. Ontbreekt hij, dan geen tekening. */
   voorgevel?: Voorgevel | null;
+  /** Het ketelpaneel, direct na sectie F. Ontbreekt het, dan geen paneel. */
+  ketel?: KetelBeeld | null;
   fotos: DossierFoto[];
   /** Bijlagen die geen afbeelding zijn — video's, een LAZ-scan. Die kunnen niet
       afgedrukt worden, maar horen wel vermeld: anders lijkt het dossier
@@ -678,6 +692,73 @@ function tekenKompasPaneel(vel: Vel, v: Voorgevel): void {
   vel.y = top - hoogte - 8;
 }
 
+/** Het ketelpaneel: links de foto, rechts het knipstuk en de uitgeschreven tekst. */
+async function tekenKetelPaneel(vel: Vel, doc: PDFDocument, k: KetelBeeld): Promise<void> {
+  const foto = await doc.embedJpg(k.foto);
+  const knipBeeld = await doc.embedJpg(k.knip);
+  const linksB = 258;
+  const linksH = (linksB * foto.height) / foto.width;
+  const rechtsX = MARGE.links + PANEEL.padding + linksB + 16;
+  const rechtsB = MARGE.links + BREEDTE - PANEEL.padding - rechtsX;
+  const knipH = (rechtsB * knipBeeld.height) / knipBeeld.width;
+  const kop = REGEL.label + 12;
+
+  const regels = k.regels.map((r) => ({
+    label: r.label,
+    waarde: knip(r.waarde, vel.normaal, MAAT.waarde, rechtsB),
+    reden: r.reden ? knip(r.reden, vel.normaal, MAAT.bijschrift, rechtsB) : [],
+  }));
+  const tekstH = regels.reduce(
+    (som, r) => som + REGEL.label + 2 + r.waarde.length * REGEL.waarde + r.reden.length * REGEL.bijschrift + 7,
+    0
+  );
+  const inhoud = Math.max(linksH + REGEL.bijschrift + 4, knipH + REGEL.bijschrift + 10 + tekstH);
+  const hoogte = 2 * PANEEL.padding + kop + inhoud;
+
+  vel.ruimte(hoogte + 8);
+  const top = vel.y;
+  vel.pagina.drawSvgPath(rondPad(BREEDTE, hoogte, PANEEL.radius), {
+    x: MARGE.links,
+    y: top,
+    borderColor: KLEUR.rand,
+    borderWidth: 0.75,
+  });
+  const x = MARGE.links + PANEEL.padding;
+  const bovenkant = top - PANEEL.padding;
+  vel.schrijf("F \u00b7 CV-KETEL", x, bovenkant - REGEL.label + 2, MAAT.kopKlein, KLEUR.zacht, true);
+  const y0 = bovenkant - kop;
+
+  vel.pagina.drawImage(foto, { x, y: y0 - linksH, width: linksB, height: linksH });
+  vel.schrijf(k.fotoNaam, x, y0 - linksH - REGEL.bijschrift, MAAT.bijschrift, KLEUR.zacht);
+
+  vel.pagina.drawImage(knipBeeld, { x: rechtsX, y: y0 - knipH, width: rechtsB, height: knipH });
+  vel.pagina.drawRectangle({
+    x: rechtsX,
+    y: y0 - knipH,
+    width: rechtsB,
+    height: knipH,
+    borderColor: rgb(0.102, 0.529, 0.282),
+    borderWidth: 1.5,
+  });
+  let y = y0 - knipH - REGEL.bijschrift;
+  vel.schrijf(`Knipstuk uit ${k.knipNaam}`, rechtsX, y, MAAT.bijschrift, KLEUR.zacht);
+  y -= 12;
+  for (const r of regels) {
+    vel.schrijf(r.label, rechtsX, y - MAAT.label, MAAT.label, KLEUR.zacht);
+    y -= REGEL.label + 2;
+    for (const w of r.waarde) {
+      vel.schrijf(w, rechtsX, y - MAAT.waarde, MAAT.waarde, KLEUR.tekst);
+      y -= REGEL.waarde;
+    }
+    for (const w of r.reden) {
+      vel.schrijf(w, rechtsX, y - MAAT.bijschrift, MAAT.bijschrift, KLEUR.attentie);
+      y -= REGEL.bijschrift;
+    }
+    y -= 7;
+  }
+  vel.y = top - hoogte - 8;
+}
+
 function tekenSectiekop(vel: Vel, titel: string, onder: string): void {
   vel.ruimte(REGEL.waarde * 3);
   vel.y -= MAAT.sectie;
@@ -862,6 +943,10 @@ export async function bouwOpnameDossier(invoer: DossierInvoer): Promise<Uint8Arr
   for (const groep of invoer.extraGroepen ?? []) {
     tekenGroep(vel, groep, 3);
   }
+
+  /* Een beeld dat niet te openen is mag het formulier niet kosten; het paneel
+     tekent pas als beide beelden zijn ingeladen. */
+  if (invoer.ketel) await tekenKetelPaneel(vel, doc, invoer.ketel).catch(() => undefined);
 
   /* --- De bijlagen die geen foto zijn ------------------------------------- */
 

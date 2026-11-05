@@ -59,3 +59,19 @@ describe("bouwOpnameDossier", () => {
     expect(pdf.byteLength).toBeGreaterThan(1000);
   });
 });
+
+describe("het ketelpaneel", () => {
+  const basis = {
+    adres: "De Zon 26", postcodePlaats: "Amstelveen", taakId: "x", taakNaam: "x", status: "x",
+    adviseur: null, gebouwtype: null, bouwjaar: null, aangemaaktMs: null, streefdatumMs: null,
+    groepen: [], fotos: [], andereBijlagen: [], opgehaaldOp: new Date(),
+  };
+
+  it("laat het formulier niet mislukken op een beeld dat niet te openen is", async () => {
+    const pdf = await bouwOpnameDossier({
+      ...basis,
+      ketel: { foto: new Uint8Array([1, 2, 3]), knip: new Uint8Array([4]), fotoNaam: "a", knipNaam: "b", regels: [] },
+    });
+    expect(pdf.byteLength).toBeGreaterThan(500);
+  });
+});

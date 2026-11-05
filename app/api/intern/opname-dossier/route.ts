@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isInternRequest } from "@/lib/intern-auth";
 import { dossierVoorTaak } from "@/lib/opname-dossier";
 import type { DossierGroep } from "@/lib/opname-velden";
+import type { KetelBeeld } from "@/lib/opname-pdf";
 
 export const maxDuration = 300;
 
@@ -15,13 +16,32 @@ export const maxDuration = 300;
  * Standaard gebeurt er niets als het bestand er al staat; met `opnieuw: true`
  * wordt het overschreven, bijvoorbeeld nadat er in ClickUp iets is bijgewerkt.
  */
+interface KetelInvoer {
+  foto?: string;
+  knip?: string;
+  fotoNaam?: string;
+  knipNaam?: string;
+  regels?: { label: string; waarde: string; reden?: string | null }[];
+}
+
+function naarKetelBeeld(k: KetelInvoer | undefined): KetelBeeld | null {
+  if (!k?.foto || !k.knip) return null;
+  return {
+    foto: Buffer.from(k.foto, "base64"),
+    knip: Buffer.from(k.knip, "base64"),
+    fotoNaam: k.fotoNaam ?? "",
+    knipNaam: k.knipNaam ?? "",
+    regels: Array.isArray(k.regels) ? k.regels : [],
+  };
+}
+
 export async function POST(request: Request) {
   if (!isInternRequest(request)) {
     return NextResponse.json({ error: "niet_toegestaan" }, { status: 401 });
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { taskId?: string; opnieuw?: boolean; extraGroepen?: DossierGroep[]; kaartAlsTerugval?: boolean }
+    | { taskId?: string; opnieuw?: boolean; extraGroepen?: DossierGroep[]; kaartAlsTerugval?: boolean; ketel?: KetelInvoer }
     | null;
   const taskId = body?.taskId?.trim() ?? "";
   if (!taskId) return NextResponse.json({ error: "taskId ontbreekt" }, { status: 400 });
@@ -38,6 +58,8 @@ export async function POST(request: Request) {
       // Alleen voor het eenmalig bijwerken van lopende dossiers van vóór de
       // kompasmeting: dan mag PDOK de graden leveren. Standaard nooit.
       kaartAlsTerugval: body?.kaartAlsTerugval === true,
+      // Het ketelpaneel: de beelden maakt het Control Center, hier wordt alleen getekend.
+      ketel: naarKetelBeeld(body?.ketel),
       extraGroepen: Array.isArray(body?.extraGroepen) ? body.extraGroepen : undefined,
     });
     // 200 ook als het dossier er niet kwam: dít verzoek is gelukt, en de agent
