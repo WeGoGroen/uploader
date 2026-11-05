@@ -48,9 +48,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <LocationPermission />
-        <UploadResume />
         <TaalProvider taal={taal}>
+          <LocationPermission />
+          <UploadResume />
           <RechtenProvider rechten={rechten} naam={sessie?.naam ?? null}>
             <div className="shell">
               <Sidebar rechten={rechten} />

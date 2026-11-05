@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useRechten } from "@/components/RechtenProvider";
+import { useTaal } from "@/components/TaalProvider";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   forgetTasks,
@@ -51,6 +52,7 @@ export default function UploadResume() {
   const pad = usePathname();
   const opDashboard = pad === "/" || pad.startsWith("/media");
   const rechten = useRechten();
+  const { t } = useTaal();
   const [ids, setIds] = useState<string[]>([]);
   const [dismissed, setDismissed] = useState(false);
   const allTasks = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
@@ -79,9 +81,9 @@ export default function UploadResume() {
   */
   const magHervatten = (folderPath: string) =>
     /NEN/i.test(folderPath) ? rechten.nen : /Media/i.test(folderPath) ? rechten.media : rechten.energielabel;
-  const tasks = allTasks.filter((t) => ids.includes(t.id) && magHervatten(t.folderPath));
-  const busy = tasks.some((t) => t.dropbox === "uploading");
-  const failed = tasks.filter((t) => t.dropbox === "error");
+  const tasks = allTasks.filter((taak) => ids.includes(taak.id) && magHervatten(taak.folderPath));
+  const busy = tasks.some((taak) => taak.dropbox === "uploading");
+  const failed = tasks.filter((taak) => taak.dropbox === "error");
 
   async function opnieuw(teDoen: string[]) {
     setHerstart((v) => [...v, ...teDoen]);
@@ -98,18 +100,18 @@ export default function UploadResume() {
   // klopt als er tussendoor nog een upload bij komt.
   useEffect(() => {
     if (tasks.length === 0 || busy || failed.length > 0) return;
-    const t = setTimeout(() => setDismissed(true), 8000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setDismissed(true), 8000);
+    return () => clearTimeout(timer);
   }, [tasks.length, busy, failed.length]);
 
   if (opDashboard || dismissed || tasks.length === 0) return null;
 
   const n = tasks.length;
   const heading = busy
-    ? `${n} upload${n === 1 ? "" : "s"} van een vorige sessie ${n === 1 ? "wordt" : "worden"} hervat…`
+    ? t(n === 1 ? "media.hervat.bezig.een" : "media.hervat.bezig.meer", { n })
     : failed.length > 0
-      ? `${failed.length} van ${n} upload${n === 1 ? "" : "s"} uit een vorige sessie is mislukt`
-      : `${n} upload${n === 1 ? "" : "s"} uit een vorige sessie afgerond`;
+      ? t(n === 1 ? "media.hervat.mislukt.een" : "media.hervat.mislukt.meer", { f: failed.length, n })
+      : t(n === 1 ? "media.hervat.afgerond.een" : "media.hervat.afgerond.meer", { n });
 
   return (
     <div className={`resume-panel${failed.length > 0 && !busy ? " is-bad" : ""}`} role="status">
@@ -121,12 +123,12 @@ export default function UploadResume() {
         <button
           type="button"
           className="resume-panel-close"
-          aria-label="Melding sluiten"
-          title={busy ? "Verbergen — de uploads gaan door" : "Verbergen"}
+          aria-label={t("media.hervat.sluiten")}
+          title={busy ? t("media.hervat.verbergenBezig") : t("media.hervat.verbergen")}
           onClick={() => {
             // Mislukte uploads ook echt uit de wachtrij halen, anders komt
             // dezelfde melding bij elke paginaopening terug tot ze verlopen.
-            if (!busy && failed.length > 0) forgetTasks(failed.map((t) => t.id));
+            if (!busy && failed.length > 0) forgetTasks(failed.map((taak) => taak.id));
             setDismissed(true);
           }}
         >
@@ -134,29 +136,29 @@ export default function UploadResume() {
         </button>
       </div>
       <ul className="resume-panel-list">
-        {tasks.map((t: UploadTask) => (
-          <li key={t.id}>
+        {tasks.map((taak: UploadTask) => (
+          <li key={taak.id}>
             {/* Het adres brengt je naar de opname zelf — eerder was er geen
                 enkele weg terug vanuit deze melding. */}
-            <a className="resume-panel-addr" href={opnameLink(t.folderPath)}>
-              {addressFromPath(t.folderPath)}
+            <a className="resume-panel-addr" href={opnameLink(taak.folderPath)}>
+              {addressFromPath(taak.folderPath)}
             </a>
             <span className="resume-panel-file">
-              {t.folder} · {t.name}
+              {taak.folder} · {taak.name}
             </span>
-            {t.dropbox === "error" ? (
+            {taak.dropbox === "error" ? (
               <button
                 type="button"
                 className="resume-panel-retry"
-                onClick={() => opnieuw([t.id])}
-                disabled={herstart.includes(t.id)}
-                title={t.dropboxError ?? "Mislukt"}
+                onClick={() => opnieuw([taak.id])}
+                disabled={herstart.includes(taak.id)}
+                title={taak.dropboxError ?? t("media.hervat.mislukt")}
               >
-                {herstart.includes(t.id) ? "Bezig…" : "Opnieuw"}
+                {herstart.includes(taak.id) ? t("media.hervat.bezigKnop") : t("media.hervat.opnieuw")}
               </button>
             ) : (
               <span className="resume-panel-state">
-                {t.dropbox === "uploading" ? `${t.pct}%` : "✓"}
+                {taak.dropbox === "uploading" ? `${taak.pct}%` : "✓"}
               </span>
             )}
           </li>
@@ -167,17 +169,17 @@ export default function UploadResume() {
           <button
             type="button"
             className="btn btn-primary resume-panel-all"
-            onClick={() => opnieuw(failed.map((t) => t.id))}
+            onClick={() => opnieuw(failed.map((taak) => taak.id))}
           >
-            {failed.length === 1 ? "Upload afmaken" : `Alle ${failed.length} uploads afmaken`}
+            {failed.length === 1 ? t("media.hervat.afmaken.een") : t("media.hervat.afmaken.meer", { n: failed.length })}
           </button>
-          <span>De bestanden staan nog op dit apparaat — je hoeft ze niet opnieuw te kiezen.</span>
+          <span>{t("media.hervat.nogOpApparaat")}</span>
         </div>
       )}
       {kwijt && (
         <p className="resume-panel-hint is-plain">
-          Dit bestand staat niet meer op dit apparaat. Open de opname en kies het opnieuw.{" "}
-          <a href="/opnames">Naar opnames</a>
+          {t("media.hervat.kwijt")}{" "}
+          <a href="/opnames">{t("media.hervat.naarOpnames")}</a>
         </p>
       )}
     </div>
