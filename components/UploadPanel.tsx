@@ -35,7 +35,7 @@ const STATUS_LABEL: Record<Status, TaalSleutel> = {
 };
 
 export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | null }) {
-  const { t } = useTaal();
+  const { t, taal } = useTaal();
   const rechten = useRechten();
   const ikBen = useIkBen();
   const alleTaken = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
@@ -56,7 +56,7 @@ export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | nul
     return drafts.filter((d) => !d.accountName || d.accountName.toLowerCase() === naam);
   }, [drafts, ikBen]);
 
-  const items = useMemo(() => bouwOpenstaand(alleTaken, eigen), [alleTaken, eigen]);
+  const items = useMemo(() => bouwOpenstaand(alleTaken, eigen, taal), [alleTaken, eigen, taal]);
 
   async function opnieuw(regel: Openstaand) {
     const ids = regel.mislukt.map((t) => t.id);
@@ -111,7 +111,7 @@ export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | nul
                 <a className="up-hit" href={hoofdHref} aria-label={t("dashboard.verderMet", { adres: r.adres })}>
                   <span className="up-top">
                     <span className={`up-status is-${r.status}`}>{t(STATUS_LABEL[r.status])}</span>
-                    {r.updatedAt && <span className="up-tijd">{relatieveTijd(r.updatedAt)}</span>}
+                    {r.updatedAt && <span className="up-tijd">{relatieveTijd(r.updatedAt, undefined, taal)}</span>}
                     {r.pct !== null && <span className="up-pct">{r.pct}%</span>}
                   </span>
                   <span className="up-addr">{r.adres}</span>

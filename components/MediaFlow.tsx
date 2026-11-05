@@ -177,7 +177,7 @@ function useDropboxInhoud(projectmap: string | null): { stand: DropboxStand | nu
  * eerder aanmaken liet bij elke adrescorrectie een lege map achter.
  */
 export default function MediaFlow() {
-  const { t } = useTaal();
+  const { t, taal } = useTaal();
   /** Schermnaam van een soort; MEDIA_STAPPEN zelf blijft Nederlands (de map hangt eraan). */
   const stapNaam = (k: MediaStap["key"]) => t(`media.stap.${k}.naam`);
   const stapUitleg = (k: MediaStap["key"]) => t(`media.stap.${k}.uitleg`);
@@ -1001,7 +1001,7 @@ export default function MediaFlow() {
                       ? t("media.klaar.titelMislukt", { bestanden: meervoud(misluktTotaal) })
                       : t("media.klaar.titelKlaar", { bestanden: meervoud(totaalInDropbox) });
             const onderTitel = [
-              bytesInDropbox > 0 ? leesbareOmvang(bytesInDropbox) : null,
+              bytesInDropbox > 0 ? leesbareOmvang(bytesInDropbox, taal) : null,
               // Via de Dropbox-app kan het nog doorlopen; dat eerlijk zeggen
               // i.p.v. "alles staat erin".
               MEDIA_STAPPEN.some(komtNogBinnen) ? t("media.klaar.komtNogBinnenApp") : null,
@@ -1043,7 +1043,7 @@ export default function MediaFlow() {
                             ? t("media.klaar.nietsGeupload")
                             : aantal === 0 && bz > 0
                               ? t("media.nOnderweg", { n: meervoud(bz) })
-                              : `${meervoud(aantal)}${bytes > 0 ? ` · ${leesbareOmvang(bytes)}` : ""}${bz > 0 ? ` · ${t("media.nOnderweg", { n: bz })}` : ""}`}
+                              : `${meervoud(aantal)}${bytes > 0 ? ` · ${leesbareOmvang(bytes, taal)}` : ""}${bz > 0 ? ` · ${t("media.nOnderweg", { n: bz })}` : ""}`}
                         </span>
                         {bz > 0 ? (
                           <span className="mt-s">
@@ -1276,8 +1276,8 @@ export default function MediaFlow() {
                     van een eerdere keer of via de Dropbox-app. */}
                 {inDropbox && inDropbox.aantal > 0 && (
                   <p className="media-kolom-dbx">
-                    {t("media.kolom.inDropbox")} <strong>{aantalVoor(st)}</strong> · {leesbareOmvang(inDropbox.bytes)}
-                    {inDropbox.laatste && ` · ${relatieveTijd(Date.parse(inDropbox.laatste))}`}
+                    {t("media.kolom.inDropbox")} <strong>{aantalVoor(st)}</strong> · {leesbareOmvang(inDropbox.bytes, taal)}
+                    {inDropbox.laatste && ` · ${relatieveTijd(Date.parse(inDropbox.laatste), undefined, taal)}`}
                   </p>
                 )}
 
