@@ -37,15 +37,11 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 ## Polycam (energielabel, stap 2)
 
-Het Polycam-blok na D1 toont de laatste scans, zet de LAS van de gekozen scan in
-Dropbox › `LAZ` van het project en vult de deellink in het D8-veld van de
-gekozen verdieping. Instellen in Vercel:
+Het Polycam-blok na D1 werkt zonder Polycam-API (die zit alleen in Enterprise):
+de opnemer start de scan in de app, kiest de verdieping, plakt de deellink en
+kiest de geëxporteerde LAS. De link komt in het D8-veld van die verdieping en
+"Polycam-scan" gaat op Ja; de LAS gaat via de gewone uploadwachtrij naar
+Dropbox › `LAZ` (D4).
 
-| Variabele | Verplicht | Wat |
-| --- | --- | --- |
-| `POLYCAM_API_TOKEN` | ja | API-token van de Polycam-werkruimte (scope `content_management`, Enterprise + API-add-on) |
-| `POLYCAM_API_BASE` | nee | Standaard `https://poly.cam/api/v1` |
-| `POLYCAM_SHARE_BASE` | nee | Vorm van de deellink, standaard `https://poly.cam/capture` (+ `/<id>`) |
-| `NEXT_PUBLIC_POLYCAM_APP_URL` | nee | Link achter "Start Polycam-scan", standaard `https://poly.cam/` |
-
-De Polycam-API is in bèta; paden en veldnamen staan bij elkaar in `lib/polycam.ts`.
+Optioneel in Vercel: `NEXT_PUBLIC_POLYCAM_APP_URL`, de link achter
+"Start Polycam-scan" (standaard `https://poly.cam/`).

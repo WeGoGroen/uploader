@@ -1791,10 +1791,9 @@ export default function Home() {
       velden={d8Velden}
       waarden={fieldValues}
       dropboxPad={dropboxFolder?.path ?? null}
+      account={meta?.account.username ?? null}
+      uploads={uploadTaken}
       onDeellink={polycamDeellink}
-      onBestandOpgeslagen={() => {
-        if (dropboxFolder) refreshDocFiles(dropboxFolder);
-      }}
     />
   );
 
