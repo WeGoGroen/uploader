@@ -10,6 +10,7 @@ import { enqueue, getServerSnapshot, getSnapshot, removeTask, subscribe } from "
 import { clearDraftLocal, listPendingLocalDrafts, markDraftSynced, saveDraftLocal } from "@/lib/local-drafts";
 import TodayAppointments from "@/components/TodayAppointments";
 import RamenInkleuren from "@/components/RamenInkleuren";
+import PolycamScan from "@/components/PolycamScan";
 // Gedeeld met het dashboard: één plek die bepaalt wanneer een opname "af" is,
 // zodat de waarschuwing daar niet iets anders betekent dan de blokkade hier.
 import {
@@ -903,6 +904,12 @@ export default function Home() {
     () => documentationGroup?.fields.filter((f) => f.id !== rekenzonesField?.id) ?? [],
     [documentationGroup, rekenzonesField]
   );
+  // De Polycam-links per verdieping (D8.x). Het Polycam-blok in stap 2 vult
+  // ze in; met de hand plakken op de Dropbox-stap blijft gewoon mogelijk.
+  const d8Velden = useMemo(
+    () => documentationRestFields.filter((f) => f.name.startsWith("D8")),
+    [documentationRestFields]
+  );
 
   // Welke verplichte velden op de technische-veldenstap nog leeg zijn.
   // Hiermee kan de opnemer vóór het klikken al zien hoeveel er nog mist,
@@ -1769,6 +1776,28 @@ export default function Home() {
     </div>
   );
 
+  /** Deellink uit het Polycam-blok: in het D8-veld, en "Polycam-scan" op Ja
+      als die keuzelijst er is — er ís dan immers een scan. */
+  function polycamDeellink(veldId: string, url: string) {
+    setFieldValue(veldId, url);
+    const scanVeld = meta?.fields.find((f) => f.type === "drop_down" && /polycam[\s-]*scan/i.test(f.name));
+    const ja = scanVeld?.options.find((o) => /^ja\b/i.test(o.name.trim()));
+    if (scanVeld && ja) setFieldValue(scanVeld.id, ja.id);
+  }
+
+  // Direct na D1: eerst het aantal rekenzones, dan per verdieping scannen.
+  const polycamBlok = d8Velden.length > 0 && (
+    <PolycamScan
+      velden={d8Velden}
+      waarden={fieldValues}
+      dropboxPad={dropboxFolder?.path ?? null}
+      onDeellink={polycamDeellink}
+      onBestandOpgeslagen={() => {
+        if (dropboxFolder) refreshDocFiles(dropboxFolder);
+      }}
+    />
+  );
+
   return (
     <>
       <header className="topline">
@@ -2059,7 +2088,12 @@ export default function Home() {
               const missingHere = missingByGroup.get(group.key) ?? 0;
               return (
                 <Fragment key={group.key}>
-                  {index === rekenzonesIndex(technicalGroups) && rekenzonesCard}
+                  {index === rekenzonesIndex(technicalGroups) && (
+                    <>
+                      {rekenzonesCard}
+                      {polycamBlok}
+                    </>
+                  )}
                   <div className="section">
                     <button
                       type="button"
@@ -2094,7 +2128,12 @@ export default function Home() {
                 </Fragment>
               );
             })}
-            {rekenzonesIndex(technicalGroups) === technicalGroups.length && rekenzonesCard}
+            {rekenzonesIndex(technicalGroups) === technicalGroups.length && (
+              <>
+                {rekenzonesCard}
+                {polycamBlok}
+              </>
+            )}
           </div>
 
           <div className="form-foot">
