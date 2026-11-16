@@ -1,4 +1,5 @@
 import { getOptionalRedis, requireRedis } from "@/lib/redis";
+import { alIngediend, andereSleutels, orderVanSchrijfactie, weigeringUitleg } from "@/lib/mediatask-weigering";
 
 // Cliënt voor de Apitome/Mediatask-API — gebruikt om NEN2580-opnames
 // (foto's + plattegronden) automatisch als order aan te leveren. Zelfde
@@ -52,6 +53,10 @@ export interface MediataskOrder {
 }
 
 export class MediataskApiError extends Error {
+  /** De stand van de order op het moment van een weigering, als die bekend is. */
+  orderState?: string | null;
+  /** De melding is al in gewone taal gezet en mag zo op het scherm. */
+  uitgelegd?: boolean;
   constructor(
     public status: number,
     message: string
@@ -224,9 +229,27 @@ export async function controleerMediataskSleutel(
   }
 }
 
-export async function mediataskFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const { token, baseUrl } = await requireMediataskConfig();
-  const res = await fetch(`${baseUrl}${path}`, {
+/**
+ * Met welke sleutel een order te wijzigen bleek, per ordernummer.
+ *
+ * Alleen in het geheugen van deze serverinstantie: het scheelt bij een opname
+ * met tien bestanden tien keer dezelfde weigering, en als het verloren gaat
+ * zoekt de volgende aanroep het gewoon opnieuw uit.
+ */
+const sleutelVoorOrder = new Map<number, string>();
+
+/** Alle Mediatask-sleutels die de uploader kent: de gedeelde en die van het team. */
+async function bekendeSleutels(gedeeld: string): Promise<string[]> {
+  try {
+    const { getClickUpAccounts } = await import("@/lib/clickup");
+    return [gedeeld, ...(await getClickUpAccounts()).map((a) => a.mediataskToken ?? "")];
+  } catch {
+    return [gedeeld];
+  }
+}
+
+function mediataskAanroep(baseUrl: string, token: string, path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {
       "X-Api-Token": token,
@@ -235,8 +258,62 @@ export async function mediataskFetch<T>(path: string, init?: RequestInit): Promi
     },
     cache: "no-store",
   });
+}
+
+export async function mediataskFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const { token: eigen, baseUrl } = await requireMediataskConfig();
+  const orderId = orderVanSchrijfactie(path, init?.method);
+  const token = (orderId && sleutelVoorOrder.get(orderId)) || eigen;
+
+  let res = await mediataskAanroep(baseUrl, token, path, init);
+
+  /*
+    Geweigerd op een order: eerst met de andere sleutels proberen.
+
+    Een order die op naam van een ander staat (een concept van een collega, of
+    een dat nog met de gedeelde sleutel is aangemaakt) mag je wel lezen en van
+    een opmerking voorzien, maar niet wijzigen of indienen — zie
+    lib/mediatask-weigering.ts. Zo kwam bij een hele opname geen scan en geen
+    foto aan, met alleen "403: {}" als uitleg.
+  */
+  if (res.status === 403 && orderId) {
+    const gedeeld = (await requireGedeeldeMediataskConfig()).token;
+    for (const andere of andereSleutels(token, [eigen, ...(await bekendeSleutels(gedeeld))])) {
+      const poging = await mediataskAanroep(baseUrl, andere, path, init).catch(() => null);
+      if (!poging || poging.status === 403 || poging.status === 401) continue;
+      // Geen weigering meer: dit is de sleutel voor deze order, ook als het
+      // antwoord verder een fout is (bv. 422 op het fotoveld).
+      sleutelVoorOrder.set(orderId, andere);
+      res = poging;
+      break;
+    }
+  }
+
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    if (res.status === 403 && orderId) {
+      // Niemand mag het: uitzoeken waarom, zodat er iets bruikbaars op het
+      // scherm en in het logboek komt in plaats van een leeg antwoord.
+      const order = await mediataskAanroep(baseUrl, eigen, `/api/orders/${orderId}`)
+        .then((r) => (r.ok ? (r.json() as Promise<MediataskOrder>) : null))
+        .catch(() => null);
+      const eigenaar = order?.owner?.full_name ?? order?.owner?.username ?? null;
+      console.error("Mediatask weigert schrijfactie op order", {
+        path,
+        orderId,
+        state: order?.state ?? null,
+        productId: order?.product_id ?? null,
+        eigenaar,
+        eigenaarId: order?.owner?.id ?? null,
+      });
+      const fout = new MediataskApiError(
+        403,
+        weigeringUitleg({ orderId, state: order?.state ?? null, eigenaar })
+      );
+      fout.orderState = order?.state ?? null;
+      fout.uitgelegd = true;
+      throw fout;
+    }
     throw new MediataskApiError(res.status, describeMediataskError(res.status, body, path));
   }
   if (res.status === 204) return {} as T;
@@ -337,8 +414,15 @@ export async function vindBestaandeDraft(
   );
 }
 
-export function submitOrder(id: number): Promise<void> {
-  return mediataskFetch<void>(`/api/orders/${id}/submit`, { method: "POST" });
+export async function submitOrder(id: number): Promise<void> {
+  try {
+    await mediataskFetch<void>(`/api/orders/${id}/submit`, { method: "POST" });
+  } catch (err) {
+    // Een order die al ingediend is nog eens indienen wordt geweigerd; het
+    // doel is dan al bereikt, dus dat is geen fout om te tonen.
+    if (err instanceof MediataskApiError && err.status === 403 && alIngediend(err.orderState)) return;
+    throw err;
+  }
 }
 
 /**
