@@ -34,3 +34,14 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Polycam (energielabel, stap 2)
+
+Het Polycam-blok na D1 werkt zonder Polycam-API (die zit alleen in Enterprise):
+de opnemer start de scan in de app, kiest de verdieping, plakt de deellink en
+kiest de geëxporteerde LAS. De link komt in het D8-veld van die verdieping en
+"Polycam-scan" gaat op Ja; de LAS gaat via de gewone uploadwachtrij naar
+Dropbox › `LAZ` (D4).
+
+Optioneel in Vercel: `NEXT_PUBLIC_POLYCAM_APP_URL`, de link achter
+"Start Polycam-scan" (standaard `https://poly.cam/`).
