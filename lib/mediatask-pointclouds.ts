@@ -3,6 +3,7 @@ import { getSharedAccessToken, listFolderFiles, openFileStream } from "@/lib/dro
 import {
   attachPointclouds,
   listPointclouds,
+  MediataskApiError,
   requestPointcloudUploads,
   type MediataskPointcloud,
 } from "@/lib/mediatask";
@@ -31,6 +32,9 @@ import { getOptionalRedis } from "@/lib/redis";
  */
 export function leesbareFout(err: unknown): string {
   const t = err instanceof Error ? err.message : String(err);
+  // Een weigering die al is uitgezocht (wie de eigenaar is, of de order al is
+  // ingediend) zegt meer dan "geen toegang".
+  if (err instanceof MediataskApiError && err.uitgelegd) return t;
   if (/not_found/i.test(t)) return "het bestand staat niet meer in Dropbox";
   if (/insufficient_space/i.test(t)) return "Dropbox zit vol";
   if (/expired_access_token|invalid_access_token/i.test(t)) return "de Dropbox-koppeling is verlopen";
