@@ -4,7 +4,17 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { useIkBen } from "@/components/RechtenProvider";
 import { useTaal } from "@/components/TaalProvider";
 import type { TaalSleutel } from "@/lib/taal";
-import { enqueue, getServerSnapshot, getSnapshot, probeerOpnieuw, subscribe } from "@/lib/upload-queue";
+import {
+  enqueue,
+  forgetTasks,
+  getServerSnapshot,
+  getSnapshot,
+  probeerOpnieuw,
+  stopUpload,
+  subscribe,
+  verwijderGeupload,
+  type UploadTask,
+} from "@/lib/upload-queue";
 import { MEDIA_STAPPEN, type MediaStap } from "@/lib/media-folders";
 import { KOP_BYTES, herkenOpNaam, herkenUitKop, leesKop, type Herkenning } from "@/lib/media-herkennen";
 import { leesbareOmvang, type StapInhoud } from "@/lib/media-inhoud";
@@ -93,10 +103,16 @@ interface DropboxStand {
  * beeld is — dan kijkt niemand, en elke ronde is een Dropbox-aanroep voor
  * niets. Terug in beeld (bijvoorbeeld uit de Dropbox-app) kijkt hij meteen.
  */
-function useDropboxInhoud(projectmap: string | null): { stand: DropboxStand | null; fout: boolean } {
+function useDropboxInhoud(projectmap: string | null): {
+  stand: DropboxStand | null;
+  fout: boolean;
+  /** Meteen opnieuw kijken, bv. na het verwijderen van een bestand. */
+  ververs: () => void;
+} {
   const [stand, setStand] = useState<{ voor: string; stand: DropboxStand | null; fout: boolean } | null>(
     null
   );
+  const kijkNu = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!projectmap) return;
@@ -148,19 +164,22 @@ function useDropboxInhoud(projectmap: string | null): { stand: DropboxStand | nu
       if (document.visibilityState === "visible") void kijk();
     };
 
+    kijkNu.current = () => void kijk();
     void kijk();
     document.addEventListener("visibilitychange", weerInBeeld);
     return () => {
       weg = true;
+      kijkNu.current = () => {};
       if (timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", weerInBeeld);
     };
   }, [projectmap]);
 
   // Een stand van een vorige opname hoort niet bij deze.
+  const ververs = () => kijkNu.current();
   return stand && stand.voor === projectmap
-    ? { stand: stand.stand, fout: stand.fout }
-    : { stand: null, fout: false };
+    ? { stand: stand.stand, fout: stand.fout, ververs }
+    : { stand: null, fout: false, ververs };
 }
 
 /**
@@ -231,6 +250,58 @@ export default function MediaFlow() {
   // submap en naam. Alleen voor wat op dit apparaat gekozen is.
   const [redenen, setRedenen] = useState<Record<string, string>>({});
   const [sleepErover, setSleepErover] = useState(false);
+  // Welk bestand op "verwijderen?" staat, en welke daar nu mee bezig is.
+  const [teVerwijderen, setTeVerwijderen] = useState<string | null>(null);
+  const [verwijderBezig, setVerwijderBezig] = useState<string | null>(null);
+  const [verwijderFout, setVerwijderFout] = useState<string | null>(null);
+
+  /**
+   * Een bestand uit de opname halen. Wat er gebeurt hangt af van waar het is:
+   * al in Dropbox → daar weghalen; nog onderweg → de upload stoppen; mislukt →
+   * alleen uit de lijst, want in Dropbox staat het niet.
+   */
+  async function verwijder(t: UploadTask) {
+    setVerwijderFout(null);
+    if (t.dropbox === "uploading") {
+      stopUpload(t.id);
+      setTeVerwijderen(null);
+      return;
+    }
+    if (t.dropbox === "error") {
+      forgetTasks([t.id]);
+      setTeVerwijderen(null);
+      return;
+    }
+    setVerwijderBezig(t.id);
+    try {
+      const weg = await verwijderGeupload(t.id);
+      if (weg) {
+        setTeVerwijderen(null);
+        kijkInDropbox();
+      } else {
+        setVerwijderFout(t.id);
+      }
+    } finally {
+      setVerwijderBezig(null);
+    }
+  }
+
+  // Uitkomst van "opnieuw proberen" als er niets te herstarten viel.
+  const [opnieuwMelding, setOpnieuwMelding] = useState<string | null>(null);
+
+  /**
+   * Mislukte uploads opnieuw starten, en zeggen als dat niet kan. De knop
+   * deed eerder stil niets als het bestand nergens meer stond (pagina
+   * herladen en het bestand was te groot voor de opslag op de iPad).
+   */
+  async function opnieuwProberen(ids: string[]) {
+    setOpnieuwMelding(null);
+    const gestart = await probeerOpnieuw(ids);
+    if (gestart < ids.length) {
+      const weg = ids.length - gestart;
+      setOpnieuwMelding(t(weg === 1 ? "media.opnieuwNiet.een" : "media.opnieuwNiet.meer", { n: weg }));
+    }
+  }
 
   const alleTaken = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const takenVanOpname = useMemo(
@@ -238,7 +309,7 @@ export default function MediaFlow() {
     [alleTaken, folder]
   );
 
-  const { stand: dropbox, fout: dropboxFout } = useDropboxInhoud(folder?.path ?? null);
+  const { stand: dropbox, fout: dropboxFout, ververs: kijkInDropbox } = useDropboxInhoud(folder?.path ?? null);
 
   /**
    * Hoeveel bestanden er voor een stap staan.
@@ -595,28 +666,42 @@ export default function MediaFlow() {
    * stopt de upload en gaat hij pas verder als je de app weer opent. Dit is
    * het enige wat een webapp daar realistisch tegen kan doen; Safari kent
    * geen achtergrond-upload.
+   *
+   * Hangt aan óf er iets loopt, niet aan hoevéél: met het aantal als
+   * afhankelijkheid werd het slot bij elk afgerond bestand losgelaten en
+   * opnieuw aangevraagd. En iOS geeft het slot zelf vrij zodra de pagina uit
+   * beeld gaat; zonder het bij terugkomst opnieuw te vragen viel het scherm na
+   * één keer wegklikken alsnog in slaap, midden in een video.
    */
+  const ietsBezig = bezigTotaal > 0;
   useEffect(() => {
-    if (bezigTotaal === 0) return;
-    type Slot = { release: () => Promise<void> };
+    if (!ietsBezig) return;
+    type Slot = { release: () => Promise<void>; released?: boolean };
     let slot: Slot | null = null;
     let losgelaten = false;
     const wakeLock = (navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<Slot> } })
       .wakeLock;
-    void wakeLock
-      ?.request("screen")
-      .then((s) => {
-        if (losgelaten) void s.release();
-        else slot = s;
-      })
-      // Geweigerd of niet ondersteund: dan werkt uploaden gewoon door, alleen
-      // zonder deze bescherming.
-      .catch(() => {});
+    const vraag = () => {
+      if (losgelaten || document.visibilityState !== "visible") return;
+      if (slot && !slot.released) return;
+      void wakeLock
+        ?.request("screen")
+        .then((s) => {
+          if (losgelaten) void s.release();
+          else slot = s;
+        })
+        // Geweigerd of niet ondersteund: dan werkt uploaden gewoon door, alleen
+        // zonder deze bescherming.
+        .catch(() => {});
+    };
+    vraag();
+    document.addEventListener("visibilitychange", vraag);
     return () => {
       losgelaten = true;
+      document.removeEventListener("visibilitychange", vraag);
       void slot?.release().catch(() => {});
     };
-  }, [bezigTotaal]);
+  }, [ietsBezig]);
 
 
   /**
@@ -1248,7 +1333,7 @@ export default function MediaFlow() {
                     {eigen.map((taak) => (
                       <li key={taak.id}>
                         <span className="media-kolom-r1">
-                          <span className="media-kolom-naam">{taak.name}</span>
+                          <span className="media-kolom-naam" title={taak.name}>{taak.name}</span>
                           {/* Ook bij "klaar" het percentage: 100% is het antwoord
                               op de vraag die je stelt terwijl je staat te wachten. */}
                           <span className={`media-kolom-st is-${taak.dropbox}`}>
@@ -1258,13 +1343,65 @@ export default function MediaFlow() {
                                 ? "✓ 100%"
                                 : `${taak.pct}%`}
                           </span>
+                          <button
+                            type="button"
+                            className={`media-kolom-del${teVerwijderen === taak.id ? " is-open" : ""}`}
+                            aria-label={t("media.kolom.verwijderenLabel", { naam: taak.name })}
+                            title={t("media.kolom.verwijderen")}
+                            onClick={() => {
+                              setVerwijderFout(null);
+                              // Mislukt staat niet in Dropbox: niets om over te twijfelen.
+                              if (taak.dropbox === "error") void verwijder(taak);
+                              else setTeVerwijderen(teVerwijderen === taak.id ? null : taak.id);
+                            }}
+                          >
+                            ✕
+                          </button>
                         </span>
+                        {taak.dropbox === "error" && taak.dropboxError && (
+                          <span className="media-kolom-r2" style={{ color: "var(--bad)" }}>
+                            {taak.dropboxError}
+                          </span>
+                        )}
                         {redenen[`${st.map}/${taak.name}`] && (
                           <span className="media-kolom-r2">{redenen[`${st.map}/${taak.name}`]}</span>
                         )}
                         {taak.dropbox === "uploading" && taak.pct > 0 && (
                           <span className="up-bar media-kolom-bar-klein">
                             <span className="up-bar-fill" style={{ width: `${taak.pct}%` }} />
+                          </span>
+                        )}
+                        {teVerwijderen === taak.id && taak.dropbox !== "error" && (
+                          <span className="media-kolom-confirm">
+                            <span className="media-kolom-confirm-vraag">
+                              {verwijderFout === taak.id
+                                ? t("media.kolom.vraagFout")
+                                : taak.dropbox === "done"
+                                  ? t("media.kolom.vraagDropbox")
+                                  : t("media.kolom.vraagStop")}
+                            </span>
+                            <button
+                              type="button"
+                              className="doc-file-yes"
+                              disabled={verwijderBezig === taak.id}
+                              onClick={() => void verwijder(taak)}
+                            >
+                              {verwijderBezig === taak.id
+                                ? t("media.kolom.bezig")
+                                : taak.dropbox === "done"
+                                  ? t("media.kolom.jaVerwijder")
+                                  : t("media.kolom.jaStop")}
+                            </button>
+                            <button
+                              type="button"
+                              className="doc-file-no"
+                              onClick={() => {
+                                setTeVerwijderen(null);
+                                setVerwijderFout(null);
+                              }}
+                            >
+                              {t("media.kolom.nee")}
+                            </button>
                           </span>
                         )}
                       </li>
@@ -1281,11 +1418,31 @@ export default function MediaFlow() {
                   </p>
                 )}
 
+                {/* Rechtstreeks naar deze submap in de Dropbox-app. Daar kan de
+                    opnemer aanleveren met achtergrond-upload (scherm op slot,
+                    iPad in de tas), wat deze pagina niet kan. Wat er binnenkomt
+                    telt hierboven gewoon mee. De link komt mee met de
+                    periodieke blik in Dropbox; zonder link geen knop. */}
+                {inDropbox?.webUrl && (
+                  <a
+                    href={inDropbox.webUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="media-kolom-dbxknop"
+                    title={t("media.kolom.openDropboxTitel", { map: st.map })}
+                  >
+                    <span>{t("media.kolom.openDropbox")}</span>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M6 4h6v6M12 4 4 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </a>
+                )}
+
                 {mislukt.length > 0 && (
                   <button
                     type="button"
                     className="media-kolom-opnieuw"
-                    onClick={() => void probeerOpnieuw(mislukt.map((t) => t.id))}
+                    onClick={() => void opnieuwProberen(mislukt.map((t) => t.id))}
                   >
                     {t("media.kolom.opnieuw")}
                   </button>
@@ -1294,6 +1451,12 @@ export default function MediaFlow() {
             );
           })}
         </div>
+
+        {opnieuwMelding && (
+          <p className="note" style={{ color: "var(--bad)" }}>
+            {opnieuwMelding}
+          </p>
+        )}
 
         {overgeslagen.length > 0 && (
           <details className="media-overgeslagen">

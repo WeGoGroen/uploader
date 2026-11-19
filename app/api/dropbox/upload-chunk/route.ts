@@ -6,6 +6,7 @@ import {
   startConcurrentUploadSession,
   startUploadSession,
 } from "@/lib/dropbox";
+import { schrijfwijze } from "@/lib/media-folders";
 
 export const maxDuration = 60;
 
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
     }
     if (action === "finish") {
       if (!sessionId || !path) return NextResponse.json({ error: "missing_fields" }, { status: 400 });
-      await finishUploadSession(accessToken, sessionId, offset, path, buffer);
+      await finishUploadSession(accessToken, sessionId, offset, path, buffer, schrijfwijze(path));
       return NextResponse.json({ ok: true });
     }
     return NextResponse.json({ error: "unknown_action" }, { status: 400 });
