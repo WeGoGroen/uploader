@@ -191,6 +191,10 @@ export async function stuurMediaVanuitDropboxMap(
           // kost alleen tijd. Ineens de hele lijst als link markeren.
           return await alsLinks(projectPad, token, uitkomsten);
         }
+        // De rauwe fout in het logboek: op het scherm staat alleen de
+        // leesbare versie, en zonder dit was niet terug te vinden wélke stap
+        // (Mediatask, S3 of Dropbox) de fout gaf.
+        console.error(`Foto naar Mediatask mislukt (${mapPad}/${bestand.name})`, err);
         uitkomsten.push({ naam: bestand.name, map, ok: false, fout: leesbareFout(err) });
       }
     }
