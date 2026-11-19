@@ -40,8 +40,11 @@ export function leesbareFout(err: unknown): string {
   if (/expired_access_token|invalid_access_token/i.test(t)) return "de Dropbox-koppeling is verlopen";
   if (/\b(401|403)\b/.test(t)) return "Mediatask weigerde het verzoek (geen toegang)";
   if (/\b(429)\b/.test(t)) return "te veel verzoeken tegelijk — probeer het zo nog eens";
+  // Vóór de 5xx-regel: "Amazon weigerde het bestand (501)" zegt meer dan
+  // een algemene serverfout van "Mediatask of Dropbox".
+  if (/Amazon weigerde/i.test(t)) return t.slice(0, 160);
+  if (err instanceof MediataskApiError && err.status >= 500) return "Mediatask gaf een serverfout";
   if (/\b(50\d)\b/.test(t)) return "Mediatask of Dropbox gaf een serverfout";
-  if (/Amazon weigerde/i.test(t)) return t;
   return t.slice(0, 120);
 }
 

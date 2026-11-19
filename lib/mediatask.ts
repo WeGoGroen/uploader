@@ -555,12 +555,34 @@ export async function requestPhotoUploads(
   photos: MediaUploadRequest[]
 ): Promise<MediaUploadTarget[]> {
   let data: Record<string, unknown>;
-  try {
-    data = await mediataskFetch<Record<string, unknown>>(`/api/orders/${orderId}`, {
+  const aanmelden = () =>
+    mediataskFetch<Record<string, unknown>>(`/api/orders/${orderId}`, {
       method: "PATCH",
       body: JSON.stringify({ files: { photos } }),
     });
+  try {
+    try {
+      data = await aanmelden();
+    } catch (err) {
+      // Eén keer opnieuw bij een serverfout: kan een echte hapering zijn.
+      if (!(err instanceof MediataskApiError && err.status >= 500)) throw err;
+      await new Promise((r) => setTimeout(r, 2000));
+      data = await aanmelden();
+    }
   } catch (err) {
+    // Blijft Mediatask een serverfout geven op het photos-veld, dan is dat
+    // hetzelfde verhaal als de 422 hieronder, alleen slordiger gemeld: hun
+    // API kan geen foto's aannemen. Zo verscheen bij elke NEN-order met alleen
+    // de automatische straatbeelden "Mediatask of Dropbox gaf een serverfout"
+    // per bestand, terwijl de foto's via de Dropbox-link in de opmerking wél
+    // bij de verwerker aankomen. Nu valt dit netjes terug op die links.
+    if (err instanceof MediataskApiError && err.status >= 500) {
+      console.error("Mediatask geeft serverfout op foto-bijlagen, terugval op links", {
+        orderId,
+        status: err.status,
+      });
+      throw new GeenDirecteUpload(`Mediatask accepteert nu geen foto-bijlagen via de API (${err.status})`);
+    }
     // Live vastgesteld (01-09): Mediatask antwoordt op élke schrijfactie op
     // het photos-veld met 422 "Attachments is invalid" — metadata, URL's, een
     // /photos-subresource (404): alles wordt geweigerd, terwijl exact dezelfde
