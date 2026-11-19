@@ -1,6 +1,8 @@
 "use client";
 
 import { Children, useCallback, useEffect, useState, type ReactNode } from "react";
+import { useTaal } from "@/components/TaalProvider";
+import { taalLocale } from "@/lib/taal";
 
 interface ConnectionStatus {
   connected: boolean;
@@ -29,16 +31,21 @@ function cardClass(status: ConnectionStatus): string {
 }
 
 function Pill({ status }: { status: ConnectionStatus }) {
+  const { t } = useTaal();
   if (status.uit) {
     return (
       <span className="pill is-off">
         <span className="dot is-off" />
-        Uitgezet
+        {t("beheer.instellingen.pill.uitgezet")}
       </span>
     );
   }
   const cls = !status.connected ? "is-off" : status.ok ? "is-ok" : "is-bad";
-  const label = !status.connected ? "Niet ingesteld" : status.ok ? "Verbonden" : "Probleem";
+  const label = !status.connected
+    ? t("beheer.instellingen.pill.nietIngesteld")
+    : status.ok
+      ? t("beheer.instellingen.pill.verbonden")
+      : t("beheer.instellingen.pill.probleem");
   return (
     <span className={`pill ${cls}`}>
       <span className={`dot ${cls}`} />
@@ -81,6 +88,7 @@ function ConnCard({ status, children }: { status: ConnectionStatus; children: Re
 }
 
 function ClickUpCard({ status, onChanged }: { status: ConnectionStatus; onChanged: () => void }) {
+  const { t } = useTaal();
   const [bezig, setBezig] = useState(false);
 
   /*
@@ -106,14 +114,14 @@ function ClickUpCard({ status, onChanged }: { status: ConnectionStatus; onChange
       const body = (await res.json().catch(() => ({}))) as { error?: string };
       // Zonder deze controle mislukte het stil: de schakelaar sprong terug en
       // je wist niet of het aan jou lag of aan de app.
-      if (!res.ok) throw new Error(body.error ?? "omzetten mislukt");
+      if (!res.ok) throw new Error(body.error ?? t("beheer.instellingen.clickup.omzettenMislukt"));
       onChanged();
       // De statuslijst in de zijbalk laadt alleen bij het openen van een
       // pagina. Zonder dit sein bleef daar "ClickUp LIVE" staan terwijl hij
       // hier al uit stond - en dan lijkt de schakelaar het niet te doen.
       window.dispatchEvent(new Event("koppelingen-gewijzigd"));
     } catch (err) {
-      setFout(err instanceof Error ? err.message : "omzetten mislukt");
+      setFout(err instanceof Error ? err.message : t("beheer.instellingen.clickup.omzettenMislukt"));
     } finally {
       setBezig(false);
     }
@@ -131,7 +139,9 @@ function ClickUpCard({ status, onChanged }: { status: ConnectionStatus; onChange
           <div>
             <div className="conn-name">ClickUp</div>
             <p className="conn-role" style={{ margin: "2px 0 0" }}>
-              {status.connected ? `Verbonden als ${status.label ?? "onbekend"}` : "Geen token ingesteld."}
+              {status.connected
+                ? t("beheer.instellingen.verbondenAls", { naam: status.label ?? t("beheer.instellingen.onbekend") })
+                : t("beheer.instellingen.clickup.geenToken")}
             </p>
           </div>
         </div>
@@ -140,8 +150,8 @@ function ClickUpCard({ status, onChanged }: { status: ConnectionStatus; onChange
       {status.error && <p className="conn-err">{status.error}</p>}
       <p className="conn-hint">
         {status.uit
-          ? "ClickUp staat uit: er wordt niet meer gemeten en er komen geen storingsmeldingen meer over. Energielabels aanmaken werkt zolang dit uitstaat niet."
-          : "Geen inlogknop hier — dit werkt via een persoonlijk API-token op de server (CLICKUP_TOKEN). Aanmaken via ClickUp → avatar → Settings → Apps → API Token."}
+          ? t("beheer.instellingen.clickup.uitUitleg")
+          : t("beheer.instellingen.clickup.aanUitleg")}
       </p>
       {/* Een schakelaar en geen knop: aan/uit is een stand, geen handeling.
           Bij een knop moet je eerst de tekst lezen om te weten wat er nú is. */}
@@ -155,7 +165,11 @@ function ClickUpCard({ status, onChanged }: { status: ConnectionStatus; onChange
           style={{ width: 18, height: 18, accentColor: "var(--accent)" }}
         />
         <span style={{ fontSize: 13, fontWeight: 600 }}>
-          {bezig ? "Bezig…" : status.uit ? "ClickUp staat uit" : "ClickUp staat aan"}
+          {bezig
+            ? t("beheer.instellingen.bezig")
+            : status.uit
+              ? t("beheer.instellingen.clickup.staatUit")
+              : t("beheer.instellingen.clickup.staatAan")}
         </span>
       </label>
       {fout && <p className="conn-err">{fout}</p>}
@@ -164,6 +178,7 @@ function ClickUpCard({ status, onChanged }: { status: ConnectionStatus; onChange
 }
 
 function BagCard({ status }: { status: ConnectionStatus }) {
+  const { t } = useTaal();
   return (
     <ConnCard status={status}>
       <div className="conn-top">
@@ -177,7 +192,7 @@ function BagCard({ status }: { status: ConnectionStatus }) {
           <div>
             <div className="conn-name">BAG</div>
             <p className="conn-role" style={{ margin: "2px 0 0" }}>
-              Openbare adresdata (PDOK) — geen account nodig.
+              {t("beheer.instellingen.bag.rol")}
             </p>
           </div>
         </div>
@@ -189,6 +204,7 @@ function BagCard({ status }: { status: ConnectionStatus }) {
 }
 
 function StreetViewCard({ status }: { status: ConnectionStatus }) {
+  const { t } = useTaal();
   return (
     <ConnCard status={status}>
       <div className="conn-top">
@@ -202,7 +218,7 @@ function StreetViewCard({ status }: { status: ConnectionStatus }) {
           <div>
             <div className="conn-name">Google Street View</div>
             <p className="conn-role" style={{ margin: "2px 0 0" }}>
-              {status.ok ? "Straatbeeld + luchtfoto per adres — geen account nodig, alleen een API-key." : "Straatbeeld + luchtfoto per adres."}
+              {status.ok ? t("beheer.instellingen.streetview.rolOk") : t("beheer.instellingen.streetview.rol")}
             </p>
           </div>
         </div>
@@ -210,18 +226,15 @@ function StreetViewCard({ status }: { status: ConnectionStatus }) {
       </div>
       {status.error && <p className="conn-err">{status.error}</p>}
       <p className="conn-hint">
-        Zet bij elke nieuwe projectmap automatisch vier beelden in de map &ldquo;Foto&apos;s&rdquo;:
-        het straatbeeld van de voorkant, de linkerhoek en de rechterhoek, plus een luchtfoto van
-        bovenaf. Zo zie je vóór de opname al het woningtype, de zijgevels en aanbouwen, en de
-        dakvorm met eventuele dakkapellen en zonnepanelen. Alleen als die map nog leeg is —
-        eigen foto&apos;s worden nooit overschreven. Instellen via <code>GOOGLE_MAPS_API_KEY</code>
-        op de server.
+        {t("beheer.instellingen.streetview.uitleg")} <code>GOOGLE_MAPS_API_KEY</code>{" "}
+        {t("beheer.instellingen.streetview.uitlegNa")}
       </p>
     </ConnCard>
   );
 }
 
 function DropboxCard({ status }: { status: ConnectionStatus }) {
+  const { t } = useTaal();
   return (
     <ConnCard status={status}>
       <div className="conn-top">
@@ -237,7 +250,9 @@ function DropboxCard({ status }: { status: ConnectionStatus }) {
           <div>
             <div className="conn-name">Dropbox</div>
             <p className="conn-role" style={{ margin: "2px 0 0" }}>
-              {status.connected ? `Verbonden als ${status.label ?? "onbekend"}` : "Nog niet gekoppeld."}
+              {status.connected
+                ? t("beheer.instellingen.verbondenAls", { naam: status.label ?? t("beheer.instellingen.onbekend") })
+                : t("beheer.instellingen.nogNietGekoppeld")}
             </p>
           </div>
         </div>
@@ -245,16 +260,14 @@ function DropboxCard({ status }: { status: ConnectionStatus }) {
       </div>
       {status.error && <p className="conn-err">{status.error}</p>}
       <p className="conn-hint">
-        Maakt automatisch een projectmap per adres aan en zet de deel-link in de
-        ClickUp-taak. Eén teamlid logt hieronder eenmalig in — daarna werkt
-        Dropbox voor iedereen, net als bij ClickUp.
+        {t("beheer.instellingen.dropbox.uitleg")}
       </p>
       <div className="conn-actions">
         <a
           href="/api/auth/dropbox/login"
           className={`btn ${status.connected ? "btn-quiet" : "btn-primary"}`}
         >
-          {status.connected ? "Opnieuw inloggen met Dropbox" : "Inloggen met Dropbox"}
+          {status.connected ? t("beheer.instellingen.dropbox.opnieuwInloggen") : t("beheer.instellingen.dropbox.inloggen")}
         </a>
       </div>
     </ConnCard>
@@ -262,6 +275,7 @@ function DropboxCard({ status }: { status: ConnectionStatus }) {
 }
 
 function GoogleCard({ status }: { status: ConnectionStatus }) {
+  const { t } = useTaal();
   return (
     <ConnCard status={status}>
       <div className="conn-top">
@@ -275,7 +289,9 @@ function GoogleCard({ status }: { status: ConnectionStatus }) {
           <div>
             <div className="conn-name">Google Agenda</div>
             <p className="conn-role" style={{ margin: "2px 0 0" }}>
-              {status.connected ? `Jouw account verbonden als ${status.label ?? "onbekend"}` : "Nog niet gekoppeld voor jouw account."}
+              {status.connected
+                ? t("beheer.instellingen.google.verbondenAls", { naam: status.label ?? t("beheer.instellingen.onbekend") })
+                : t("beheer.instellingen.google.nietGekoppeld")}
             </p>
           </div>
         </div>
@@ -283,15 +299,12 @@ function GoogleCard({ status }: { status: ConnectionStatus }) {
       </div>
       {status.error && <p className="conn-err">{status.error}</p>}
       <p className="conn-hint">
-        Haalt de afspraken van vandaag op bij het zoeken van een adres, zodat je het adres en de
-        makelaarsinformatie uit de agenda-afspraak niet opnieuw hoeft over te typen.{" "}
-        <b>In tegenstelling tot Dropbox is dit per teamlid</b> — elke gebruiker logt hier zelf in met
-        zijn eigen Google-account (gekoppeld aan het actieve account in de zijbalk). Wissel eerst van
-        account via Gebruikers voordat je hier inlogt, anders koppel je Google aan de verkeerde naam.
+        {t("beheer.instellingen.google.uitlegVoor")}{" "}
+        <b>{t("beheer.instellingen.google.uitlegNadruk")}</b> {t("beheer.instellingen.google.uitlegNa")}
       </p>
       <div className="conn-actions">
         <a href="/api/auth/google/login" className={`btn ${status.connected ? "btn-quiet" : "btn-primary"}`}>
-          {status.connected ? "Opnieuw inloggen met Google" : "Inloggen met Google"}
+          {status.connected ? t("beheer.instellingen.google.opnieuwInloggen") : t("beheer.instellingen.google.inloggen")}
         </a>
       </div>
     </ConnCard>
@@ -304,6 +317,7 @@ interface SharePointConfig {
 }
 
 function SharePointCard({ status, onSaved }: { status: ConnectionStatus; onSaved: () => void }) {
+  const { t } = useTaal();
   const [config, setConfig] = useState<SharePointConfig | null>(null);
   const [isDefault, setIsDefault] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -346,12 +360,12 @@ function SharePointCard({ status, onSaved }: { status: ConnectionStatus; onSaved
       if (!res.ok) {
         setError(
           data?.error === "invalid_url"
-            ? "Dit lijkt geen SharePoint-link. Plak de volledige URL uit de adresbalk."
+            ? t("beheer.instellingen.sharepoint.fout.url")
             : data?.error === "site_unreachable"
-              ? "Deze map is niet te openen met het gekoppelde account. Controleer de link."
+              ? t("beheer.instellingen.sharepoint.fout.onbereikbaar")
               : data?.error === "no_storage"
-                ? "Er is geen Redis-opslag gekoppeld, dus de wijziging kan niet bewaard worden."
-                : "Opslaan is mislukt. Probeer het opnieuw."
+                ? t("beheer.instellingen.sharepoint.fout.geenOpslag")
+                : t("beheer.instellingen.opslaanMislukt")
         );
         return;
       }
@@ -372,7 +386,7 @@ function SharePointCard({ status, onSaved }: { status: ConnectionStatus; onSaved
       const res = await fetch("/api/sharepoint/config", { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) {
-        setError("Terugzetten is mislukt.");
+        setError(t("beheer.instellingen.sharepoint.fout.terugzetten"));
         return;
       }
       setConfig(data.config);
@@ -399,10 +413,12 @@ function SharePointCard({ status, onSaved }: { status: ConnectionStatus; onSaved
             <div className="conn-name">SharePoint (Microsoft 365)</div>
             <p className="conn-role" style={{ margin: "2px 0 0" }}>
               {status.ok
-                ? `Leestoegang tot ${status.label ?? "de site"}`
+                ? t("beheer.instellingen.sharepoint.leestoegang", {
+                    site: status.label ?? t("beheer.instellingen.sharepoint.deSite"),
+                  })
                 : status.connected
-                  ? "App-gegevens staan er, maar Microsoft geeft nog geen toegang."
-                  : "Nog niet ingesteld op de server."}
+                  ? t("beheer.instellingen.sharepoint.geenToegang")
+                  : t("beheer.instellingen.sharepoint.nietIngesteld")}
             </p>
           </div>
         </div>
@@ -410,9 +426,7 @@ function SharePointCard({ status, onSaved }: { status: ConnectionStatus; onSaved
       </div>
       {status.error && <p className="conn-err">{status.error}</p>}
       <p className="conn-hint">
-        Zet de hele opgeleverde map uit SharePoint — met dezelfde naam en indeling — als eigen
-        map in de Dropbox-projectmap van dat adres, zodra de taak in ClickUp op klaar gaat.
-        Eén teamlid logt hier eenmalig in; daarna werkt het voor iedereen.
+        {t("beheer.instellingen.sharepoint.uitleg")}
       </p>
 
       {/* De map staat vast ingesteld. Alleen tonen, niet zomaar aanpasbaar: een
@@ -420,33 +434,30 @@ function SharePointCard({ status, onSaved }: { status: ConnectionStatus; onSaved
       {config && !editing && (
         <div className="conn-fixed">
           <div className="conn-fixed-row">
-            <span className="conn-fixed-label">Map</span>
+            <span className="conn-fixed-label">{t("beheer.instellingen.sharepoint.map")}</span>
             <span className="conn-fixed-value">
-              {config.rootPath || "(hele bibliotheek)"}
-              {isDefault && <span className="conn-tag">standaard</span>}
+              {config.rootPath || t("beheer.instellingen.sharepoint.heleBibliotheek")}
+              {isDefault && <span className="conn-tag">{t("beheer.instellingen.sharepoint.standaard")}</span>}
             </span>
           </div>
           <div className="conn-fixed-row">
-            <span className="conn-fixed-label">Site</span>
+            <span className="conn-fixed-label">{t("beheer.instellingen.sharepoint.site")}</span>
             <span className="conn-fixed-value is-url">{config.siteUrl}</span>
           </div>
         </div>
       )}
 
       {saved === "verified" && !editing && (
-        <p className="conn-hint">Opgeslagen en gecontroleerd — de app kan deze map openen.</p>
+        <p className="conn-hint">{t("beheer.instellingen.sharepoint.gecontroleerd")}</p>
       )}
       {saved === "stored" && !editing && (
-        <p className="conn-hint">
-          Opgeslagen. Klik nu op &quot;Inloggen met Microsoft&quot; — de app weet nu bij welke
-          organisatie hij moet aanmelden.
-        </p>
+        <p className="conn-hint">{t("beheer.instellingen.sharepoint.opgeslagen")}</p>
       )}
 
       {editing ? (
         <div className="section-body is-single-wide" style={{ padding: 0 }}>
           <div className="field">
-            <label htmlFor="sp-site">Link naar de map in SharePoint</label>
+            <label htmlFor="sp-site">{t("beheer.instellingen.sharepoint.linkLabel")}</label>
             <input
               id="sp-site"
               className="control"
@@ -455,12 +466,11 @@ function SharePointCard({ status, onSaved }: { status: ConnectionStatus; onSaved
               onChange={(e) => setSiteUrl(e.target.value)}
             />
             <p className="conn-hint" style={{ marginTop: 4 }}>
-              Open de map in SharePoint en plak de URL uit de adresbalk. Site en map worden er
-              zelf uit gehaald.
+              {t("beheer.instellingen.sharepoint.linkHint")}
             </p>
           </div>
           <div className="field">
-            <label htmlFor="sp-root">Map (wordt uit de link gehaald)</label>
+            <label htmlFor="sp-root">{t("beheer.instellingen.sharepoint.mapLabel")}</label>
             <input
               id="sp-root"
               className="control"
@@ -472,14 +482,14 @@ function SharePointCard({ status, onSaved }: { status: ConnectionStatus; onSaved
           {error && <p className="conn-err">{error}</p>}
           <div className="conn-actions">
             <button className="btn btn-primary" disabled={busy || !siteUrl.trim()} onClick={save}>
-              {busy ? "Bezig met controleren…" : "Opslaan"}
+              {busy ? t("beheer.instellingen.bezigControleren") : t("beheer.instellingen.opslaan")}
             </button>
             <button className="btn btn-quiet" onClick={() => setEditing(false)} disabled={busy}>
-              Annuleren
+              {t("beheer.instellingen.annuleren")}
             </button>
             {!isDefault && (
               <button className="btn-text" onClick={reset} disabled={busy}>
-                Terug naar standaardmap
+                {t("beheer.instellingen.sharepoint.terugStandaard")}
               </button>
             )}
           </div>
@@ -487,7 +497,7 @@ function SharePointCard({ status, onSaved }: { status: ConnectionStatus; onSaved
       ) : (
         <div className="conn-actions">
           <button className="btn btn-quiet" onClick={startEditing}>
-            Map aanpassen
+            {t("beheer.instellingen.sharepoint.mapAanpassen")}
           </button>
         </div>
       )}
@@ -497,6 +507,7 @@ function SharePointCard({ status, onSaved }: { status: ConnectionStatus; onSaved
 }
 
 function MediataskCard({ status, onSaved }: { status: ConnectionStatus; onSaved: () => void }) {
+  const { t } = useTaal();
   const [editing, setEditing] = useState(false);
   const [token, setToken] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -517,10 +528,10 @@ function MediataskCard({ status, onSaved }: { status: ConnectionStatus; onSaved:
       if (!res.ok) {
         setError(
           data?.error === "invalid_credentials"
-            ? "Mediatask wijst dit token/deze URL af. Controleer beide velden."
+            ? t("beheer.instellingen.mediatask.fout.gegevens")
             : data?.error === "unreachable"
-              ? "Kon de basis-URL niet bereiken. Controleer of hij klopt (bv. https://wegogroen.apitome.io)."
-              : "Opslaan is mislukt. Probeer het opnieuw."
+              ? t("beheer.instellingen.mediatask.fout.onbereikbaar")
+              : t("beheer.instellingen.opslaanMislukt")
         );
         return;
       }
@@ -545,7 +556,9 @@ function MediataskCard({ status, onSaved }: { status: ConnectionStatus; onSaved:
           <div>
             <div className="conn-name">Mediatask</div>
             <p className="conn-role" style={{ margin: "2px 0 0" }}>
-              {status.connected ? `Verbonden — ${status.label ?? "onbekend"}` : "Nog niet gekoppeld."}
+              {status.connected
+                ? t("beheer.instellingen.mediatask.verbonden", { naam: status.label ?? t("beheer.instellingen.onbekend") })
+                : t("beheer.instellingen.nogNietGekoppeld")}
             </p>
           </div>
         </div>
@@ -553,15 +566,15 @@ function MediataskCard({ status, onSaved }: { status: ConnectionStatus; onSaved:
       </div>
       {status.error && <p className="conn-err">{status.error}</p>}
       <p className="conn-hint">
-        Voor het automatisch versturen van NEN2580-foto&apos;s en plattegronden naar Mediatask (zie{" "}
-        <a href="/nen" style={{ color: "var(--accent-text)" }}>Upload NEN</a>). Vul hieronder handmatig het
-        API-token en de basis-URL van jullie Mediatask-omgeving in — geen herdeploy nodig.
+        {t("beheer.instellingen.mediatask.uitlegVoor")}{" "}
+        <a href="/nen" style={{ color: "var(--accent-text)" }}>{t("beheer.instellingen.mediatask.uitlegLink")}</a>
+        {t("beheer.instellingen.mediatask.uitlegNa")}
       </p>
 
       {editing ? (
         <div className="section-body is-single-wide" style={{ padding: 0, marginTop: 10 }}>
           <div className="field">
-            <label htmlFor="mt-cred-base">Basis-URL</label>
+            <label htmlFor="mt-cred-base">{t("beheer.instellingen.mediatask.basisUrl")}</label>
             <input
               id="mt-cred-base"
               className="control"
@@ -571,7 +584,7 @@ function MediataskCard({ status, onSaved }: { status: ConnectionStatus; onSaved:
             />
           </div>
           <div className="field">
-            <label htmlFor="mt-cred-token">API-token</label>
+            <label htmlFor="mt-cred-token">{t("beheer.instellingen.mediatask.apiToken")}</label>
             <input
               id="mt-cred-token"
               className="control"
@@ -583,17 +596,17 @@ function MediataskCard({ status, onSaved }: { status: ConnectionStatus; onSaved:
           {error && <p className="conn-err">{error}</p>}
           <div className="conn-actions">
             <button className="btn btn-primary" disabled={busy || !token.trim() || !baseUrl.trim()} onClick={save}>
-              {busy ? "Bezig met controleren…" : "Opslaan"}
+              {busy ? t("beheer.instellingen.bezigControleren") : t("beheer.instellingen.opslaan")}
             </button>
             <button className="btn btn-quiet" onClick={() => setEditing(false)} disabled={busy}>
-              Annuleren
+              {t("beheer.instellingen.annuleren")}
             </button>
           </div>
         </div>
       ) : (
         <div className="conn-actions">
           <button className="btn btn-quiet" onClick={() => setEditing(true)}>
-            {status.connected ? "Gegevens aanpassen" : "Handmatig koppelen"}
+            {status.connected ? t("beheer.instellingen.mediatask.aanpassen") : t("beheer.instellingen.mediatask.koppelen")}
           </button>
         </div>
       )}
@@ -622,6 +635,7 @@ interface Gezondheid {
  * de knop om het recht te zetten op één pagina.
  */
 function Storingen() {
+  const { t, taal } = useTaal();
   const [rapport, setRapport] = useState<Gezondheid | null>(null);
   const [bezig, setBezig] = useState(false);
   const [fout, setFout] = useState<string | null>(null);
@@ -653,7 +667,7 @@ function Storingen() {
       if (!res.ok) throw new Error("controle mislukt");
       setRapport(await res.json());
     } catch {
-      setFout("De controle kon niet worden uitgevoerd.");
+      setFout(t("beheer.instellingen.storingen.mislukt"));
     } finally {
       setBezig(false);
     }
@@ -695,15 +709,15 @@ function Storingen() {
           </svg>
           <span>
             <h2 style={{ margin: 0 }}>
-              Storingen
+              {t("beheer.instellingen.storingen.titel")}
               {rapport && (
                 <span style={{ marginLeft: 8, opacity: 0.6, fontWeight: 500 }}>
-                  {alles.length === 0 ? "alles in orde" : alles.length}
+                  {alles.length === 0 ? t("beheer.instellingen.storingen.allesInOrde") : alles.length}
                 </span>
               )}
             </h2>
             <p className="set-sectie-uitleg" style={{ margin: "2px 0 0" }}>
-              Wat de automatische controle als laatste zag. Alleen wat aandacht vraagt staat hier.
+              {t("beheer.instellingen.storingen.uitleg")}
             </p>
           </span>
         </button>
@@ -711,20 +725,20 @@ function Storingen() {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={bezig ? "spin" : undefined}>
             <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          {bezig ? "Controleren…" : "Nu controleren"}
+          {bezig ? t("beheer.instellingen.storingen.controleren") : t("beheer.instellingen.storingen.nuControleren")}
         </button>
       </div>
 
       {open && fout && <p className="conn-err">{fout}</p>}
 
       {open && !rapport && !fout && (
-        <p className="note" style={{ padding: 0 }}>Nog geen controle gedraaid.</p>
+        <p className="note" style={{ padding: 0 }}>{t("beheer.instellingen.storingen.nogGeen")}</p>
       )}
 
       {open && rapport && alles.length === 0 && (
         <div className="set-rustig">
           <span className="dot is-ok" />
-          Alles in orde — geen storingen gevonden.
+          {t("beheer.instellingen.storingen.geenStoringen")}
         </div>
       )}
 
@@ -749,13 +763,18 @@ function Storingen() {
       )}
 
       {open && rapport && (
-        <p className="sig-time">Gecontroleerd op {new Date(rapport.tijdstip).toLocaleString("nl-NL")}</p>
+        <p className="sig-time">
+          {t("beheer.instellingen.storingen.gecontroleerdOp", {
+            tijd: new Date(rapport.tijdstip).toLocaleString(taalLocale(taal)),
+          })}
+        </p>
       )}
     </section>
   );
 }
 
 export default function Instellingen() {
+  const { t } = useTaal();
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -784,7 +803,7 @@ export default function Instellingen() {
   return (
     <>
       <header className="topline">
-        <span className="eyebrow">Instellingen</span>
+        <span className="eyebrow">{t("beheer.instellingen.titel")}</span>
       </header>
 
       {/* Twee blokken onder elkaar in plaats van één lange kaart: eerst wat er
@@ -793,22 +812,21 @@ export default function Instellingen() {
       <div className="set-page">
         <div className="set-hero">
           <div className="set-hero-tekst">
-            <h1>Instellingen</h1>
+            <h1>{t("beheer.instellingen.titel")}</h1>
             <p className="lede">
-              Storingen en koppelingen op één plek. Alles staat centraal ingesteld — inloggen doe
-              je één keer, daarna werkt het voor het hele team.
+              {t("beheer.instellingen.lede")}
             </p>
           </div>
           {status && (
             <div className="set-tellers">
               <span className="set-teller is-ok">
-                <b>{okCount}</b> in orde
+                <b>{okCount}</b> {t("beheer.instellingen.tellerOk")}
               </span>
               <span className={`set-teller${problems > 0 ? " is-bad" : " is-leeg"}`}>
-                <b>{problems}</b> met een probleem
+                <b>{problems}</b> {t("beheer.instellingen.tellerProbleem")}
               </span>
               <span className={`set-teller${missing > 0 ? " is-off" : " is-leeg"}`}>
-                <b>{missing}</b> niet ingesteld
+                <b>{missing}</b> {t("beheer.instellingen.tellerNietIngesteld")}
               </span>
             </div>
           )}
@@ -819,20 +837,20 @@ export default function Instellingen() {
         <section className="set-sectie">
           <div className="set-sectie-head">
             <div>
-              <h2>Koppelingen</h2>
+              <h2>{t("beheer.instellingen.koppelingen")}</h2>
               <p className="set-sectie-uitleg">
-                Live status van de diensten waar de app op leunt.
+                {t("beheer.instellingen.koppelingenUitleg")}
               </p>
             </div>
             <button className="btn-refresh" onClick={load} disabled={loading}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={loading ? "spin" : undefined}>
                 <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              {loading ? "Verversen…" : "Verversen"}
+              {loading ? t("beheer.instellingen.verversenBezig") : t("beheer.instellingen.verversen")}
             </button>
           </div>
 
-          {loading && !status && <p className="note" style={{ padding: 0 }}>Status controleren…</p>}
+          {loading && !status && <p className="note" style={{ padding: 0 }}>{t("beheer.instellingen.statusControleren")}</p>}
 
           {status && (
             <div className="conn-grid">

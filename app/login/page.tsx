@@ -1,6 +1,8 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { useTaal } from "@/components/TaalProvider";
+import TaalKnop from "@/components/TaalKnop";
 
 /** Lengte van de inlogcode; bij dit aantal cijfers logt de app vanzelf in. */
 const CODE_LENGTH = 4;
@@ -43,6 +45,7 @@ function LoginForm() {
     altijd: nieuw apparaat, nieuwe dag, nieuwe opname.
   */
   const next = "/";
+  const { t } = useTaal();
 
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [gekozen, setGekozen] = useState<Account | null>(null);
@@ -69,7 +72,7 @@ function LoginForm() {
         });
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
         if (!res.ok) {
-          setError(data?.error ?? "Inloggen mislukt.");
+          setError(data?.error ?? t("beheer.login.mislukt"));
           setCode("");
           return;
         }
@@ -77,13 +80,13 @@ function LoginForm() {
         // gezien worden op de doelpagina.
         window.location.href = next;
       } catch {
-        setError("Inloggen mislukt — controleer je verbinding.");
+        setError(t("beheer.login.misluktVerbinding"));
         setCode("");
       } finally {
         setBusy(false);
       }
     },
-    [next]
+    [next, t]
   );
 
   // Zodra de code compleet is meteen inloggen: scheelt een extra tik.
@@ -119,19 +122,16 @@ function LoginForm() {
     <div className="login-card">
       <div className="mark" style={{ padding: 0 }}>
         <b>WeGoGroen</b>
-        <span>Upload portaal</span>
+        <span>{t("beheer.login.ondertitel")}</span>
       </div>
 
       {!gekozen ? (
         <>
-          <p className="login-prompt">Wie ben je?</p>
+          <p className="login-prompt">{t("beheer.login.wieBenJe")}</p>
           {accounts === null ? (
-            <p className="login-msg">Even kijken…</p>
+            <p className="login-msg">{t("beheer.login.evenKijken")}</p>
           ) : accounts.length === 0 ? (
-            <p className="login-msg is-error">
-              Er zijn nog geen accounts. Voeg ze toe vanuit het Business Control Center, bij
-              Werknemers.
-            </p>
+            <p className="login-msg is-error">{t("beheer.login.geenAccounts")}</p>
           ) : (
             <div className="login-accounts">
               {accounts.map((a) => (
@@ -171,12 +171,12 @@ function LoginForm() {
               )}
             </span>
             <span className="login-naam">{gekozen.naam}</span>
-            <span className="login-wissel">wisselen</span>
+            <span className="login-wissel">{t("beheer.login.wisselen")}</span>
           </button>
 
-          <p className="login-prompt">Vul je code van vier cijfers in</p>
+          <p className="login-prompt">{t("beheer.login.vulCodeIn")}</p>
 
-          <div className="pin-dots" aria-label={`${code.length} van ${CODE_LENGTH} cijfers ingevoerd`}>
+          <div className="pin-dots" aria-label={t("beheer.login.cijfersIngevoerd", { n: code.length, totaal: CODE_LENGTH })}>
             {Array.from({ length: CODE_LENGTH }, (_, i) => (
               <span key={i} className={`pin-dot${i < code.length ? " is-filled" : ""}`} />
             ))}
@@ -184,8 +184,8 @@ function LoginForm() {
 
           <p className={`login-msg${error ? " is-error" : ""}`}>
             {busy
-              ? "Bezig met inloggen…"
-              : error ?? (gekozen.codeGewijzigd ? "" : "Nog niet gewijzigd? De startcode is 0000.")}
+              ? t("beheer.login.bezig")
+              : error ?? (gekozen.codeGewijzigd ? "" : t("beheer.login.startcode"))}
           </p>
 
           <div className="keypad">
@@ -203,13 +203,15 @@ function LoginForm() {
               className="keypad-key is-quiet"
               onClick={backspace}
               disabled={busy || code.length === 0}
-              aria-label="Wissen"
+              aria-label={t("beheer.login.wissen")}
             >
               ⌫
             </button>
           </div>
         </>
       )}
+
+      <TaalKnop />
     </div>
   );
 }

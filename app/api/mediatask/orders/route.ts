@@ -10,6 +10,7 @@ import {
 } from "@/lib/mediatask";
 import { getFolderLinkWithCount, getSharedAccessToken } from "@/lib/dropbox";
 import { bouwOrderOpmerking, type OpmerkingMap } from "@/lib/mediatask-opmerking";
+import { vertaalOpmerking } from "@/lib/vertaal-opmerking";
 import {
   bewaarOrderPad,
   leesOrderTijden,
@@ -80,6 +81,9 @@ export async function POST(request: Request) {
     /** Garage, alleen gezet als er een is: de bouwlaag en of de parkeerplek
         een elektrische lader heeft. */
     garage?: { verdieping: number; lader: boolean } | null;
+    /** Vrije opmerking van de opnemer, vaak in het Nederlands. Wordt hier
+        naar het Engels vertaald voordat hij bij de order komt. */
+    opmerking?: string;
     /** Alleen het concept aanmaken (en de Dropbox-map eraan koppelen), zonder
         opmerking, scans of indienen. Gebruikt bij de bevestigingspop-up aan
         het begin van de flow: de bestanden bestaan dan nog niet. */
@@ -242,6 +246,7 @@ export async function POST(request: Request) {
         body.garage && Number.isInteger(body.garage.verdieping)
           ? { verdieping: body.garage.verdieping, lader: body.garage.lader === true }
           : null,
+      opmerking: typeof body.opmerking === "string" ? await vertaalOpmerking(body.opmerking) : null,
       mappen,
     });
     if (opmerking) {

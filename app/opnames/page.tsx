@@ -8,6 +8,11 @@ import { taakHoortBij } from "@/lib/upload-overview";
 import { sameAddress } from "@/lib/address-format";
 import { clearDraftLocal } from "@/lib/local-drafts";
 import type { DraftRecord as ServerDraftRecord } from "@/lib/drafts";
+import { useTaal } from "@/components/TaalProvider";
+import { taalLocale, type Taal, type TaalSleutel } from "@/lib/taal";
+
+/** Een foutmelding van de server (as-is) of een eigen melding als sleutel, zodat die meevertaalt. */
+type LaadFout = { tekst: string } | { sleutel: TaalSleutel };
 
 type DraftRecord = Pick<
   ServerDraftRecord,
@@ -25,8 +30,8 @@ type DraftRecord = Pick<
   | "soort"
 >;
 
-function formatDate(ts: number): string {
-  return new Date(ts).toLocaleString("nl-NL", {
+function formatDate(ts: number, taal: Taal): string {
+  return new Date(ts).toLocaleString(taalLocale(taal), {
     day: "numeric",
     month: "short",
     hour: "2-digit",
@@ -35,8 +40,9 @@ function formatDate(ts: number): string {
 }
 
 export default function Opnames() {
+  const { t, taal } = useTaal();
   const [drafts, setDrafts] = useState<DraftRecord[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<LaadFout | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [verwijderFout, setVerwijderFout] = useState<string | null>(null);
@@ -61,10 +67,13 @@ export default function Opnames() {
       // inclusief afgerond) leeft in het Business Control Center.
       const res = await fetch("/api/drafts?mijn=1", { cache: "no-store" });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Onbekende fout");
+      if (!res.ok) {
+        setError(data.error != null ? { tekst: data.error } : { sleutel: "dashboard.opnames.onbekendeFout" });
+        return;
+      }
       setDrafts(data.drafts ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kon concepten niet laden.");
+      setError(err instanceof Error ? { tekst: err.message } : { sleutel: "dashboard.opnames.ladenMislukt" });
     }
   }, []);
 
@@ -123,10 +132,10 @@ export default function Opnames() {
           const res = await fetch(`/api/drafts/${encodeURIComponent(d.id)}`, { method: "DELETE" });
           if (!res.ok) {
             const data = await res.json().catch(() => null);
-            throw new Error(data?.error ?? `de server gaf ${res.status} terug`);
+            throw new Error(data?.error ?? t("dashboard.opnames.serverStatus", { status: res.status }));
           }
         } catch (err) {
-          mislukt.push(err instanceof Error ? err.message : "onbekende fout");
+          mislukt.push(err instanceof Error ? err.message : t("dashboard.opnames.onbekendeFoutKlein"));
         }
 
         /*
@@ -151,15 +160,15 @@ export default function Opnames() {
 
         const eigenAdres = d.straatnaam || d.titel;
         if (eigenAdres) {
-          await vergeetTakenVoor((t) => taakHoortBij(t, eigenAdres, d.soort)).catch(() => {});
+          await vergeetTakenVoor((taak) => taakHoortBij(taak, eigenAdres, d.soort)).catch(() => {});
         }
       }
 
       if (mislukt.length > 0) {
         setVerwijderFout(
           mislukt.length === samen.length
-            ? `Verwijderen mislukt: ${mislukt[0]}.`
-            : `Niet alles is verwijderd (${mislukt.length} van ${samen.length}): ${mislukt[0]}.`
+            ? t("dashboard.opnames.verwijderenMislukt", { fout: mislukt[0] })
+            : t("dashboard.opnames.nietAllesVerwijderd", { n: mislukt.length, totaal: samen.length, fout: mislukt[0] })
         );
       }
 
@@ -218,89 +227,82 @@ export default function Opnames() {
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M10 12.5 5.5 8 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          Terug naar dashboard
+          {t("dashboard.opnames.terug")}
         </a>
-        <span className="eyebrow">Af te maken</span>
+        <span className="eyebrow">{t("dashboard.opnames.eyebrow")}</span>
       </header>
 
       <div className="pad" style={{ background: "var(--paper)", border: "1px solid var(--rule)", borderRadius: "var(--r)" }}>
-        <h1>Nog af te maken</h1>
-        <p className="lede">
-          Alleen jouw werk dat nog niet klaar is: opnames die halverwege zijn
-          blijven staan en taken waar bijlages missen. Wat afgerond is, verdwijnt
-          hier vanzelf.
-        </p>
+        <h1>{t("dashboard.opnames.titel")}</h1>
+        <p className="lede">{t("dashboard.opnames.lede")}</p>
 
         {cijfers && (
           <dl className="cijfers">
             <div>
-              <dt>Vandaag afgerond</dt>
+              <dt>{t("dashboard.opnames.vandaagAfgerond")}</dt>
               <dd>{cijfers.vandaag}</dd>
             </div>
             <div>
-              <dt>Afgelopen week</dt>
+              <dt>{t("dashboard.opnames.afgelopenWeek")}</dt>
               <dd>{cijfers.afgelopenWeek}</dd>
             </div>
             <div>
-              <dt>Openstaand</dt>
+              <dt>{t("dashboard.opnames.openstaand")}</dt>
               <dd>{cijfers.open}</dd>
             </div>
             <div className={cijfers.langOpenstaand > 0 ? "is-warn" : undefined}>
-              <dt>Langer dan een week</dt>
+              <dt>{t("dashboard.opnames.langerDanWeek")}</dt>
               <dd>{cijfers.langOpenstaand}</dd>
             </div>
             <div className={cijfers.bijlagesOntbreken > 0 ? "is-bad" : undefined}>
-              <dt>Bijlages ontbreken</dt>
+              <dt>{t("dashboard.opnames.bijlagesOntbreken")}</dt>
               <dd>{cijfers.bijlagesOntbreken}</dd>
             </div>
           </dl>
         )}
 
-        {loading && !drafts && <p className="note">Concepten laden…</p>}
-        {error && <p className="conn-err">{error}</p>}
+        {loading && !drafts && <p className="note">{t("dashboard.opnames.conceptenLaden")}</p>}
+        {error && <p className="conn-err">{"tekst" in error ? error.tekst : t(error.sleutel)}</p>}
         {verwijderFout && <p className="conn-err">{verwijderFout}</p>}
 
         {nietsTeDoen && (
-          <p className="note">Niets meer af te maken — al je opnames zijn doorgezet.</p>
+          <p className="note">{t("dashboard.opnames.nietsMeer")}</p>
         )}
 
         {unfinished.length > 0 && (
           <div className="section">
             <div className="section-head">
-              <h2>Niet afgemaakt</h2>
+              <h2>{t("dashboard.opnames.nietAfgemaakt")}</h2>
             </div>
             <div className="draft-list">
               {unfinished.map((d) => (
                 <div className="draft-row" key={d.id}>
                   <div className="draft-info">
-                    <span className="pill is-bad">Niet afgemaakt</span>
+                    <span className="pill is-bad">{t("dashboard.opnames.nietAfgemaakt")}</span>
                     <div>
                       <div className="draft-title">
-                        {d.straatnaam || d.titel || "Onbekend adres"}
+                        {d.straatnaam || d.titel || t("dashboard.opnames.onbekendAdres")}
                       </div>
                       <div className="draft-meta">
                         {d.postcode} {d.woonplaats}
-                        {d.accountName ? ` · ${d.accountName}` : ""} · {formatDate(d.updatedAt)}
+                        {d.accountName ? ` · ${d.accountName}` : ""} · {formatDate(d.updatedAt, taal)}
                       </div>
                     </div>
                   </div>
                   <div className="draft-actions">
                     {magDitAfmaken(d) ? (
                       <a className="btn btn-primary" href={opnameLink(d)}>
-                        Verder afmaken
+                        {t("dashboard.opnames.verderAfmaken")}
                       </a>
                     ) : (
-                      <span className="note">
-                        Jij mag dit soort opname niet afmaken — vraag of je dat
-                        recht erbij krijgt, of haal hem weg.
-                      </span>
+                      <span className="note">{t("dashboard.opnames.geenRecht")}</span>
                     )}
                     <button
                       className="btn-text"
                       onClick={() => verwijderOpname(d)}
                       disabled={verwijderBezig === d.id}
                     >
-                      {verwijderBezig === d.id ? "Bezig…" : "Verwijderen"}
+                      {verwijderBezig === d.id ? t("dashboard.bezig") : t("dashboard.opnames.verwijderen")}
                     </button>
                   </div>
                 </div>
@@ -312,43 +314,37 @@ export default function Opnames() {
         {incomplete.length > 0 && (
           <div className="section">
             <div className="section-head">
-              <h2>Bijlages ontbreken in ClickUp</h2>
+              <h2>{t("dashboard.opnames.bijlagesOntbrekenClickUp")}</h2>
               <span className="section-count">{incomplete.length}</span>
             </div>
-            <p className="note">
-              Verwijderen haalt de opname hier en van het dashboard weg. De
-              ClickUp-taak en de bestanden in Dropbox blijven staan.
-            </p>
+            <p className="note">{t("dashboard.opnames.verwijderenUitleg")}</p>
             <div className="draft-list">
               {incomplete.map((d) => (
                 <div className="draft-row" key={d.id}>
                   <div className="draft-info">
-                    <span className="pill is-bad">Incompleet</span>
+                    <span className="pill is-bad">{t("dashboard.opnames.incompleet")}</span>
                     <div>
-                      <div className="draft-title">{d.straatnaam || d.titel || "Onbekend adres"}</div>
+                      <div className="draft-title">{d.straatnaam || d.titel || t("dashboard.opnames.onbekendAdres")}</div>
                       <div className="draft-meta">
-                        Niet overgezet: {d.incompleteDocs!.join(", ")}
+                        {t("dashboard.opnames.nietOvergezet", { bestanden: d.incompleteDocs!.join(", ") })}
                       </div>
                       <div className="draft-meta">
                         {d.postcode} {d.woonplaats}
-                        {d.accountName ? ` · ${d.accountName}` : ""} · {formatDate(d.updatedAt)}
+                        {d.accountName ? ` · ${d.accountName}` : ""} · {formatDate(d.updatedAt, taal)}
                       </div>
                     </div>
                   </div>
                   <div className="draft-actions">
                     {magDitAfmaken(d) ? (
                       <a className="btn btn-primary" href={opnameLink(d)}>
-                        Bijlages opnieuw uploaden
+                        {t("dashboard.opnames.bijlagesOpnieuw")}
                       </a>
                     ) : (
-                      <span className="note">
-                        Jij mag dit soort opname niet afmaken — vraag of je dat
-                        recht erbij krijgt, of haal hem weg.
-                      </span>
+                      <span className="note">{t("dashboard.opnames.geenRecht")}</span>
                     )}
                     {d.clickupTaskUrl && (
                       <a className="btn btn-quiet" href={d.clickupTaskUrl} target="_blank" rel="noreferrer">
-                        Open in ClickUp
+                        {t("dashboard.opnames.openInClickUp")}
                       </a>
                     )}
                     {/* Deze stonden wél op het dashboard maar waren nergens
@@ -360,7 +356,7 @@ export default function Opnames() {
                       onClick={() => verwijderOpname(d)}
                       disabled={verwijderBezig === d.id}
                     >
-                      {verwijderBezig === d.id ? "Bezig…" : "Verwijderen"}
+                      {verwijderBezig === d.id ? t("dashboard.bezig") : t("dashboard.opnames.verwijderen")}
                     </button>
                   </div>
                 </div>
@@ -373,7 +369,7 @@ export default function Opnames() {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={refreshing ? "spin" : undefined}>
             <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          {refreshing ? "Bezig met verversen…" : "Lijst verversen"}
+          {refreshing ? t("dashboard.verversenBezig") : t("dashboard.opnames.lijstVerversen")}
         </button>
       </div>
     </>

@@ -25,7 +25,7 @@ export interface DropboxAccount {
 // met "The string did not match the expected pattern." Dropbox schrijft zelf
 // voor om zulke tekens in de header-waarde te escapen als \uXXXX i.p.v. ze
 // letterlijk mee te sturen.
-function safeHeaderJson(value: unknown): string {
+export function safeHeaderJson(value: unknown): string {
   return JSON.stringify(value).replace(
     /[-￿]/g,
     (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")

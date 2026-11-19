@@ -45,6 +45,14 @@ export function isProjectmap(pad: string): boolean {
   return false;
 }
 
+/**
+ * Of dit de naam van een opgemaakte kopie is: "<origineel> - cv-ketel.jpg" of
+ * "<origineel> - ventilatie.jpg", zonder map erin.
+ */
+export function isKopieNaam(naam: string): boolean {
+  return / - (cv-ketel|ventilatie)\.jpg$/i.test(naam) && !naam.includes("/") && !naam.includes("..") && naam.length <= 200;
+}
+
 /** De submap waar de opname-app de gevelfoto's (ClickUp-veld D2) neerzet. */
 export const OPNAMEMAP = "opname formulier";
 

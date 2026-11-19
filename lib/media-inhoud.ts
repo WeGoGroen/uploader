@@ -76,7 +76,7 @@ export function dropboxWebUrl(thuispad: string, pad: string): string {
 }
 
 /** "4,55 GB", "812 MB", "96 kB" — op het scherm, niet voor berekeningen. */
-export function leesbareOmvang(bytes: number): string {
+export function leesbareOmvang(bytes: number, taal: "nl" | "en" = "nl"): string {
   const eenheden = ["B", "kB", "MB", "GB", "TB"];
   let waarde = bytes;
   let i = 0;
@@ -85,5 +85,7 @@ export function leesbareOmvang(bytes: number): string {
     i++;
   }
   const cijfers = i === 0 || waarde >= 100 ? 0 : waarde >= 10 ? 1 : 2;
-  return `${waarde.toFixed(cijfers).replace(".", ",")} ${eenheden[i]}`;
+  const getal = waarde.toFixed(cijfers);
+  // Engels schrijft een decimale punt, Nederlands een komma.
+  return `${taal === "en" ? getal : getal.replace(".", ",")} ${eenheden[i]}`;
 }

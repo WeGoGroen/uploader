@@ -53,12 +53,15 @@ export interface OpmerkingGarage {
 export function bouwOrderOpmerking({
   verdiepingenPerBestand,
   garage,
+  opmerking,
   mappen,
 }: {
   /** Per scanbestand de bouwlagen die erin zitten. */
   verdiepingenPerBestand: Record<string, number[]>;
   /** Alleen gezet als er een garage is. */
   garage?: OpmerkingGarage | null;
+  /** Vrije opmerking van de opnemer, al vertaald naar het Engels. */
+  opmerking?: string | null;
   /** De mappen met bestanden, in de volgorde waarin ze moeten staan. */
   mappen: OpmerkingMap[];
 }): string {
@@ -89,6 +92,11 @@ export function bouwOrderOpmerking({
         `EV charger at the parking space: ${garage.lader ? "yes" : "no"}.`
     );
   }
+
+  // Wat de opnemer zelf kwijt wil, vóór de links: het gaat over de opname,
+  // niet over waar de bestanden staan.
+  const notitie = opmerking?.trim();
+  if (notitie) blokken.push(`Surveyor's note:\n${notitie}`);
 
   /*
     Eén link per map, niet één per bestand.

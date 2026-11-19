@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isProjectmap, kiesLosseFotos, kiesOpnameFotos, kiesScans } from "@/lib/fotos-opruimen";
+import { isKopieNaam, isProjectmap, kiesLosseFotos, kiesOpnameFotos, kiesScans } from "@/lib/fotos-opruimen";
 
 /**
  * /api/intern/fotos-opruimen is de enige route in deze app die een bestand van
@@ -98,5 +98,19 @@ describe("kiesScans", () => {
   it("laat staan wat al in LAZ staat, en alles wat geen LAS of LAZ is", () => {
     const uit = kiesScans([b("LAZ/88.laz"), b("laz/sub/89.las"), b("88.zip"), b("scan.e57"), b("plattegrond.pdf")]);
     expect(uit).toEqual([]);
+  });
+});
+
+describe("isKopieNaam", () => {
+  it("laat alleen de naam van een kopie door", () => {
+    expect(isKopieNaam("IMG_1 - cv-ketel.jpg")).toBe(true);
+    expect(isKopieNaam("IMG_1 - ventilatie.jpg")).toBe(true);
+    expect(isKopieNaam("IMG_1.jpg")).toBe(false);
+    expect(isKopieNaam("Opnameformulier.pdf")).toBe(false);
+  });
+
+  it("weigert een pad, zodat de route niet buiten de fotomap kan schrijven", () => {
+    expect(isKopieNaam("../x - cv-ketel.jpg")).toBe(false);
+    expect(isKopieNaam("a/b - ventilatie.jpg")).toBe(false);
   });
 });

@@ -143,7 +143,8 @@ export function gemiddeldPct(taken: UploadTask[]): number | null {
   return Math.round(som / meetbaar.length);
 }
 
-function bestandenTekst(n: number): string {
+function bestandenTekst(n: number, en: boolean): string {
+  if (en) return `${n} ${n === 1 ? "file" : "files"}`;
   return `${n} bestand${n === 1 ? "" : "en"}`;
 }
 
@@ -170,8 +171,11 @@ function voegProductToe(regel: Openstaand, soort: Soort, href: string) {
  */
 export function bouwOpenstaand(
   taken: UploadTask[],
-  drafts: OverzichtDraft[] | null
+  drafts: OverzichtDraft[] | null,
+  /** Taal van de redenen op het scherm; standaard Nederlands. */
+  taal: "nl" | "en" = "nl"
 ): Openstaand[] {
+  const en = taal === "en";
   const perAdres = new Map<string, Openstaand>();
 
   function regelVoor(adres: string): Openstaand {
@@ -216,8 +220,12 @@ export function bouwOpenstaand(
     regel.status = regel.bezig > 0 ? "bezig" : "mislukt";
     regel.redenen.push(
       regel.bezig > 0
-        ? `${regel.bezig} van ${bestandenTekst(eigen.length)} nog bezig`
-        : `${bestandenTekst(regel.mislukt.length)} mislukt`
+        ? en
+          ? `${regel.bezig} of ${bestandenTekst(eigen.length, en)} still uploading`
+          : `${regel.bezig} van ${bestandenTekst(eigen.length, en)} nog bezig`
+        : en
+          ? `${bestandenTekst(regel.mislukt.length, en)} failed`
+          : `${bestandenTekst(regel.mislukt.length, en)} mislukt`
     );
   }
 
@@ -232,8 +240,10 @@ export function bouwOpenstaand(
     if (d.status !== "concept" && !onvolledig) continue;
 
     const reden = onvolledig
-      ? `bijlages ontbreken in ClickUp: ${d.incompleteDocs!.join(", ")}`
-      : "opname niet afgemaakt";
+      ? `${en ? "attachments missing in ClickUp" : "bijlages ontbreken in ClickUp"}: ${d.incompleteDocs!.join(", ")}`
+      : en
+        ? "survey not finished"
+        : "opname niet afgemaakt";
     const adres = splitAddress(d.straatnaam || d.titel || "Onbekend adres").street;
 
     const bestaand = [...perAdres.values()].find((r) => sameAddress(r.adres, d.straatnaam));

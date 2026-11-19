@@ -98,3 +98,27 @@ export function configVoorProduct(
   }
   return uit;
 }
+
+/** Het standaardproduct voor een NEN2580-opname. */
+export const NEN_PRODUCT = "Floorplanner NEN2580 plans NEW";
+/** Het product voor een huurpuntentelling of een commercieel gebouw. */
+export const BASIS_PRODUCT = "Floorplanner basic plans";
+
+/**
+ * Het product dat hoort bij de soort plattegrond op het eerste NEN-scherm:
+ * zonder keuze NEN2580, bij huurpuntentelling of commercieel het basisproduct.
+ *
+ * Op de exacte naam, met een terugval op "basic" in de naam: een kleine
+ * naamswijziging bij Mediatask mag de schakelaar niet stil laten doen.
+ */
+export function productVoorSoort<T extends { full_name: string }>(
+  products: T[],
+  soort: "" | "huurpunten" | "commercieel"
+): T | null {
+  if (!soort) return products.find((p) => p.full_name === NEN_PRODUCT) ?? null;
+  return (
+    products.find((p) => p.full_name === BASIS_PRODUCT) ??
+    products.find((p) => /\bbasic\b/i.test(p.full_name)) ??
+    null
+  );
+}

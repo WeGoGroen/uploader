@@ -11,6 +11,8 @@ import {
   type Status,
 } from "@/lib/upload-overview";
 import { relatieveTijd } from "@/lib/relatieve-tijd";
+import { useTaal } from "@/components/TaalProvider";
+import type { TaalSleutel } from "@/lib/taal";
 
 /**
  * De linkerkolom van het dashboard: wat de actieve gebruiker nog moet afmaken.
@@ -26,13 +28,14 @@ import { relatieveTijd } from "@/lib/relatieve-tijd";
  * De samenvoeg- en percentagelogica staat in lib/upload-overview.ts, zodat die
  * te testen is zonder een browser.
  */
-const STATUS_LABEL: Record<Status, string> = {
-  bezig: "Bezig",
-  mislukt: "Vastgelopen",
-  open: "Openstaand",
+const STATUS_LABEL: Record<Status, TaalSleutel> = {
+  bezig: "dashboard.status.bezig",
+  mislukt: "dashboard.status.mislukt",
+  open: "dashboard.status.open",
 };
 
 export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | null }) {
+  const { t, taal } = useTaal();
   const rechten = useRechten();
   const ikBen = useIkBen();
   const alleTaken = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
@@ -53,7 +56,7 @@ export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | nul
     return drafts.filter((d) => !d.accountName || d.accountName.toLowerCase() === naam);
   }, [drafts, ikBen]);
 
-  const items = useMemo(() => bouwOpenstaand(alleTaken, eigen), [alleTaken, eigen]);
+  const items = useMemo(() => bouwOpenstaand(alleTaken, eigen, taal), [alleTaken, eigen, taal]);
 
   async function opnieuw(regel: Openstaand) {
     const ids = regel.mislukt.map((t) => t.id);
@@ -66,10 +69,10 @@ export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | nul
   }
 
   return (
-    <section className="dash-uploads" aria-label="Openstaand werk">
+    <section className="dash-uploads" aria-label={t("dashboard.openstaandWerk")}>
       <div className="dash-card">
         <div className="dash-card-head">
-          <h2>Nog af te maken</h2>
+          <h2>{t("dashboard.nogAfTeMaken")}</h2>
           {/* Uitsplitsing i.p.v. één getal: "3" zegt niet of er iets loopt of
               iets vastligt, en dat is precies het verschil tussen wachten en
               ingrijpen. */}
@@ -80,7 +83,7 @@ export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | nul
                 .filter(({ n }) => n > 0)
                 .map(({ st, n }) => (
                   <span key={st} className={`up-telling-item is-${st}`}>
-                    {n} {STATUS_LABEL[st].toLowerCase()}
+                    {n} {t(STATUS_LABEL[st]).toLowerCase()}
                   </span>
                 ))}
             </span>
@@ -92,10 +95,7 @@ export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | nul
             <span className="up-leeg-mark" aria-hidden="true">
               ✓
             </span>
-            <p>
-              Niets openstaand. Uploads die nog bezig zijn of zijn blijven liggen komen hier vanzelf
-              te staan, met hun voortgang.
-            </p>
+            <p>{t("dashboard.nietsOpenstaand")}</p>
           </div>
         )}
 
@@ -108,10 +108,10 @@ export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | nul
             const hoofdHref = r.invulHref ?? r.producten[0]?.href ?? "#";
             return (
               <li key={r.sleutel} className={`up-item is-${r.status}`}>
-                <a className="up-hit" href={hoofdHref} aria-label={`Verder met ${r.adres}`}>
+                <a className="up-hit" href={hoofdHref} aria-label={t("dashboard.verderMet", { adres: r.adres })}>
                   <span className="up-top">
-                    <span className={`up-status is-${r.status}`}>{STATUS_LABEL[r.status]}</span>
-                    {r.updatedAt && <span className="up-tijd">{relatieveTijd(r.updatedAt)}</span>}
+                    <span className={`up-status is-${r.status}`}>{t(STATUS_LABEL[r.status])}</span>
+                    {r.updatedAt && <span className="up-tijd">{relatieveTijd(r.updatedAt, undefined, taal)}</span>}
                     {r.pct !== null && <span className="up-pct">{r.pct}%</span>}
                   </span>
                   <span className="up-addr">{r.adres}</span>
@@ -124,7 +124,7 @@ export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | nul
                     aria-valuenow={r.pct}
                     aria-valuemin={0}
                     aria-valuemax={100}
-                    aria-label={`Upload ${r.adres}`}
+                    aria-label={t("dashboard.uploadVoortgang", { adres: r.adres })}
                   >
                     <span className="up-bar-fill" style={{ width: `${r.pct}%` }} />
                   </span>
@@ -156,7 +156,9 @@ export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | nul
                     </span>
                     <span className="up-todo-text">
                       <strong>
-                        {r.ontbrekend.length} veld{r.ontbrekend.length === 1 ? "" : "en"} nog invullen
+                        {t(r.ontbrekend.length === 1 ? "dashboard.veldInvullen.een" : "dashboard.veldInvullen.meer", {
+                          n: r.ontbrekend.length,
+                        })}
                       </strong>
                       <span className="up-todo-codes">{r.ontbrekend.join(" · ")}</span>
                     </span>
@@ -192,14 +194,14 @@ export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | nul
                       onClick={() => opnieuw(r)}
                       disabled={bezigHerstart}
                     >
-                      {bezigHerstart ? "Bezig…" : "Upload afmaken"}
+                      {bezigHerstart ? t("dashboard.bezig") : t("dashboard.uploadAfmaken")}
                     </button>
                   )}
                 </div>
 
                 {isKwijt && (
                   <span className="up-lost">
-                    Bestanden staan niet meer op dit apparaat — open de opname en kies ze opnieuw.
+                    {t("dashboard.bestandenKwijt")}
                   </span>
                 )}
               </li>
@@ -210,7 +212,7 @@ export default function UploadPanel({ drafts }: { drafts: OverzichtDraft[] | nul
         {/* Stond eerder in de zijbalk. Daar was het een tweede plek waar
             opnames leefden; hier staat het naast het werk zelf. */}
         <a href="/opnames" className="dash-meer">
-          Alle opnames bekijken
+          {t("dashboard.alleOpnames")}
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
