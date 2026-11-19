@@ -8,6 +8,7 @@ import {
   isLeegmaakUitvoer,
   mediaHernoemPaden,
   mediaVrijgeefPaden,
+  fotoVerwijderPad,
 } from "@/lib/media-pad";
 
 /**
@@ -402,5 +403,29 @@ describe("isLeegmaakUitvoer", () => {
     expect(isLeegmaakUitvoer("OUT/Photo's")).toBe(true);
     expect(isLeegmaakUitvoer("out/_controle/photo's")).toBe(true);
     for (const sub of ["OUT/360", "OUT/Video", "In/Raw/Photo's", "OUT", ""]) expect(isLeegmaakUitvoer(sub)).toBe(false);
+  });
+});
+
+describe("fotoVerwijderPad — één foto weghalen vanaf de projectpagina", () => {
+  const map = "/Automatie Media/Erich Salomonstraat 358, Amsterdam";
+  it("mag in de fotomappen onder OUT", () => {
+    expect(fotoVerwijderPad(map, "OUT/Photo's", "Erich Salomonstraat 358 - Keuken 1.jpg")).toBe(`${map}/OUT/Photo's/Erich Salomonstraat 358 - Keuken 1.jpg`);
+    expect(fotoVerwijderPad(map, "OUT/_controle/Photo's", "DSC06137-HDR.jpg")).not.toBeNull();
+    expect(fotoVerwijderPad(map, "OUT/Oplevering", "01 Erich Salomonstraat 358, Amsterdam - Gevel 1.jpg")).not.toBeNull();
+    expect(fotoVerwijderPad(map, "OUT/_controle/Broersma Klassiek", "DSC06137-HDR.jpg")).not.toBeNull();
+  });
+  it("nooit originelen, video, 360 of buiten Automatie Media", () => {
+    expect(fotoVerwijderPad(map, "In/Raw/Photo's", "DSC06137.ARW")).toBeNull();
+    expect(fotoVerwijderPad(map, "In/Raw/Photo's", "DSC06137.jpg")).toBeNull();
+    expect(fotoVerwijderPad(map, "OUT/Video", "film.mp4")).toBeNull();
+    expect(fotoVerwijderPad(map, "OUT/360", "Woonkamer.jpg")).toBeNull();
+    expect(fotoVerwijderPad(map, "OUT/_controle/360", "Woonkamer.jpg")).toBeNull();
+    expect(fotoVerwijderPad("/Automatie Energielabels/Dam 1", "OUT/Photo's", "a.jpg")).toBeNull();
+  });
+  it("geen padtrucs en alleen beeld", () => {
+    expect(fotoVerwijderPad(map, "OUT/Photo's", "../geheim.jpg")).toBeNull();
+    expect(fotoVerwijderPad(map, "OUT/Photo's", "a/b.jpg")).toBeNull();
+    expect(fotoVerwijderPad(map, "OUT/Photo's", "notitie.pdf")).toBeNull();
+    expect(fotoVerwijderPad(map, "OUT/Photo's/..", "a.jpg")).toBeNull();
   });
 });

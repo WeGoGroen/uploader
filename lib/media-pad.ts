@@ -352,3 +352,31 @@ export const LEEGMAAK_UITVOER = ["OUT/Photo's", "OUT/_controle/Photo's", "OUT/Op
 export function isLeegmaakUitvoer(submap: string): boolean {
   return LEEGMAAK_UITVOER.some((m) => m.toLowerCase() === submap.toLowerCase());
 }
+
+/**
+ * Waar één losse foto uit verwijderd mag worden: de fotomappen onder OUT, en
+ * niets anders.
+ *
+ * Waarvoor: op de fotografie-projectpagina van het control center kan iemand
+ * een eindfoto weghalen (een dubbele, een mislukte, een die de klant niet wil).
+ * Die foto staat dan op een paar plekken: de eindfoto in OUT/Photo's, Imagens
+ * bewaarde versie en de varianten onder OUT/_controle, en de opgeleverde kopie
+ * in OUT/Oplevering. Alleen die mappen; video, 360, omgevingsfoto's en de
+ * originelen in In/Raw blijven altijd buiten bereik.
+ */
+export const FOTO_VERWIJDER_SUBMAPPEN = MEDIA_SUBMAPPEN.filter(
+  (m) => !/360|video|omgevingsfoto/i.test(m)
+);
+
+export function isFotoVerwijderSubmap(submap: string): boolean {
+  return FOTO_VERWIJDER_SUBMAPPEN.some((m) => m.toLowerCase() === submap.toLowerCase());
+}
+
+/** Het volledige pad van één te verwijderen foto, of null als iets niet deugt. */
+export function fotoVerwijderPad(projectmap: string, submap: string, bestandsnaam: string): string | null {
+  if (!isMediaProjectmap(projectmap) || !isFotoVerwijderSubmap(submap)) return null;
+  const naam = sanitizePathSegment(bestandsnaam);
+  // Opschonen mag de naam niet veranderen: dan wees hij naar iets anders dan gevraagd.
+  if (naam !== bestandsnaam || naam.length < 5 || naam.length > 180 || !BEELD.test(naam)) return null;
+  return `${projectmap.replace(/\/+$/, "")}/${submap}/${naam}`;
+}
